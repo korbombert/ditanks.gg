@@ -89,7 +89,14 @@ function handleUserLogin(res, providerId, username, pfp, provider) {
 app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
-const db = new Database('game.db');
+// Check if Railway provided a volume path, otherwise use local 'game.db'
+const dbPath = process.env.RAILWAY_VOLUME_MOUNT_PATH 
+    ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'game.db') 
+    : 'game.db';
+
+const db = new Database(dbPath);
+
+console.log(`[Database] Mounted at: ${dbPath}`); // Helpful for debugging in Railway logs
 const crypto = require('crypto'); 
 // 1. Create the basic table if it's a brand new database
 db.prepare(`
@@ -1519,5 +1526,7 @@ if (process.env.DISCORD_BOT_TOKEN) {
     });
 }
 // ==========================================
-const PORT = process.env.PORT;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Game server running on port ${PORT}`);
+});
