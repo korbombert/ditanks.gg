@@ -1448,7 +1448,7 @@ discordClient.on('interactionCreate', async interaction => {
 
         if (!user) {
             return interaction.reply({ 
-                content: "You don't have a linked game account yet! Please log in via Discord on the game's web interface first to create your profile.", 
+                content: "You don't have a linked game discord account yet! Please log in via Discord on the game's web interface first to create your profile.", 
                 ephemeral: true 
             });
         }
