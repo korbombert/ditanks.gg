@@ -1,0 +1,1371 @@
+#!/bin/bash
+
+# 1. Update system and install Node.js (v20)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get update
+sudo apt-get install -y nodejs git
+
+# 2. Install PM2 (Process Manager) to keep your game running 24/7
+sudo npm install -g pm2
+
+# 3. Create your project tree
+mkdir -p /opt/ditanks-io/public
+cd /opt/ditanks-io
+
+# 4. Create package.json
+cat << 'EOF' > package.json
+{
+"name": "diep-multiplayer",
+"version": "1.0.0",
+"description": "",
+"main": "index.js",
+"scripts": {
+"test": "echo \"Error: no test specified\" && exit 1"
+},
+"keywords": [],
+"author": "",
+"license": "ISC",
+"dependencies": {
+"express": "^5.2.1",
+"ws": "^8.19.0"
+}
+}
+
+EOF
+
+# 5. Create server.js (Pasting the code you provided)
+cat << 'EOF' > server.js
+const express = require('express');
+const http = require('http');
+const WebSocket = require('ws');
+const path = require('path');
+
+const app = express();
+app.use(express.static(path.join(__dirname, 'public')));
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
+// --- GAME CONFIG & CONSTANTS ---
+const WORLD_SIZE = 4000;
+const BASE_SIZE = 600;
+const MAX_LEVEL = 30;
+const TICK_RATE = 60; // Updated to 45/s
+const BOT_NAMES = ["Master", "Pro", "Rammer", "Sniper", "Destroyer", "Buffed", "Glitch", "Orbit", "Doge", "X_X", "Bot1", "Player99", "Noob", "King", "Queen"];
+const TANK_SPECS = {
+'Basic': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0, spread: 0}], dmg: 1, spd: 1, rel: 1, maxDrones: 0 },
+'Twin': { barrels: [{x:0, y:-10, w:16, l:1.8, angle:0, spread: 0}, {x:0, y:10, w:16, l:1.8, angle:0, spread: 0}], dmg: 0.7, spd: 1, rel: 1, maxDrones: 0 },
+'Sniper': { barrels: [{x:0, y:0, w:18, l:2.4, angle:0, spread: 0}], dmg: 1.2, spd: 2, rel: 1.66, maxDrones: 0 },
+'Machine Gun': { barrels: [{x:0, y:0, w:22, w2: 32, l:1.6, angle:0, spread: 0.5}], dmg: 0.8, spd: 1, rel: 0.5, maxDrones: 0 },
+'Flank Guard': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0, spread: 0}, {x:0, y:0, w:18, l:1.5, angle:Math.PI, spread: 0}], dmg: 1, spd: 1, rel: 1, maxDrones: 0 },
+'Overseer': { barrels: [{x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI/2, spread:0}, {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2, spread:0}], dmg: 1.5, spd: 0.8, rel: 1.5, maxDrones: 7, isDroneSpawner: true },
+'Smasher': { barrels: [], dmg: 1, spd: 1, rel: 1, maxDrones: 0, isSmasher: true }
+};
+
+// --- CLASSES ---
+class Room {
+constructor(id, mode) {
+this.id = id;
+this.mode = mode;
+this.entities = [];
+this.bullets = [];
+this.drones = [];
+this.clients = [];
+this.nextEntityId = 1;
+this.spawnEntities();
+}
+
+spawnEntities() {
+for(let i=0; i<200; i++) {
+this.spawnShape();
+}
+for(let i=0; i<20; i++) this.spawnBot(i);
+}
+
+spawnShape() {
+let x = Math.random() * WORLD_SIZE, y = Math.random() * WORLD_SIZE;
+let isCenter = x > 1200 && x < 1800 && y > 1200 && y < 1800;
+let type;
+
+if (isCenter) {
+type = ['pentagon', 'pentagon', 'hexagon', 'triangle'][Math.floor(Math.random()*4)];
+} else {
+type = ['square','square','square','triangle'][Math.floor(Math.random()*4)];
+}
+this.entities.push(new Entity(this, x, y, type));
+}
+
+spawnBot(index, startScore = 0) {
+let team = this.mode === "2TDM" ? (index % 2 === 0 ? 1 : 2) : index + 5;
+let bx, by;
+
+if(this.mode === "2TDM") {
+bx = team === 1 ? Math.random()*200 + 450 : WORLD_SIZE - 450 - Math.random()*200;
+by = team === 1 ? Math.random()*200 + 450 : WORLD_SIZE - 450 - Math.random()*200;
+} else {
+bx = Math.random() * WORLD_SIZE;
+by = Math.random() * WORLD_SIZE;
+}
+let bot = new Entity(this, bx, by, 'ai', "", team);
+if (startScore > 0) bot.addXP(startScore);
+this.entities.push(bot);
+}
+}
+
+class Entity {
+constructor(room, x, y, type, name = "", team = 0, isPlayer = false, ws = null) {
+this.room = room;
+this.id = room.nextEntityId++;
+this.x = x; this.y = y; this.type = type;
+this.name = name; this.team = team;
+this.isPlayer = isPlayer; this.ws = ws;
+this.tankType = 'Basic';
+this.score = 0; this.level = 1; this.xp = 0; this.statPoints = 0;
+this.stats = [0,0,0,0,0,0,0,0];
+this.hp = 100; this.maxHp = 100;
+this.radius = 20; this.angle = 0;
+this.vx = 0; this.vy = 0;
+this.reloadTimer = 0; this.activeDrones = 0;
+this.inputs = { up: false, down: false, left: false, right: false, shooting: false, angle: 0, repel: false };
+this.markedForDeletion = false;
+this.spawnTime = Date.now();
+this.targetId = null;
+this.lastDamagedBy = null;
+
+if(type === 'square') { this.hp = 15; this.maxHp = 15; this.radius = 15; this.xpVal = 60; }
+if(type === 'triangle') { this.hp = 35; this.maxHp = 35; this.radius = 18; this.xpVal = 150; }
+if(type === 'pentagon') { this.hp = 120; this.maxHp = 120; this.radius = 30; this.xpVal = 600; }
+if(type === 'hexagon') { this.hp = 350; this.maxHp = 350; this.radius = 45; this.xpVal = 2000; }
+if(type === 'ai') { this.name = BOT_NAMES[Math.floor(Math.random()*BOT_NAMES.length)]; }
+}
+
+addXP(amt) {
+if(['square','triangle','pentagon','hexagon'].includes(this.type)) return;
+this.score += amt;
+
+if(this.level >= MAX_LEVEL) return;
+
+this.xp += amt;
+let req = this.level * 40;
+while(this.xp >= req && this.level < MAX_LEVEL) {
+this.level++; this.xp -= req; this.statPoints++;
+this.maxHp += 15; this.hp = this.maxHp;
+this.radius = 20 + (this.level * 0.3);
+req = this.level * 40;
+}
+if(this.level === MAX_LEVEL) this.xp = 0;
+}
+
+update() {
+this.vx *= 0.85; this.vy *= 0.85;
+this.x += this.vx; this.y += this.vy;
+this.x = Math.max(0, Math.min(WORLD_SIZE, this.x));
+this.y = Math.max(0, Math.min(WORLD_SIZE, this.y));
+
+if(this.reloadTimer > 0) this.reloadTimer--;
+if(this.hp < this.maxHp) this.hp += 0.02 * (1 + this.stats[0]*0.5);
+
+let moveSpeed = 0.5 + (this.stats[7] * 0.04);
+
+if(this.isPlayer) {
+if(this.inputs.up) this.vy -= moveSpeed;
+if(this.inputs.down) this.vy += moveSpeed;
+if(this.inputs.left) this.vx -= moveSpeed;
+if(this.inputs.right) this.vx += moveSpeed;
+this.angle = this.inputs.angle;
+if(this.inputs.shooting) shoot(this);
+} else if(this.type === 'ai') {
+let evadeVx = 0, evadeVy = 0, evadeCount = 0;
+this.room.bullets.forEach(b => {
+if (b.owner === this) return;
+let isSameTeam = this.room.mode === "2TDM" && b.team === this.team && b.team !== 0;
+if (isSameTeam) return;
+let dx = b.x - this.x, dy = b.y - this.y;
+let d = Math.hypot(dx, dy);
+if (d < 250) {
+let dot = (b.vx * dx + b.vy * dy);
+if (dot < 0) {
+evadeVx += (-dy/d) * moveSpeed;
+evadeVy += (dx/d) * moveSpeed;
+evadeCount++;
+}
+}
+});
+if (evadeCount > 0) {
+this.vx += evadeVx / evadeCount;
+this.vy += evadeVy / evadeCount;
+}
+
+let enemyTarget = null; let minEnemyDist = Infinity;
+let shapeTarget = null; let minShapeDist = Infinity;
+let droneTarget = null; let minDroneDist = Infinity;
+
+// Target Drones
+this.room.drones.forEach(d => {
+if (d.owner === this || d.markedForDeletion) return;
+let isSameTeam = this.room.mode === "2TDM" && d.team === this.team && d.team !== 0;
+if (isSameTeam) return;
+let dDist = Math.hypot(this.x - d.x, this.y - d.y);
+if (dDist < 600 && dDist < minDroneDist) { minDroneDist = dDist; droneTarget = d; }
+});
+
+// Target Entities
+this.room.entities.forEach(e => {
+if(e === this || e.markedForDeletion) return;
+
+let isTank = ['tank', 'ai'].includes(e.type);
+if (isTank && (this.score < 1000 || e.score < 1000)) return;
+
+let isSameTeam = this.room.mode === "2TDM" && e.team === this.team && e.team !== 0;
+let isShape = ['square','triangle','pentagon','hexagon'].includes(e.type);
+if (isSameTeam && !isShape) return;
+
+let d = Math.hypot(this.x - e.x, this.y - e.y);
+
+if (!isShape && !isSameTeam) {
+if(d < 600 && d < minEnemyDist) { minEnemyDist = d; enemyTarget = e; }
+} else if (isShape) {
+if(d < minShapeDist) { minShapeDist = d; shapeTarget = e; }
+}
+});
+
+// Priority: Drones <- Players <- Shapes
+let target = droneTarget || enemyTarget || shapeTarget;
+this.targetId = target ? (target.id || null) : null;
+
+if(target) {
+let dTarget = Math.hypot(target.x - this.x, target.y - this.y);
+let bSpd = (6 + (this.stats[3]*0.4)) * (TANK_SPECS[this.tankType].spd || 1);
+let timeToHit = dTarget / (bSpd || 1);
+let predX = target.x + (target.vx || 0) * timeToHit;
+let predY = target.y + (target.vy || 0) * timeToHit;
+
+this.angle = Math.atan2(predY - this.y, predX - this.x);
+shoot(this);
+
+let keepDist = this.tankType === 'Smasher' ? 0 : (this.tankType === 'Sniper' ? 300 : (enemyTarget ? 150 : 50));
+let d = enemyTarget ? minEnemyDist : minShapeDist;
+
+if(d > keepDist) {
+this.vx += Math.cos(this.angle) * moveSpeed;
+this.vy += Math.sin(this.angle) * moveSpeed;
+} else if (d < keepDist - 50) {
+this.vx -= Math.cos(this.angle) * moveSpeed;
+this.vy -= Math.sin(this.angle) * moveSpeed;
+}
+} else {
+this.vx += Math.cos(this.angle) * (moveSpeed * 0.4);
+this.vy += Math.sin(this.angle) * (moveSpeed * 0.4);
+if(Math.random() < 0.02) this.angle += (Math.random() - 0.5);
+}
+
+if(this.level >= 15 && this.tankType === 'Basic') {
+const choices = ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard','Overseer', 'Smasher'];
+this.tankType = choices[Math.floor(Math.random() * choices.length)];
+}
+}
+
+if(this.type === 'ai' && this.statPoints > 0){
+const bulletStats = [3,4,5,6];
+const otherStats = [0,1,2,7];
+let pool = [];
+bulletStats.forEach(s=>{ if(this.stats[s] < 7) for(let i=0;i<3;i++) pool.push(s); });
+otherStats.forEach(s=>{ if(this.stats[s] < 7) pool.push(s); });
+
+if(pool.length){
+let choice = pool[Math.floor(Math.random()*pool.length)];
+this.stats[choice]++;
+this.statPoints--;
+}
+}
+}
+}
+
+class Drone {
+constructor(room, x, y, owner) {
+this.room = room;
+this.x = x; this.y = y; this.owner = owner;
+this.vx = 0; this.vy = 0; this.radius = 12;
+this.hp = 20 + (owner.stats[4] * 5);
+this.dmg = 15 + (owner.stats[5] * 5);
+this.team = owner.team; this.angle = 0;
+this.markedForDeletion = false;
+owner.activeDrones++;
+}
+
+update() {
+let speed = 4 + (this.owner.stats[3] * 0.5);
+let tx = this.x, ty = this.y, moving = false;
+
+if (this.owner.isPlayer) {
+tx = this.owner.inputs.mouseX; ty = this.owner.inputs.mouseY; moving = true;
+if(this.owner.inputs.repel) {
+let ang = Math.atan2(this.y - ty, this.x - tx);
+tx = this.x + Math.cos(ang) * 500; ty = this.y + Math.sin(ang) * 500;
+}
+} else {
+let target = null; let minDist = Infinity;
+this.room.entities.forEach(e => {
+if(e === this.owner || e.markedForDeletion) return;
+if(this.room.mode === "2TDM" && e.team === this.owner.team && ['ai','tank'].includes(e.type)) return;
+let d = Math.hypot(this.x - e.x, this.y - e.y);
+if(d < 800 && d < minDist) { minDist = d; target = e; }
+});
+if(target) { tx = target.x; ty = target.y; moving = true; }
+else { tx = this.owner.x; ty = this.owner.y; moving = true; }
+}
+
+if (moving) {
+let angle = Math.atan2(ty - this.y, tx - this.x);
+this.angle = angle;
+this.vx += Math.cos(angle) * 0.5; this.vy += Math.sin(angle) * 0.5;
+}
+
+let curSpeed = Math.hypot(this.vx, this.vy);
+if(curSpeed > speed) {
+this.vx = (this.vx / curSpeed) * speed;
+this.vy = (this.vy / curSpeed) * speed;
+}
+
+this.x += this.vx; this.y += this.vy;
+
+this.room.drones.forEach(d => {
+if(d !== this && !d.markedForDeletion) {
+let dist = Math.hypot(this.x - d.x, this.y - d.y);
+if(dist < this.radius * 2) {
+let pushAngle = Math.atan2(this.y - d.y, this.x - d.x);
+this.x += Math.cos(pushAngle) * 1; this.y += Math.sin(pushAngle) * 1;
+}
+}
+});
+}
+}
+
+const rooms = {
+"FFA-S1": new Room("FFA-S1", "FFA"),
+"FFA-S2": new Room("FFA-S2", "FFA"),
+"2TDM-S1": new Room("2TDM-S1", "2TDM"),
+"2TDM-S2": new Room("2TDM-S2", "2TDM")
+};
+
+function shoot(who) {
+if(who.reloadTimer > 0 || who.markedForDeletion) return;
+const specs = TANK_SPECS[who.tankType];
+const room = who.room;
+
+if(specs.isSmasher) return;
+
+if(specs.isDroneSpawner) {
+if(who.activeDrones < specs.maxDrones) {
+room.drones.push(new Drone(room, who.x, who.y, who));
+who.reloadTimer = Math.max(10, (40 - who.stats[6]*4) * specs.rel);
+}
+return;
+}
+
+let bSpeed = (6 + (who.stats[3]*0.4)) * specs.spd;
+let bDmg = (8 + (who.stats[5]*3)) * specs.dmg;
+let bPen = 1 + (who.stats[4]*0.5);
+
+specs.barrels.forEach(b => {
+let spreadAngle = (Math.random() - 0.5) * b.spread;
+let finalAngle = who.angle + b.angle + spreadAngle;
+let bx = who.x + Math.cos(who.angle + b.angle) * b.l * who.radius - Math.sin(who.angle) * b.y;
+let by = who.y + Math.sin(who.angle + b.angle) * b.l * who.radius + Math.cos(who.angle) * b.y;
+
+let recoilForce = (1.5 + bDmg * 0.05) * specs.dmg;
+who.vx -= Math.cos(finalAngle) * recoilForce * 0.25;
+who.vy -= Math.sin(finalAngle) * recoilForce * 0.25;
+
+room.bullets.push({
+x: bx, y: by, vx: Math.cos(finalAngle)*bSpeed, vy: Math.sin(finalAngle)*bSpeed,
+r: 8 + (who.stats[5]*0.5), life: 100 * (1 + who.stats[3]*0.1), dmg: bDmg, pen: bPen,
+owner: who, team: who.team
+});
+});
+
+who.reloadTimer = Math.max(5, (30 - who.stats[6]*3) * specs.rel);
+}
+
+// --- MAIN GAME LOOP ---
+function updateRoom(room) {
+if(room.mode === "2TDM") {
+room.entities.forEach(e => {
+if(!['tank','ai'].includes(e.type) || e.markedForDeletion) return;
+
+if(e.team !== 1 && e.x < BASE_SIZE && e.y < BASE_SIZE) {
+if (e.x > e.y) e.y = BASE_SIZE; else e.x = BASE_SIZE;
+}
+if(e.team !== 2 && e.x > WORLD_SIZE-BASE_SIZE && e.y > WORLD_SIZE-BASE_SIZE) {
+if ((WORLD_SIZE-BASE_SIZE) - e.x > (WORLD_SIZE-BASE_SIZE) - e.y) e.y = WORLD_SIZE-BASE_SIZE;
+else e.x = WORLD_SIZE-BASE_SIZE;
+}
+});
+}
+
+for (let i = 0; i < room.bullets.length; i++) {
+let b1 = room.bullets[i];
+if (b1.life <= 0) continue;
+for (let j = i + 1; j < room.bullets.length; j++) {
+let b2 = room.bullets[j];
+if (b2.life <= 0) continue;
+
+let sameOwner = b1.owner === b2.owner;
+let sameTeam = room.mode === "2TDM" && b1.team === b2.team && b1.team !== 0;
+
+if (!sameOwner && !sameTeam) {
+if (Math.hypot(b1.x - b2.x, b1.y - b2.y) < b1.r + b2.r) {
+let p1 = b1.pen; let p2 = b2.pen;
+b1.pen -= p2; b2.pen -= p1;
+if (b1.pen <= 0) b1.life = 0;
+if (b2.pen <= 0) b2.life = 0;
+}
+}
+}
+}
+
+for (let i = 0; i < room.drones.length; i++) {
+let d1 = room.drones[i];
+if (d1.markedForDeletion) continue;
+for (let j = i + 1; j < room.drones.length; j++) {
+let d2 = room.drones[j];
+if (d2.markedForDeletion) continue;
+
+let sameOwner = d1.owner === d2.owner;
+let sameTeam = room.mode === "2TDM" && d1.team === d2.team && d1.team !== 0;
+
+if (!sameOwner && !sameTeam) {
+if (Math.hypot(d1.x - d2.x, d1.y - d2.y) < d1.radius + d2.radius) {
+let d1Dmg = d1.dmg; let d2Dmg = d2.dmg;
+d1.hp -= d2Dmg; d2.hp -= d1Dmg;
+if (d1.hp <= 0) d1.markedForDeletion = true;
+if (d2.hp <= 0) d2.markedForDeletion = true;
+}
+}
+}
+}
+
+for(let i=room.bullets.length-1; i>=0; i--) {
+let b = room.bullets[i];
+
+if (room.mode === "2TDM") {
+if (b.team !== 1 && b.x < BASE_SIZE && b.y < BASE_SIZE) b.life = 0;
+if (b.team !== 2 && b.x > WORLD_SIZE-BASE_SIZE && b.y > WORLD_SIZE-BASE_SIZE) b.life = 0;
+}
+
+b.x += b.vx; b.y += b.vy; b.life--;
+if(b.life <= 0) { room.bullets.splice(i, 1); continue; }
+
+let hit = false;
+room.drones.forEach(d => {
+if(hit || d.markedForDeletion || b.owner === d.owner) return;
+let isSameTeam = room.mode === "2TDM" && d.team === b.team && b.team !== 0;
+if(isSameTeam) return;
+
+if(Math.hypot(b.x - d.x, b.y - d.y) < b.r + d.radius) {
+d.hp -= b.dmg;
+b.pen -= 1;
+if(b.pen <= 0) hit = true;
+}
+});
+room.entities.forEach(en => {
+if(hit || en.markedForDeletion || b.owner === en) return;
+if(room.mode === "2TDM" && en.team === b.team && !['square','triangle','pentagon','hexagon'].includes(en.type)) return;
+
+if(Math.hypot(b.x - en.x, b.y - en.y) < b.r + en.radius) {
+en.hp -= b.dmg; b.pen -= 1;
+if(b.owner) en.lastDamagedBy = b.owner.id;
+if(b.pen <= 0) hit = true;
+
+if(en.hp <= 0 && b.owner && typeof b.owner.addXP === 'function') {
+let xpGain = ['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100);
+b.owner.addXP(Math.min(xpGain,24700));
+}
+}
+});
+if(hit) room.bullets.splice(i, 1);
+}
+
+for(let i=room.drones.length-1; i>=0; i--) {
+let d = room.drones[i];
+if (d.markedForDeletion) continue;
+d.update();
+let hit = false;
+
+room.entities.forEach(en => {
+if(hit || en.markedForDeletion || d.owner === en) return;
+if(room.mode === "2TDM" && en.team === d.team && !['square','triangle','pentagon','hexagon'].includes(en.type)) return;
+
+if(Math.hypot(d.x - en.x, d.y - en.y) < d.radius + en.radius) {
+en.hp -= d.dmg; d.hp -= ['ai','tank'].includes(en.type) ? 20 : 5;
+if(d.owner) en.lastDamagedBy = d.owner.id;
+if(d.hp <= 0) hit = true;
+
+if(en.hp <= 0 && d.owner && typeof d.owner.addXP === 'function') {
+let xpGain = ['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100);
+d.owner.addXP(xpGain);
+}
+}
+});
+if(hit || d.owner.hp <= 0 || d.owner.markedForDeletion) {
+if(d.owner) d.owner.activeDrones--;
+d.markedForDeletion = true;
+}
+}
+room.drones = room.drones.filter(d => !d.markedForDeletion);
+
+room.entities.forEach(en => {
+if(en.markedForDeletion) return;
+en.update();
+if(['square','triangle','pentagon','hexagon'].includes(en.type)) {
+en.angle += (en.type==='square'?0.01:(en.type==='triangle'?0.02:0.005));
+}
+
+room.entities.forEach(other => {
+if(en === other || other.markedForDeletion || en.markedForDeletion) return;
+let isSameTeam = room.mode === "2TDM" && en.team === other.team && en.team !== 0;
+
+if(Math.hypot(en.x - other.x, en.y - other.y) < en.radius + other.radius) {
+let ang = Math.atan2(other.y - en.y, other.x - en.x);
+
+en.vx -= Math.cos(ang)*2; en.vy -= Math.sin(ang)*2;
+other.vx += Math.cos(ang)*2; other.vy += Math.sin(ang)*2;
+
+if (!isSameTeam) {
+let dmgE = 1 + (other.stats ? other.stats[2]*2 : 0);
+let dmgO = 1 + (en.stats ? en.stats[2]*2 : 0);
+
+en.hp -= dmgE; other.hp -= dmgO;
+en.lastDamagedBy = other.id; other.lastDamagedBy = en.id;
+
+if(en.hp <= 0 && typeof other.addXP === 'function') other.addXP(['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100));
+if(other.hp <= 0 && typeof en.addXP === 'function') en.addXP(['tank','ai'].includes(other.type) ? Math.max(other.xpVal||100, other.score) : (other.xpVal || 100));
+}
+}
+});
+});
+
+let respawningBots = [];
+
+room.entities = room.entities.filter(e => {
+if(e.hp <= 0) {
+if(e.isPlayer && e.ws) {
+let timeAlive = Math.floor((Date.now() - e.spawnTime) / 1000);
+e.ws.send(JSON.stringify({ type: 'death', score: e.score, level: e.level, timeAlive: timeAlive, tank: e.tankType, killerId: e.lastDamagedBy }));
+
+// Track spectating logic
+let client = room.clients.find(c => c.player === e);
+if (client) {
+client.player = null;
+client.spectatingId = e.lastDamagedBy;
+}
+}
+if(e.type === 'ai') {
+respawningBots.push(Math.min(e.score / 5, 6124));
+}
+
+// Move chain spectators to the killer
+room.clients.forEach(c => {
+if (c.spectatingId === e.id) {
+c.spectatingId = e.lastDamagedBy || null;
+}
+});
+
+return false;
+}
+return true;
+});
+
+respawningBots.forEach(score => room.spawnBot(Math.floor(Math.random()*100), score));
+
+let shapes = room.entities.filter(e => !['ai','tank'].includes(e.type)).length;
+if(shapes < 200) room.spawnShape();
+}
+
+setInterval(() => { Object.values(rooms).forEach(updateRoom); }, 1000 / TICK_RATE);
+
+// --- WEBSOCKETS ---
+wss.on('connection', (ws) => {
+let client = { ws: ws, player: null, room: null, spectatingId: null };
+
+ws.on('message', (message) => {
+const data = JSON.parse(message);
+
+if(data.type === 'ping') {
+ws.send(JSON.stringify({ type: 'pong', time: data.time }));
+}
+else if (data.type === 'spectate') {
+if (client.room) {
+client.room.clients = client.room.clients.filter(c => c !== client);
+}
+const roomId = `${data.mode}-${data.region}`;
+client.room = rooms[roomId];
+client.room.clients.push(client);
+}
+else if (data.type === 'spawn') {
+if (!client.room) return;
+const room = client.room;
+let team = room.mode === "2TDM" ? (Math.random() > 0.5 ? 1 : 2) : room.nextEntityId + 100;
+let px = room.mode === "2TDM" ? (team === 1 ? 250 : WORLD_SIZE - 250) : WORLD_SIZE / 2;
+let py = room.mode === "2TDM" ? (team === 1 ? 250 : WORLD_SIZE - 250) : WORLD_SIZE / 2;
+
+client.player = new Entity(room, px, py, 'tank', data.name || "Unnamed", team, true, ws);
+client.spectatingId = null;
+room.entities.push(client.player);
+
+ws.send(JSON.stringify({ type: 'init', id: client.player.id, team: team }));
+}
+else if (data.type === 'input' && client.player && !client.player.markedForDeletion) {
+client.player.inputs = data;
+}
+else if (data.type === 'upgradeStat' && client.player && !client.player.markedForDeletion) {
+let i = data.statIndex;
+if(client.player.statPoints > 0 && client.player.stats[i] < 7) {
+client.player.stats[i]++; client.player.statPoints--;
+}
+}
+else if (data.type === 'upgradeTank' && client.player && !client.player.markedForDeletion) {
+client.player.tankType = data.tank;
+}
+});
+
+ws.on('close', () => {
+if (client.player) client.player.markedForDeletion = true;
+if (client.room) client.room.clients = client.room.clients.filter(c => c !== client);
+});
+});
+
+setInterval(() => {
+Object.values(rooms).forEach(room => {
+const stateStr = JSON.stringify({
+type: 'state',
+entities: room.entities.map(e => ({
+id: e.id, x: Math.round(e.x), y: Math.round(e.y), type: e.type, team: e.team,
+hp: e.hp, maxHp: e.maxHp, radius: e.radius, angle: e.angle,
+tankType: e.tankType, name: e.name, score: e.score
+})),
+bullets: room.bullets.map(b => ({
+x: Math.round(b.x), y: Math.round(b.y), r: b.r, team: b.team
+})),
+drones: room.drones.map(d => ({
+x: Math.round(d.x), y: Math.round(d.y), radius: d.radius, angle: d.angle, team: d.team
+}))
+});
+
+room.clients.forEach(c => {
+if(c.ws.readyState === WebSocket.OPEN) {
+c.ws.send(stateStr);
+
+if(c.player && !c.player.markedForDeletion) {
+c.ws.send(JSON.stringify({
+type: 'playerStats', xp: c.player.xp, level: c.player.level, statPoints: c.player.statPoints,
+stats: c.player.stats, tankType: c.player.tankType, score: c.player.score
+}));
+} else {
+// Spectator sync
+if (!c.spectatingId) {
+let top = room.entities.filter(en => ['tank','ai'].includes(en.type)).sort((a,b) => b.score - a.score)[0];
+c.spectatingId = top ? top.id : null;
+} else {
+let specTarget = room.entities.find(en => en.id === c.spectatingId);
+if (!specTarget || specTarget.markedForDeletion) {
+let top = room.entities.filter(en => ['tank','ai'].includes(en.type)).sort((a,b) => b.score - a.score)[0];
+c.spectatingId = top ? top.id : null;
+}
+}
+if (c.spectatingId) c.ws.send(JSON.stringify({ type: 'spectate_update', id: c.spectatingId }));
+}
+}
+});
+});
+}, 1000 / TICK_RATE);
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+EOF
+
+# 6. Create your public/index.html (REPLACE WITH YOUR ACTUAL HTML/JS)
+cat << 'EOF' > public/index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diep.io Multiplayer</title>
+<link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;700&display=swap" rel="stylesheet">
+<style>
+* { font-family: 'Ubuntu', sans-serif; user-select: none; }
+body { margin: 0; overflow: hidden; background: #b1b1b1; }
+canvas { display: block; position: absolute; z-index: -1; }
+
+#exit-btn { position: absolute; top: 10px; left: 10px; width: 44px; height: 44px; background: rgba(100,100,100,0.5); border-radius: 5px; cursor: pointer; display: none; align-items: center; justify-content: center; z-index: 100; transition: 0.2s; }
+#exit-btn:hover { background: rgba(100,100,100,0.8); }
+#exit-btn img { width: 28px; height: 28px; opacity: 0.8; }
+
+#menu-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; flex-direction: row; gap: 20px;}
+#menu-box { background: #eee; padding: 30px; border-radius: 10px; border: 5px solid #555; text-align: center; width: 380px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+input[type="text"], select { width: 80%; padding: 10px; margin: 10px 0; border: 2px solid #ccc; border-radius: 5px; font-size: 18px; }
+.btn { background: #00b2e1; color: white; border: none; padding: 12px 24px; font-size: 20px; font-weight: bold; cursor: pointer; border-radius: 5px; border-bottom: 4px solid #0085a8; transition: 0.1s; width: 85%; margin-top: 10px;}
+.btn:active { transform: translateY(2px); border-bottom-width: 2px; }
+.btn:disabled { background: #777; border-bottom-color: #555; cursor: not-allowed;}
+
+#settings-btn { margin-top: 15px; cursor: pointer; color: #555; text-decoration: underline; font-size: 14px; font-weight: bold;}
+
+#color-menu { display: none; background: #eee; padding: 30px; border-radius: 10px; border: 5px solid #555; width: 320px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: left; }
+.color-row { display: flex; justify-content: space-between; margin: 5px 0; font-size: 14px; align-items: center;}
+.reset-btn { background: #f14e54; color: white; border: none; padding: 5px; width: 100%; cursor: pointer; margin-top: 10px; border-radius: 3px; }
+
+#game-ui { display: none; }
+#stats-panel { position: absolute; bottom: 20px; left: 20px; pointer-events: auto; display: none; }
+.stat-bar { background: rgba(0, 0, 0, 0.4); margin: 3px 0; padding: 4px; border-radius: 4px; width: 220px; display: flex; align-items: center; cursor: pointer; transition: background 0.2s;}
+.stat-bar:hover { background: rgba(0, 0, 0, 0.6); }
+.stat-name { color: white; font-size: 11px; width: 90px; font-weight: bold; }
+.slots { display: flex; gap: 2px; }
+.slot { width: 14px; height: 14px; background: #555; border: 1px solid #222; }
+
+#scoreboard { position: absolute; top: 20px; right: 20px; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 5px; color: white; width: 150px; text-align: right; }
+#minimap { position: absolute; bottom: 20px; right: 20px; width: 150px; height: 150px; background: rgba(0,0,0,0.2); border: 2px solid rgba(255,255,255,0.3); }
+#ping-display { position: absolute; bottom: 180px; right: 20px; color: white; font-weight: bold; font-size: 14px; text-shadow: 1px 1px 2px black; }
+
+#lvl-info { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); text-align: center; width: 350px;}
+#level-text { color: white; font-weight: bold; margin-bottom: 2px; font-size: 18px; text-shadow: 1px 1px 2px black; }
+
+#score-bar-container { width: 100%; height: 12px; background: #333; border-radius: 6px; overflow: hidden; margin-bottom: 4px; border: 2px solid #222; position: relative;}
+#score-bar { width: 100%; height: 100%; background: #40f252; transition: 0.2s; }
+#score-text-overlay { position: absolute; top: -1px; left: 0; width: 100%; text-align: center; color: white; font-size: 10px; font-weight: bold; text-shadow: 1px 1px black;}
+
+#xp-bar-container { width: 100%; height: 16px; background: #555; border: 3px solid #333; border-radius: 8px; overflow: hidden; }
+#xp-bar { width: 0%; height: 100%; background: #ffe300; transition: width 0.2s; }
+
+#upgrades-panel { position: absolute; top: 70px; left: 20px; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+.upgrade-btn { background: rgba(0,0,0,0.5); border: 3px solid #768dfc; color: white; border-radius: 8px; width: 120px; padding: 10px; text-align: center; cursor: pointer; pointer-events: auto; font-weight: bold; transition: 0.1s;}
+.upgrade-btn:hover { background: rgba(0,0,0,0.8); border-color: #a6b7ff; transform: scale(1.05);}
+
+#death-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 200; color: white; text-align: center;}
+.ds-box { background: #333; padding: 40px; border-radius: 10px; border: 4px solid #555; width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);}
+.ds-title { font-size: 32px; font-weight: bold; color: #f14e54; margin-bottom: 20px; }
+.ds-stat { font-size: 18px; margin: 10px 0; color: #ddd;}
+.ds-stat span { font-weight: bold; color: white;}
+</style>
+</head>
+<body>
+
+<div id="exit-btn" onclick="exitGame()">
+<img src="/exit.png" alt="Exit" onerror="this.style.display='none'; this.parentNode.innerHTML='✖'; this.parentNode.style.fontSize='24px'; this.parentNode.style.color='#fff';">
+</div>
+
+<div id="menu-overlay">
+<div id="menu-box">
+<h1 style="color:#333; margin-top:0;">TANK ONLINE</h1>
+
+<select id="gameModeInput">
+<option value="FFA">⚔️ Free For All</option>
+<option value="2TDM">🔵 2 Teams</option>
+</select>
+
+<select id="regionInput">
+<option value="S1">🌐 Server 1</option>
+<option value="S2">🌐 Server 2</option>
+</select>
+
+<input type="text" id="nameInput" placeholder="This is the tale of..." maxlength="15">
+<br>
+<button class="btn" id="playBtn" onclick="spawnPlayer()" disabled>Connecting...</button>
+<div id="settings-btn" onclick="toggleSettings()">⚙ Edit Colors</div>
+</div>
+
+<div id="color-menu">
+<h3 style="margin-top:0; color:#333;">Appearance</h3>
+<div class="color-row">Background: <input type="color" id="color-bg" value="#cdcdcd"></div>
+<div class="color-row">Team 1 (Blue): <input type="color" id="color-t1" value="#00b2e1"></div>
+<div class="color-row">Team 2 (Red): <input type="color" id="color-t2" value="#f14e54"></div>
+<div class="color-row">Square: <input type="color" id="color-square" value="#ffe869"></div>
+<div class="color-row">Triangle: <input type="color" id="color-triangle" value="#fc7677"></div>
+<div class="color-row">Pentagon: <input type="color" id="color-pentagon" value="#768dfc"></div>
+<div class="color-row">Hexagon: <input type="color" id="color-hexagon" value="#6df5b9"></div>
+
+<div style="display:flex; justify-content:space-between; margin-top:10px;">
+<button class="btn" onclick="exportColors()" style="font-size:14px; width:48%; margin:0;">Export</button>
+<button class="btn" onclick="importColors()" style="font-size:14px; width:48%; margin:0; background:#f0a824; border-bottom-color:#c88414;">Import</button>
+</div>
+
+<button class="reset-btn" onclick="resetColors()">Reset to Default</button>
+</div>
+</div>
+
+<div id="death-screen">
+<div class="ds-box">
+<div class="ds-title">You were killed!</div>
+<canvas id="ds-tank-icon" width="100" height="100" style="margin: 0 auto 20px auto; display:block;"></canvas>
+<div class="ds-stat">Level: <span id="ds-level"></span></div>
+<div class="ds-stat">Final Score: <span id="ds-score"></span></div>
+<div class="ds-stat">Time Alive: <span id="ds-time"></span></div>
+<button class="btn" onclick="continueToMenu()" style="margin-top:20px;">Continue</button>
+</div>
+</div>
+
+<div id="game-ui">
+<div id="upgrades-panel"></div>
+<div id="stats-panel">
+<div id="points-label" style="color: #ffe300; font-weight: bold; margin-bottom: 5px;">Points: <span id="stat-points">0</span></div>
+<div id="stats-container"></div>
+</div>
+<div id="scoreboard">
+<div id="sb-title" style="font-weight: bold; border-bottom: 1px solid white; margin-bottom: 5px; padding-bottom:3px;">Scoreboard</div>
+<div id="score-list" style="font-size: 14px;"></div>
+</div>
+<div id="ping-display">Ping: -- ms</div>
+<div id="minimap"><canvas id="minimapCanvas" width="150" height="150"></canvas></div>
+<div id="lvl-info">
+<div id="level-text">Lvl 1 Basic</div>
+<div id="score-bar-container">
+<div id="score-bar"></div>
+<div id="score-text-overlay">Score: 0</div>
+</div>
+<div id="xp-bar-container"><div id="xp-bar"></div></div>
+</div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const mCanvas = document.getElementById('minimapCanvas');
+const mCtx = mCanvas.getContext('2d');
+
+const WORLD_SIZE = 4000;
+const BASE_SIZE = 600;
+const TICK_RATE = 45;
+
+let ws;
+let myId = null;
+let spectateId = null;
+let myTeam = null;
+let gameMode = "FFA";
+let camera = { x: WORLD_SIZE/2, y: WORLD_SIZE/2 };
+let mouse = { x: 0, y: 0, rx: 0, ry: 0, pressed: false, rightDown: false, repel: false };
+let keys = { w:false, a:false, s:false, d:false, shift: false };
+
+let autoFire = false;
+let autoSpin = false;
+let spinAngle = 0;
+let renderEntities = new Map();
+
+let gameState = { entities: [], bullets: [], drones: [] };
+let myStats = { xp: 0, level: 1, statPoints: 0, stats: [0,0,0,0,0,0,0,0], tankType: 'Basic', score: 0 };
+
+const DEFAULT_COLORS = { bg: "#cdcdcd", team1: "#00b2e1", team2: "#f14e54", square: "#ffe869", triangle: "#fc7677", pentagon: "#768dfc", hexagon: "#6df5b9" };
+let COLORS = { ...DEFAULT_COLORS };
+
+function formatScore(num) {
+if (num < 1000) return num.toString();
+if (num < 1000000) return (num / 1000).toFixed(num < 10000 ? 1 : 0) + "k";
+return (num / 1000000).toFixed(2).replace(/\.00$/, '') + "m";
+}
+
+const STAT_INFO = [
+{ name: "Health Regen", color: "#e8b08d" }, { name: "Max Health", color: "#e88dd6" },
+{ name: "Body Damage", color: "#988de8" }, { name: "Bullet Speed", color: "#8daae8" },
+{ name: "Bullet Penetration", color: "#e8db8d" }, { name: "Bullet Damage", color: "#e88d8d" },
+{ name: "Reload", color: "#ade88d" }, { name: "Movement Speed", color: "#8de8e1" }
+];
+
+const TANK_SPECS = {
+'Basic': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0}] },
+'Twin': { barrels: [{x:0, y:-10, w:16, l:1.8, angle:0}, {x:0, y:10, w:16, l:1.8, angle:0}] },
+'Sniper': { barrels: [{x:0, y:0, w:18, l:2.4, angle:0}] },
+'Machine Gun': { barrels: [{x:0, y:0, w:22, w2: 32, l:1.6, angle:0}] },
+'Flank Guard': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0}, {x:0, y:0, w:18, l:1.5, angle:Math.PI}] },
+'Overseer': { barrels: [{x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI/2}, {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2}] },
+'Smasher': { barrels: [] }
+};
+
+function darkenColor(hex, percent) {
+hex = hex.replace('#', '');
+if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+let r = parseInt(hex.substring(0, 2), 16);
+let g = parseInt(hex.substring(2, 4), 16);
+let b = parseInt(hex.substring(4, 6), 16);
+r = Math.max(0, Math.floor(r * (100 - percent) / 100));
+g = Math.max(0, Math.floor(g * (100 - percent) / 100));
+b = Math.max(0, Math.floor(b * (100 - percent) / 100));
+return "#" + (1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1);
+}
+
+function loadColors() {
+let saved = localStorage.getItem('diepColors');
+if(saved) {
+COLORS = JSON.parse(saved);
+document.getElementById('color-bg').value = COLORS.bg;
+document.getElementById('color-t1').value = COLORS.team1;
+document.getElementById('color-t2').value = COLORS.team2;
+document.getElementById('color-square').value = COLORS.square;
+document.getElementById('color-triangle').value = COLORS.triangle;
+document.getElementById('color-pentagon').value = COLORS.pentagon;
+document.getElementById('color-hexagon').value = COLORS.hexagon || "#6df5b9";
+}
+}
+
+function saveColors() {
+COLORS.bg = document.getElementById('color-bg').value;
+COLORS.team1 = document.getElementById('color-t1').value;
+COLORS.team2 = document.getElementById('color-t2').value;
+COLORS.square = document.getElementById('color-square').value;
+COLORS.triangle = document.getElementById('color-triangle').value;
+COLORS.pentagon = document.getElementById('color-pentagon').value;
+COLORS.hexagon = document.getElementById('color-hexagon').value;
+localStorage.setItem('diepColors', JSON.stringify(COLORS));
+}
+
+function resetColors() {
+COLORS = { ...DEFAULT_COLORS };
+localStorage.removeItem('diepColors');
+document.getElementById('color-bg').value = COLORS.bg;
+document.getElementById('color-t1').value = COLORS.team1;
+document.getElementById('color-t2').value = COLORS.team2;
+document.getElementById('color-square').value = COLORS.square;
+document.getElementById('color-triangle').value = COLORS.triangle;
+document.getElementById('color-pentagon').value = COLORS.pentagon;
+document.getElementById('color-hexagon').value = COLORS.hexagon;
+}
+
+function exportColors() {
+saveColors();
+navigator.clipboard.writeText(JSON.stringify(COLORS)).then(() => alert("Colors successfully copied!")).catch(err => alert("Failed to copy colors."));
+}
+
+function importColors() {
+let input = prompt("Paste your color settings JSON string here:");
+if (input) {
+try {
+let parsed = JSON.parse(input);
+COLORS = { ...DEFAULT_COLORS, ...parsed };
+document.getElementById('color-bg').value = COLORS.bg;
+document.getElementById('color-t1').value = COLORS.team1;
+document.getElementById('color-t2').value = COLORS.team2;
+document.getElementById('color-square').value = COLORS.square;
+document.getElementById('color-triangle').value = COLORS.triangle;
+document.getElementById('color-pentagon').value = COLORS.pentagon;
+document.getElementById('color-hexagon').value = COLORS.hexagon;
+saveColors();
+alert("Colors imported successfully!");
+} catch (e) { alert("Invalid color data format!"); }
+}
+}
+
+loadColors();
+
+function toggleSettings() {
+let m = document.getElementById('color-menu');
+m.style.display = m.style.display === 'block' ? 'none' : 'block';
+}
+
+function initConnection() {
+gameMode = document.getElementById('gameModeInput').value;
+const region = document.getElementById('regionInput').value;
+if (ws) { ws.onclose = null; ws.close(); }
+document.getElementById('playBtn').innerText = "Connecting...";
+document.getElementById('playBtn').disabled = true;
+connectWS(region, gameMode);
+}
+
+document.getElementById('gameModeInput').addEventListener('change', initConnection);
+document.getElementById('regionInput').addEventListener('change', initConnection);
+window.onload = initConnection;
+
+function spawnPlayer() {
+saveColors();
+gameMode = document.getElementById('gameModeInput').value;
+document.getElementById('sb-title').innerText = gameMode === "2TDM" ? "2 Teams" : "FFA";
+
+ws.send(JSON.stringify({ type: 'spawn', name: document.getElementById('nameInput').value || "Unnamed" }));
+
+document.getElementById('menu-overlay').style.display = 'none';
+document.getElementById('game-ui').style.display = 'block';
+document.getElementById('exit-btn').style.display = 'flex';
+document.getElementById('death-screen').style.display = 'none';
+initUI();
+}
+
+function continueToMenu() {
+document.getElementById('death-screen').style.display = 'none';
+document.getElementById('game-ui').style.display = 'none';
+document.getElementById('exit-btn').style.display = 'none';
+document.getElementById('menu-overlay').style.display = 'flex';
+}
+
+function exitGame() {
+if(confirm("Are you sure you want to disconnect and return to the menu?")) { location.reload(); }
+}
+
+function initUI() {
+const container = document.getElementById('stats-container');
+container.innerHTML = '';
+STAT_INFO.forEach((s, i) => {
+const d = document.createElement('div');
+d.className = 'stat-bar';
+d.innerHTML = `<span class="stat-name" style="color:${s.color}">${s.name}</span><div class="slots" id="slots-${i}">${Array(7).fill('<div class="slot"></div>').join('')}</div>`;
+d.onclick = () => { if(ws) ws.send(JSON.stringify({ type: 'upgradeStat', statIndex: i })); };
+container.appendChild(d);
+});
+}
+
+function connectWS(regionStr, modeStr) {
+const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+ws = new WebSocket(protocol + window.location.host);
+
+ws.onopen = () => {
+ws.send(JSON.stringify({ type: 'spectate', mode: modeStr, region: regionStr }));
+document.getElementById('playBtn').innerText = "Play";
+document.getElementById('playBtn').disabled = false;
+
+if (window.pingInterval) clearInterval(window.pingInterval);
+window.pingInterval = setInterval(() => { if(ws.readyState === 1) ws.send(JSON.stringify({ type: 'ping', time: Date.now() })); }, 1000);
+
+if (window.inputInterval) clearInterval(window.inputInterval);
+window.inputInterval = setInterval(() => {
+if(myId) {
+let finalAngle = Math.atan2(mouse.ry - (camera.y + canvas.height/2), mouse.rx - (camera.x + canvas.width/2));
+if (autoSpin) { spinAngle += 0.08; finalAngle = spinAngle; }
+
+ws.send(JSON.stringify({
+type: 'input', up: keys.w || keys.arrowup, down: keys.s || keys.arrowdown,
+left: keys.a || keys.arrowleft, right: keys.d || keys.arrowright,
+shooting: mouse.pressed || autoFire, angle: finalAngle,
+repel: mouse.repel, mouseX: mouse.rx, mouseY: mouse.ry
+}));
+}
+}, 1000 / TICK_RATE);
+};
+
+ws.onmessage = (e) => {
+const data = JSON.parse(e.data);
+if(data.type === 'init') { myId = data.id; myTeam = data.team; spectateId = null; }
+else if(data.type === 'pong') { document.getElementById('ping-display').innerText = 'Ping: ' + (Date.now() - data.time) + ' ms'; }
+else if(data.type === 'state') {
+gameState = data;
+if (!window.drawing) { window.drawing = true; requestAnimationFrame(draw); }
+}
+else if(data.type === 'playerStats') { myStats = data; updateUI(); checkUpgrades(); }
+else if(data.type === 'spectate_update') { spectateId = data.id; }
+else if(data.type === 'death') {
+myId = null;
+spectateId = data.killerId;
+document.getElementById('death-screen').style.display = 'flex';
+document.getElementById('ds-level').innerText = data.level + " " + data.tank;
+document.getElementById('ds-score').innerText = Math.floor(data.score);
+let m = Math.floor(data.timeAlive / 60); let s = data.timeAlive % 60;
+document.getElementById('ds-time').innerText = `${m}m ${s}s`;
+
+let dCanvas = document.getElementById('ds-tank-icon');
+let dctx = dCanvas.getContext('2d');
+dctx.clearRect(0,0,100,100);
+let col = getTeamColor(myTeam);
+
+dctx.fillStyle = col; dctx.strokeStyle = darkenColor(col, 30); dctx.lineWidth = 4;
+dctx.save(); dctx.translate(50, 50); dctx.rotate(-Math.PI/4);
+
+let specs = TANK_SPECS[data.tank] || TANK_SPECS['Basic'];
+let r = 24;
+
+specs.barrels.forEach(b => {
+dctx.save(); dctx.rotate(b.angle);
+dctx.fillStyle = "#999"; dctx.strokeStyle = darkenColor("#999", 30);
+if(b.w2) {
+dctx.beginPath(); dctx.moveTo(0, -b.w/2); dctx.lineTo(r * b.l, -b.w2/2);
+dctx.lineTo(r * b.l, b.w2/2); dctx.lineTo(0, b.w/2); dctx.closePath();
+dctx.fill(); dctx.stroke();
+} else {
+dctx.fillRect(0, -b.w/2 + (b.y||0), r * b.l, b.w);
+dctx.strokeRect(0, -b.w/2 + (b.y||0), r * b.l, b.w);
+}
+dctx.restore();
+});
+
+if (data.tank === 'Smasher') {
+dctx.fillStyle = "#555"; dctx.strokeStyle = darkenColor("#555", 30);
+dctx.beginPath();
+for(let i=0; i<6; i++){
+let a = (i * Math.PI * 2 / 6);
+dctx.lineTo(Math.cos(a)*r*1.4, Math.sin(a)*r*1.4);
+}
+dctx.closePath(); dctx.fill(); dctx.stroke();
+dctx.fillStyle = col; dctx.strokeStyle = darkenColor(col, 30);
+}
+
+dctx.beginPath(); dctx.arc(0, 0, r, 0, Math.PI*2); dctx.fill(); dctx.stroke();
+dctx.restore();
+}
+};
+
+ws.onclose = () => {
+if(myId) {
+document.getElementById('death-screen').style.display = 'flex';
+document.querySelector('.ds-title').innerText = "Disconnected";
+document.getElementById('ds-level').innerText = "Connection lost.";
+document.getElementById('ds-score').innerText = "--";
+document.getElementById('ds-time').innerText = "--";
+}
+document.getElementById('playBtn').innerText = "Connecting...";
+document.getElementById('playBtn').disabled = true;
+};
+}
+
+let currentUpgradesShown = "";
+function checkUpgrades() {
+const upPanel = document.getElementById('upgrades-panel');
+let options = [];
+
+if (myStats.level >= 15 && myStats.tankType === 'Basic') {
+options = ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard', 'Overseer', 'Smasher'];
+}
+
+let neededStr = options.join(",");
+if (currentUpgradesShown === neededStr) return;
+currentUpgradesShown = neededStr;
+
+upPanel.innerHTML = '';
+options.forEach(c => {
+let btn = document.createElement('div'); btn.className = 'upgrade-btn'; btn.innerText = c;
+btn.onclick = () => {
+ws.send(JSON.stringify({ type: 'upgradeTank', tank: c }));
+currentUpgradesShown = "";
+upPanel.innerHTML = '';
+};
+upPanel.appendChild(btn);
+});
+}
+
+function updateUI() {
+document.getElementById('score-text-overlay').innerText = "Score: " + Math.floor(myStats.score);
+document.getElementById('xp-bar').style.width = myStats.level >= 30 ? "100%" : ((myStats.xp / (myStats.level * 40)) * 100 + "%");
+document.getElementById('level-text').innerText = `Lvl ${myStats.level} ${myStats.tankType}`;
+
+let panel = document.getElementById('stats-panel');
+if (myStats.statPoints > 0) {
+panel.style.display = 'block';
+document.getElementById('stat-points').innerText = myStats.statPoints;
+} else { panel.style.display = 'none'; }
+
+myStats.stats.forEach((val, i) => {
+let slots = document.getElementById(`slots-${i}`).children;
+for(let j=0; j<7; j++) { slots[j].style.background = j < val ? STAT_INFO[i].color : '#555'; }
+});
+}
+
+function getTeamColor(team) {
+if(team === 0) return "#fff";
+if(gameMode === "FFA") return team === myTeam ? COLORS.team1 : COLORS.team2;
+return team === 1 ? COLORS.team1 : COLORS.team2;
+}
+
+function drawPoly(sides, r) {
+ctx.beginPath();
+for(let i=0; i<sides; i++){
+let a = (i * Math.PI * 2 / sides);
+ctx.lineTo(Math.cos(a)*r*1.2, Math.sin(a)*r*1.2);
+}
+ctx.closePath(); ctx.fill(); ctx.stroke();
+}
+
+function draw() {
+ctx.fillStyle = COLORS.bg; ctx.fillRect(0,0,canvas.width,canvas.height);
+
+let targetCamX = WORLD_SIZE/2 - canvas.width/2;
+let targetCamY = WORLD_SIZE/2 - canvas.height/2;
+
+if (myId) {
+let me = gameState.entities.find(e => e.id === myId);
+if(me) {
+if (!renderEntities.has(me.id)) renderEntities.set(me.id, { x: me.x, y: me.y });
+let rMe = renderEntities.get(me.id);
+targetCamX = rMe.x - canvas.width/2;
+targetCamY = rMe.y - canvas.height/2;
+
+if (myStats.tankType === 'Sniper' && (mouse.rightDown || keys.shift)) {
+let mouseAngle = Math.atan2(mouse.ry - rMe.y, mouse.rx - rMe.x);
+targetCamX += Math.cos(mouseAngle) * 450;
+targetCamY += Math.sin(mouseAngle) * 450;
+}
+}
+} else if (spectateId) {
+let spec = gameState.entities.find(e => e.id === spectateId);
+if(spec) {
+if (!renderEntities.has(spec.id)) renderEntities.set(spec.id, { x: spec.x, y: spec.y });
+let rSpec = renderEntities.get(spec.id);
+targetCamX = rSpec.x - canvas.width/2;
+targetCamY = rSpec.y - canvas.height/2;
+}
+}
+
+camera.x += (targetCamX - camera.x) * 0.1;
+camera.y += (targetCamY - camera.y) * 0.1;
+
+mouse.rx = mouse.x + camera.x;
+mouse.ry = mouse.y + camera.y;
+
+ctx.strokeStyle = "rgba(0,0,0,0.06)";
+ctx.lineWidth = 1;
+ctx.beginPath();
+for(let x=-camera.x%50; x<canvas.width; x+=50) { ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); }
+for(let y=-camera.y%50; y<canvas.height; y+=50) { ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); }
+ctx.stroke();
+
+if(gameMode === "2TDM") {
+ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(-camera.x, -camera.y, BASE_SIZE, BASE_SIZE);
+ctx.fillStyle = "rgba(241, 78, 84, 0.15)"; ctx.fillRect(WORLD_SIZE-BASE_SIZE-camera.x, WORLD_SIZE-BASE_SIZE-camera.y, BASE_SIZE, BASE_SIZE);
+}
+
+ctx.fillStyle = "rgba(0,0,0,0.02)";
+ctx.fillRect(1700 - camera.x, 1700 - camera.y, 600, 600);
+
+const activeIds = gameState.entities.map(e => e.id);
+for (let id of renderEntities.keys()) {
+if (!activeIds.includes(id)) renderEntities.delete(id);
+}
+
+[...gameState.entities].sort((a,b) => (a.type.includes('tank')||a.type==='ai'?1:-1)).forEach(en => {
+if (!renderEntities.has(en.id)) renderEntities.set(en.id, { x: en.x, y: en.y });
+let rPos = renderEntities.get(en.id);
+rPos.x += (en.x - rPos.x) * 0.35;
+rPos.y += (en.y - rPos.y) * 0.35;
+
+const sx = rPos.x - camera.x;
+const sy = rPos.y - camera.y;
+
+if(sx < -100 || sx > canvas.width+100 || sy < -100 || sy > canvas.height+100) return;
+
+if(['tank','ai'].includes(en.type)) {
+ctx.fillStyle = "white"; ctx.strokeStyle = "black"; ctx.lineWidth = 3;
+ctx.font = "bold 14px Ubuntu"; ctx.textAlign = "center";
+ctx.strokeText(en.name, sx, sy - en.radius - 25); ctx.fillText(en.name, sx, sy - en.radius - 25);
+ctx.font = "11px Ubuntu";
+ctx.strokeText(Math.floor(en.score), sx, sy - en.radius - 12); ctx.fillText(formatScore(Math.floor(en.score)), sx, sy - en.radius - 12);
+}
+
+if(en.hp < en.maxHp) {
+ctx.fillStyle = '#555'; ctx.fillRect(sx-20, sy+en.radius+10, 40, 6);
+ctx.fillStyle = '#85e37d'; ctx.fillRect(sx-20, sy+en.radius+10, 40*(en.hp/en.maxHp), 6);
+}
+
+ctx.save(); ctx.translate(sx, sy); ctx.lineWidth = 4;
+
+if(['tank','ai'].includes(en.type)) {
+let col = getTeamColor(en.team);
+
+if (en.tankType === 'Smasher') {
+ctx.save();
+ctx.rotate(en.angle + Date.now() / 300);
+ctx.fillStyle = "#555";
+ctx.strokeStyle = darkenColor("#555", 30);
+drawPoly(6, en.radius * 1.4);
+ctx.restore();
+}
+
+ctx.fillStyle = col; ctx.strokeStyle = darkenColor(col, 30);
+
+let specs = TANK_SPECS[en.tankType] || TANK_SPECS['Basic'];
+specs.barrels.forEach(b => {
+ctx.save(); ctx.rotate(en.angle + b.angle);
+ctx.fillStyle = "#999"; ctx.strokeStyle = darkenColor("#999", 30);
+
+if(b.w2) {
+ctx.beginPath(); ctx.moveTo(0, -b.w/2); ctx.lineTo(en.radius * b.l, -b.w2/2);
+ctx.lineTo(en.radius * b.l, b.w2/2); ctx.lineTo(0, b.w/2); ctx.closePath();
+ctx.fill(); ctx.stroke();
+} else {
+ctx.fillRect(0, -b.w/2 + (b.y||0), en.radius * b.l, b.w);
+ctx.strokeRect(0, -b.w/2 + (b.y||0), en.radius * b.l, b.w);
+}
+ctx.restore();
+});
+
+ctx.beginPath(); ctx.arc(0, 0, en.radius, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+} else {
+if(en.type==='square'){ ctx.fillStyle=COLORS.square; ctx.strokeStyle=darkenColor(COLORS.square, 30); ctx.fillRect(-12,-12,24,24); ctx.strokeRect(-12,-12,24,24); }
+if(en.type==='triangle'){ ctx.fillStyle=COLORS.triangle; ctx.strokeStyle=darkenColor(COLORS.triangle, 30); ctx.rotate(en.angle); drawPoly(3, en.radius); }
+if(en.type==='pentagon'){ ctx.fillStyle=COLORS.pentagon; ctx.strokeStyle=darkenColor(COLORS.pentagon, 30); ctx.rotate(en.angle); drawPoly(5, en.radius); }
+if(en.type==='hexagon'){ ctx.fillStyle=COLORS.hexagon; ctx.strokeStyle=darkenColor(COLORS.hexagon, 30); ctx.rotate(en.angle); drawPoly(6, en.radius); }
+}
+ctx.restore();
+});
+
+gameState.drones.forEach(d => {
+const sx = d.x - camera.x; const sy = d.y - camera.y;
+if(sx < -50 || sx > canvas.width+50 || sy < -50 || sy > canvas.height+50) return;
+ctx.save(); ctx.translate(sx, sy); ctx.rotate(d.angle);
+ctx.lineWidth = 3; ctx.fillStyle = getTeamColor(d.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30);
+ctx.beginPath(); ctx.lineTo(d.radius, 0); ctx.lineTo(-d.radius*0.8, d.radius*0.8); ctx.lineTo(-d.radius*0.8, -d.radius*0.8); ctx.closePath();
+ctx.fill(); ctx.stroke(); ctx.restore();
+});
+
+gameState.bullets.forEach(b => {
+ctx.fillStyle = getTeamColor(b.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30); ctx.lineWidth = 2;
+ctx.beginPath(); ctx.arc(b.x-camera.x, b.y-camera.y, b.r, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+});
+
+let scores = gameState.entities.filter(e => ['tank','ai'].includes(e.type)).sort((a,b) => b.score - a.score).slice(0, 8);
+document.getElementById('score-list').innerHTML = scores.map(s => `<div style="color:${getTeamColor(s.team)}; margin: 2px 0;">${s.name}: ${Math.floor(s.score)}</div>`).join('');
+
+mCtx.clearRect(0,0,150,150);
+if(gameMode === "2TDM") {
+mCtx.fillStyle = "rgba(0, 178, 225, 0.3)"; mCtx.fillRect(0, 0, (BASE_SIZE/WORLD_SIZE)*150, (BASE_SIZE/WORLD_SIZE)*150);
+mCtx.fillStyle = "rgba(241, 78, 84, 0.3)"; mCtx.fillRect(150-(BASE_SIZE/WORLD_SIZE)*150, 150-(BASE_SIZE/WORLD_SIZE)*150, (BASE_SIZE/WORLD_SIZE)*150, (BASE_SIZE/WORLD_SIZE)*150);
+}
+gameState.entities.forEach(en => {
+if(!['tank','ai'].includes(en.type)) return;
+mCtx.fillStyle = en.id === myId ? '#fff' : getTeamColor(en.team);
+let s = en.id === myId ? 4 : 2;
+mCtx.fillRect((en.x/WORLD_SIZE)*150 - s/2, (en.y/WORLD_SIZE)*150 - s/2, s, s);
+});
+
+requestAnimationFrame(draw);
+}
+
+window.onkeydown = e => {
+let key = e.key.toLowerCase();
+if(key === 'shift') { mouse.repel = true; keys.shift = true; }
+keys[key] = true;
+
+if(key === 'e') autoFire = !autoFire;
+if(key === 'c') autoSpin = !autoSpin;
+
+if(key >= '1' && key <= '8') {
+if(ws && ws.readyState === 1) {
+ws.send(JSON.stringify({ type: 'upgradeStat', statIndex: parseInt(key) - 1 }));
+}
+}
+};
+
+window.onkeyup = e => {
+let key = e.key.toLowerCase();
+if(key === 'shift') { mouse.repel = false; keys.shift = false; }
+keys[key] = false;
+};
+
+window.onmousemove = e => {
+mouse.x = e.clientX; mouse.y = e.clientY;
+mouse.rx = mouse.x + camera.x; mouse.ry = mouse.y + camera.y;
+};
+
+window.onmousedown = (e) => {
+if(e.button === 0) mouse.pressed = true;
+if(e.button === 2) mouse.rightDown = true;
+};
+window.onmouseup = (e) => {
+if(e.button === 0) mouse.pressed = false;
+if(e.button === 2) mouse.rightDown = false;
+};
+window.oncontextmenu = e => e.preventDefault();
+window.onresize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
+canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+</script>
+</body>
+</html>
+EOF
+
+# 7. Install dependencies and start the game
+npm install
+pm2 start server.js --name "ditanks-io"
+pm2 save
+pm2 startup
