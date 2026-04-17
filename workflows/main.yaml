@@ -1,0 +1,39 @@
+name: Deploy Application
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run App with Env Variables
+        # This section maps GitHub's store to the actual environment
+        env:
+          # Variables (from the Variables tab)
+          PORT: ${{ vars.PORT }}
+          BASE_URL: ${{ vars.BASE_URL }}
+          DB_NAME: ${{ vars.DB_NAME }}
+          SERVER_LOCATION: ${{ vars.SERVER_LOCATION }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          DISCORD_CLIENT_ID: ${{ vars.DISCORD_CLIENT_ID }}
+          
+          # Secrets (from the Secrets tab)
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: npm start
