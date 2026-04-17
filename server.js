@@ -1428,7 +1428,7 @@ const commands = [
     }
 ];
 
-discordClient.once('ready', async () => {
+discordClient.once('clientReady', async () => {
     try {
         await discordClient.application.commands.set(commands);
         updateLeaderboard();
