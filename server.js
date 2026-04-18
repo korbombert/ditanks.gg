@@ -1527,6 +1527,13 @@ if (process.env.DISCORD_BOT_TOKEN) {
 }
 // ==========================================
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Game server running on port ${PORT}`);
+const PUBLIC_URL = process.env.RAILWAY_STATIC_URL || `localhost:${PORT}`;
+
+server.listen(PORT, '0.0.0.0', () => {
+    const protocol = process.env.RAILWAY_STATIC_URL ? 'wss' : 'ws';
+    const httpProtocol = process.env.RAILWAY_STATIC_URL ? 'https' : 'http';
+
+    console.log(`server is live:`);
+    console.log(` port: ${PORT}`);
+    console.log(` WS:     ${protocol}://${PUBLIC_URL}`);
 });
