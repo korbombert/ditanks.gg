@@ -145,6 +145,8 @@ const SHOP_ITEMS = {
         { id: '#ffff00', name: 'Yellow', cost: 5000 }
     ]
 };
+
+// --- Add this table creation block ---
 db.prepare(`
     CREATE TABLE IF NOT EXISTS banned_ips_v2 (
         ip_hash TEXT PRIMARY KEY,
@@ -152,6 +154,8 @@ db.prepare(`
         reason TEXT
     )
 `).run();
+// -------------------------------------
+
 try { db.prepare("ALTER TABLE banned_ips_v2 ADD COLUMN reason TEXT").run(); } catch(e) {}
 db.prepare(`
     CREATE TABLE IF NOT EXISTS changelogs (
