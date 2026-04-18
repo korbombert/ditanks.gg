@@ -58,6 +58,7 @@ app.get('/auth/discord/callback', async (req, res) => {
         const profileRes = await fetch('https://discord.com/api/users/@me', {
             headers: { Authorization: `Bearer ${tokenData.access_token}` }
         });
+        console.log(profileRes)
         const profile = await profileRes.json();
         const avatarUrl = profile.avatar 
             ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png` 
