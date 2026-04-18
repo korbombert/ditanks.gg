@@ -42,30 +42,43 @@ app.get('/auth/discord', (req, res) => {
 
 app.get('/auth/discord/callback', async (req, res) => {
     try {
+        const { code } = req.query;
+        if (!code) throw new Error("No code provided from Discord");
+
         const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({
                 client_id: process.env.DISCORD_CLIENT_ID,
                 client_secret: process.env.DISCORD_CLIENT_SECRET,
-                code: req.query.code,
+                code: code,
                 grant_type: 'authorization_code',
                 redirect_uri: `${process.env.BASE_URL}/auth/discord/callback`
             })
         });
+
         const tokenData = await tokenRes.json();
+        
+        // If the token exchange failed, log the Discord error message
+        if (!tokenRes.ok) {
+            console.error("Token Exchange Failed:", tokenData);
+            return res.redirect('/?error=token_exchange_failed');
+        }
 
         const profileRes = await fetch('https://discord.com/api/users/@me', {
             headers: { Authorization: `Bearer ${tokenData.access_token}` }
         });
-        console.log(profileRes)
+
         const profile = await profileRes.json();
+        console.log("Discord Profile:", profile);
+
         const avatarUrl = profile.avatar 
             ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png` 
             : `https://cdn.discordapp.com/embed/avatars/${parseInt(profile.discriminator || 0) % 5}.png`;
 
         handleUserLogin(res, `discord_${profile.id}`, profile.username, avatarUrl, 'discord');
     } catch (err) {
+        console.error("Full Auth Crash:", err.message);
         res.redirect('/?error=auth_failed');
     }
 });
