@@ -253,12 +253,15 @@ select:focus, select:hover {
         <div id="color-menu">
             <h3 style="margin-top:0; color:#333;">Appearance</h3>
             <div class="color-row">Background: <input type="color" id="color-bg" value="#cdcdcd"></div>
-            <div class="color-row">Team 1 (Blue): <input type="color" id="color-t1" value="#00b2e1"></div>
-            <div class="color-row">Team 2 (Red): <input type="color" id="color-t2" value="#f14e54"></div>
-            <div class="color-row">Square: <input type="color" id="color-square" value="#ffe869"></div>
-            <div class="color-row">Triangle: <input type="color" id="color-triangle" value="#fc7677"></div>
-            <div class="color-row">Pentagon: <input type="color" id="color-pentagon" value="#768dfc"></div>
-            <div class="color-row">Hexagon: <input type="color" id="color-hexagon" value="#6df5b9"></div>
+<div class="color-row">Grid Alpha: <input type="range" id="color-grid" min="0" max="0.3" step="0.01" value="0.06" style="width: 60px;"></div>
+<div class="color-row">Team 1 (Blue): <input type="color" id="color-t1" value="#00b2e1"></div>
+<div class="color-row">Team 2 (Red): <input type="color" id="color-t2" value="#f14e54"></div>
+<div class="color-row">Team 3 (Purple): <input type="color" id="color-t3" value="#be7ff5"></div>
+<div class="color-row">Team 4 (Green): <input type="color" id="color-t4" value="#00e16e"></div>
+<div class="color-row">Square: <input type="color" id="color-square" value="#ffe869"></div>
+<div class="color-row">Triangle: <input type="color" id="color-triangle" value="#fc7677"></div>
+<div class="color-row">Pentagon: <input type="color" id="color-pentagon" value="#768dfc"></div>
+<div class="color-row">Hexagon: <input type="color" id="color-hexagon" value="#6df5b9"></div>
             
             <div style="display:flex; justify-content:space-between; margin-top:10px;">
                 <button class="btn" onclick="exportColors()" style="font-size:14px; width:48%; margin:0;">Export</button>
