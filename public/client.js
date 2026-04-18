@@ -593,7 +593,7 @@ function connectWS(regionStr, modeStr) {
         
         // Tween button to Red & Add Redo Icon
         const btn = document.getElementById('playBtn');
-        btn.innerHTML = `<img src="/redo.svg" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 8px; filter: brightness(0) invert(1);"> Disconnected`;
+        btn.innerHTML = `<img src="" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 8px; filter: brightness(0) invert(1);"> Disconnected`;
         btn.style.background = "#f14e54"; 
         btn.style.borderBottomColor = "#c83d42"; 
         btn.disabled = false;
