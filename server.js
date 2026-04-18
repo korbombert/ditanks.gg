@@ -8,30 +8,46 @@ const fs = require('fs');
 const Database = require('better-sqlite3');
 const app = express();
 app.get('/auth/google', (req, res) => {
-    const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=792599903935-8p80grjptnrjso3dlef76g4kl0tfjjuv.apps.googleusercontent.com&redirect_uri=${encodeURIComponent(process.env.BASE_URL)}%2Fauth%2Fgoogle%2Fcallback&response_type=code&scope=profile`;
+    const redirectUri = `${process.env.BASE_URL}/auth/google/callback`;
+    const params = new URLSearchParams({
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: 'profile'
+    });
+
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
     res.redirect(url);
 });
+
 app.get('/auth/google/callback', async (req, res) => {
     try {
+        const { code } = req.query;
+        if (!code) throw new Error("No code provided from Google");
         const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({
                 client_id: process.env.GOOGLE_CLIENT_ID,
                 client_secret: process.env.GOOGLE_CLIENT_SECRET, 
-                code: req.query.code,
+                code: code,
                 grant_type: 'authorization_code',
                 redirect_uri: `${process.env.BASE_URL}/auth/google/callback`,
             })
         });
         const tokenData = await tokenRes.json();
-        if (!tokenData.access_token) { throw new Error("No access token returned from Google"); }
+        
+        if (!tokenRes.ok) {
+            console.error("Google Token Exchange Failed:", tokenData);
+            return res.redirect('/?error=token_exchange_failed');
+        }
         const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
             headers: { Authorization: `Bearer ${tokenData.access_token}` }
         });
         const profile = await profileRes.json();
         handleUserLogin(res, `google_${profile.id}`, profile.name, profile.picture, 'google');
     } catch (err) {
+        console.error("Google Auth Crash:", err.message);
         res.redirect('/?error=auth_failed');
     }
 });
