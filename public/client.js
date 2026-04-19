@@ -1047,54 +1047,72 @@ function draw() {
     requestAnimationFrame(draw);
 }
 
+// Variables and State
+let holdingM = false;
+
 window.onkeydown = e => { 
     let key = e.key.toLowerCase();
-    if(key === 'shift') { mouse.repel = true; keys.shift = true; } 
     keys[key] = true; 
 
-    if(key === 'e') autoFire = !autoFire;
-    if(key === 'c') autoSpin = !autoSpin;
+    // Shift Logic
+    if (key === 'shift') { 
+        mouse.repel = true; 
+        keys.shift = true; 
+    } 
 
-    if(key >= '1' && key <= '8') {
-        if(ws && ws.readyState === 1) { ws.send(JSON.stringify({ type: 'upgradeStat', statIndex: parseInt(key) - 1 })); }
+    // Menu Logic (M key)
+    if (key === 'm') { 
+        holdingM = true; 
+        const panel = document.getElementById('upgrades-panel');
+        if (panel) panel.style.transform = 'translateX(0)'; 
+    }
+
+    // Toggles
+    if (key === 'e') autoFire = !autoFire;
+    if (key === 'c') autoSpin = !autoSpin;
+
+    // Stat Upgrades (1-8)
+    if (key >= '1' && key <= '8') {
+        if (ws && ws.readyState === 1) { 
+            ws.send(JSON.stringify({ 
+                type: 'upgradeStat', 
+                statIndex: parseInt(key) - 1 
+            })); 
+        }
     }
 };
 
 window.onkeyup = e => { 
     let key = e.key.toLowerCase();
-    if(key === 'shift') { mouse.repel = false; keys.shift = false; } 
     keys[key] = false; 
+
+    // Reset Shift
+    if (key === 'shift') { 
+        mouse.repel = false; 
+        keys.shift = false; 
+    } 
+
+    // Reset M
+    if (key === 'm') { 
+        holdingM = false; 
+    }
 };
 
 window.onmousemove = e => { 
-    mouse.x = e.clientX; mouse.y = e.clientY; 
-    mouse.rx = mouse.x + camera.x; mouse.ry = mouse.y + camera.y; 
+    mouse.x = e.clientX; 
+    mouse.y = e.clientY; 
+    mouse.rx = mouse.x + camera.x; 
+    mouse.ry = mouse.y + camera.y; 
 };
 
 window.onmousedown = (e) => {
-    if(e.button === 0) mouse.pressed = true;
-    if(e.button === 2) mouse.rightDown = true;
+    if (e.button === 0) mouse.pressed = true;
+    if (e.button === 2) mouse.rightDown = true;
 };
+
 window.onmouseup = (e) => {
-    if(e.button === 0) mouse.pressed = false;
-    if(e.button === 2) mouse.rightDown = false;
-};
-// Add variable at the top of client.js
-let holdingM = false;
-
-window.onkeydown = e => { 
-    let key = e.key.toLowerCase();
-    if(key === 'shift') { mouse.repel = true; keys.shift = true; } 
-    if(key === 'm') { holdingM = true; document.getElementById('upgrades-panel').style.transform = 'translateX(0)'; }
-    keys[key] = true; 
-    // ... existing keybinds
-};
-
-window.onkeyup = e => { 
-    let key = e.key.toLowerCase();
-    if(key === 'shift') { mouse.repel = false; keys.shift = false; } 
-    if(key === 'm') { holdingM = false; } // Menu will hide on next update if no points
-    keys[key] = false; 
+    if (e.button === 0) mouse.pressed = false;
+    if (e.button === 2) mouse.rightDown = false;
 };
 
 window.oncontextmenu = e => e.preventDefault(); 
