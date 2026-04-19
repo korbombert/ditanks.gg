@@ -1079,6 +1079,33 @@ window.onmouseup = (e) => {
     if(e.button === 0) mouse.pressed = false;
     if(e.button === 2) mouse.rightDown = false;
 };
+// Add variable at the top of client.js
+let holdingM = false;
+
+window.onkeydown = e => { 
+    let key = e.key.toLowerCase();
+    if(key === 'shift') { mouse.repel = true; keys.shift = true; } 
+    if(key === 'm') { holdingM = true; document.getElementById('upgrades-panel').style.transform = 'translateX(0)'; }
+    keys[key] = true; 
+    // ... existing keybinds
+};
+
+window.onkeyup = e => { 
+    let key = e.key.toLowerCase();
+    if(key === 'shift') { mouse.repel = false; keys.shift = false; } 
+    if(key === 'm') { holdingM = false; } // Menu will hide on next update if no points
+    keys[key] = false; 
+};
+document.getElementById('respawnBtn').onclick = () => {
+    document.getElementById('deathScreen').style.display = 'none';
+    document.getElementById('menu').style.display = 'flex'; // Go back to menu to respawn
+};
+
+document.getElementById('spectateBtn').onclick = () => {
+    document.getElementById('deathScreen').style.display = 'none';
+    // Tell server we want to spectate, or just let the camera free-roam
+    ws.send(JSON.stringify({ type: 'spectate' })); 
+};
 window.oncontextmenu = e => e.preventDefault(); 
 window.onresize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
 canvas.width = window.innerWidth; canvas.height = window.innerHeight;
