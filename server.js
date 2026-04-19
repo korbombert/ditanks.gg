@@ -501,10 +501,21 @@ class Room {
 
     spawnShape() {
         let x = Math.random() * WORLD_SIZE, y = Math.random() * WORLD_SIZE;
-        let isCenter = x > 1200 && x < 1800 && y > 1200 && y < 1800;
-        let type = isCenter 
-            ? ['pentagon', 'pentagon', 'hexagon', 'triangle'][Math.floor(Math.random()*4)]
-            : ['square','square','square','triangle'][Math.floor(Math.random()*4)];
+        
+        // Center is 2000, 2000. This is the true center box.
+        let isCenter = x > 1600 && x < 2400 && y > 1600 && y < 2400;
+        let type;
+
+        if (isCenter && Math.random() < 0.08) {
+            // Hexagons spawn strictly clustered in the exact middle
+            x = WORLD_SIZE / 2 + (Math.random() * 200 - 100);
+            y = WORLD_SIZE / 2 + (Math.random() * 200 - 100);
+            type = 'hexagon';
+        } else {
+            type = isCenter 
+                ? ['pentagon', 'pentagon', 'triangle', 'pentagon'][Math.floor(Math.random()*4)]
+                : ['square','square','square','triangle'][Math.floor(Math.random()*4)];
+        }
         this.entities.push(new Entity(this, x, y, type));
     }
 
@@ -716,40 +727,68 @@ class Entity {
                     predY += (target.vy || 0) * timeToHit;
                 }              
                 
-                this.angle = Math.atan2(predY - this.y, predX - this.x);
-                shoot(this);
-                
                 if (this.isFleeing && !target.isShape) {
+                    // NEW: Fleeing recoil jump! Turn backwards and shoot to escape faster.
+                    this.angle = Math.atan2(this.y - predY, this.x - predX);
+                    shoot(this);
+                    
                     if (this.tankType === 'Tri-angle') {
-                        this.angle = Math.atan2(this.y - predY, this.x - predX);
-                        this.vx += Math.cos(this.angle) * moveSpeed;
-                        this.vy += Math.sin(this.angle) * moveSpeed;
+                        // Tri-angle runs faster forward
+                        this.angle = Math.atan2(predY - this.y, predX - this.x);
+                        this.vx -= Math.cos(this.angle) * moveSpeed;
+                        this.vy -= Math.sin(this.angle) * moveSpeed;
                     } else {
-                        this.vx -= Math.cos(this.angle) * moveSpeed;
-                        this.vy -= Math.sin(this.angle) * moveSpeed;
-                    }
-                } else if (isDrone && target.owner) {
-                    let evadeAngle = Math.atan2(target.owner.y - this.y, target.owner.x - this.x);
-                    this.vx -= Math.cos(evadeAngle) * moveSpeed;
-                    this.vy -= Math.sin(evadeAngle) * moveSpeed;
-                } else {
-                    let keepDist = this.tankType === 'Sniper' ? 300 : (target.isShape ? 50 : 150); 
-                    let dx = target.x - this.x;
-                    let dy = target.y - this.y;
-                    let distSq = dx*dx + dy*dy;
-                    let keepDistSq = keepDist * keepDist;
-                    if(distSq > keepDistSq) {
+                        // Regular tanks run faster by shooting backward
                         this.vx += Math.cos(this.angle) * moveSpeed;
                         this.vy += Math.sin(this.angle) * moveSpeed;
-                    } else if (distSq < (keepDist - 50) * (keepDist - 50)) {
-                        this.vx -= Math.cos(this.angle) * moveSpeed;
-                        this.vy -= Math.sin(this.angle) * moveSpeed;
+                    }
+                } else {
+                    // Normal chase & shoot
+                    this.angle = Math.atan2(predY - this.y, predX - this.x);
+                    shoot(this);
+
+                    if (isDrone && target.owner) {
+                        let evadeAngle = Math.atan2(target.owner.y - this.y, target.owner.x - this.x);
+                        this.vx -= Math.cos(evadeAngle) * moveSpeed;
+                        this.vy -= Math.sin(evadeAngle) * moveSpeed;
+                    } else {
+                        let keepDist = this.tankType === 'Sniper' ? 300 : (target.isShape ? 50 : 150); 
+                        let dx = target.x - this.x;
+                        let dy = target.y - this.y;
+                        let distSq = dx*dx + dy*dy;
+                        let keepDistSq = keepDist * keepDist;
+                        if(distSq > keepDistSq) {
+                            this.vx += Math.cos(this.angle) * moveSpeed;
+                            this.vy += Math.sin(this.angle) * moveSpeed;
+                        } else if (distSq < (keepDist - 50) * (keepDist - 50)) {
+                            this.vx -= Math.cos(this.angle) * moveSpeed;
+                            this.vy -= Math.sin(this.angle) * moveSpeed;
+                        }
                     }
                 }
             } else {
+                let centerX = WORLD_SIZE / 2;
+                let centerY = WORLD_SIZE / 2;
+                let distToCenterSq = (this.x - centerX)**2 + (this.y - centerY)**2;
+                
+                if (distToCenterSq > 1000000) { // If far from center
+                    let centerAngle = Math.atan2(centerY - this.y, centerX - this.x);
+                    // Smoothly turn towards the middle
+                    let angleDiff = centerAngle - this.angle;
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                    this.angle += angleDiff * 0.05; 
+                } else if(this.thinkTimer === 0 && Math.random() < 0.2) {
+                    this.angle += (Math.random() - 0.5);
+                }
+                
                 this.vx += Math.cos(this.angle) * (moveSpeed * 0.4);
                 this.vy += Math.sin(this.angle) * (moveSpeed * 0.4);
-                if(this.thinkTimer === 0 && Math.random() < 0.2) this.angle += (Math.random() - 0.5);
+
+                // Occasionally shoot at nothing to farm off-screen shapes
+                if (Math.random() < 0.03) {
+                    shoot(this);
+                }
             }
             
             if (this.thinkTimer === 0) {
@@ -834,7 +873,10 @@ class Drone {
         if (moving) {
             let angle = Math.atan2(ty - this.y, tx - this.x);
             this.angle = angle;
-            this.vx += Math.cos(angle) * 0.5; this.vy += Math.sin(angle) * 0.5;
+            this.vx *= 0.80; 
+            this.vy *= 0.80;
+            this.vx += Math.cos(angle) * (speed * 0.4); 
+            this.vy += Math.sin(angle) * (speed * 0.4);
         }
 
         let curSpeedSq = this.vx*this.vx + this.vy*this.vy;
@@ -918,21 +960,40 @@ function updateRoom(room) {
     const PROX = 350; 
     const REPEL_FORCE = 2.5; 
 
-    function applyRepel(obj) {
+   function applyRepel(obj) {
         let team = obj.team || 0;
+        const FAN_FORCE = 0.8; // Softer push
+        const MAX_PUSH = 15;   // Prevents hyper-speed bouncebacks
+
         if (room.mode === "2TDM" && team !== 0) {
-            if (team !== 1 && obj.x < BASE_WIDTH_2 + PROX) { obj.vx += REPEL_FORCE; }
-            if (team !== 2 && obj.x > WORLD_SIZE - BASE_WIDTH_2 - PROX) { obj.vx -= REPEL_FORCE; }
+            if (team !== 1 && obj.x < BASE_WIDTH_2 + PROX) { 
+                obj.vx += FAN_FORCE; if (obj.vx > MAX_PUSH) obj.vx = MAX_PUSH; 
+            }
+            if (team !== 2 && obj.x > WORLD_SIZE - BASE_WIDTH_2 - PROX) { 
+                obj.vx -= FAN_FORCE; if (obj.vx < -MAX_PUSH) obj.vx = -MAX_PUSH; 
+            }
         } else if (room.mode === "4TDM" && team !== 0) {
             let inTL = (obj.x < BASE_SIZE_4 + PROX && obj.y < BASE_SIZE_4 + PROX);
             let inTR = (obj.x > WORLD_SIZE - BASE_SIZE_4 - PROX && obj.y < BASE_SIZE_4 + PROX);
             let inBL = (obj.x < BASE_SIZE_4 + PROX && obj.y > WORLD_SIZE - BASE_SIZE_4 - PROX);
             let inBR = (obj.x > WORLD_SIZE - BASE_SIZE_4 - PROX && obj.y > WORLD_SIZE - BASE_SIZE_4 - PROX);
 
-            if (team !== 1 && inTL) { obj.vx += REPEL_FORCE; obj.vy += REPEL_FORCE; }
-            if (team !== 3 && inTR) { obj.vx -= REPEL_FORCE; obj.vy += REPEL_FORCE; }
-            if (team !== 4 && inBL) { obj.vx += REPEL_FORCE; obj.vy -= REPEL_FORCE; }
-            if (team !== 2 && inBR) { obj.vx -= REPEL_FORCE; obj.vy -= REPEL_FORCE; }
+            if (team !== 1 && inTL) { 
+                obj.vx += FAN_FORCE; obj.vy += FAN_FORCE; 
+                if (obj.vx > MAX_PUSH) obj.vx = MAX_PUSH; if (obj.vy > MAX_PUSH) obj.vy = MAX_PUSH; 
+            }
+            if (team !== 3 && inTR) { 
+                obj.vx -= FAN_FORCE; obj.vy += FAN_FORCE; 
+                if (obj.vx < -MAX_PUSH) obj.vx = -MAX_PUSH; if (obj.vy > MAX_PUSH) obj.vy = MAX_PUSH; 
+            }
+            if (team !== 4 && inBL) { 
+                obj.vx += FAN_FORCE; obj.vy -= FAN_FORCE; 
+                if (obj.vx > MAX_PUSH) obj.vx = MAX_PUSH; if (obj.vy < -MAX_PUSH) obj.vy = -MAX_PUSH; 
+            }
+            if (team !== 2 && inBR) { 
+                obj.vx -= FAN_FORCE; obj.vy -= FAN_FORCE; 
+                if (obj.vx < -MAX_PUSH) obj.vx = -MAX_PUSH; if (obj.vy < -MAX_PUSH) obj.vy = -MAX_PUSH; 
+            }
         }
     }
 
@@ -1234,7 +1295,7 @@ wss.on('connection', (ws, req) => {
             else if (room.mode === "4TDM") team = Math.floor(Math.random() * 4) + 1;
             else team = room.nextEntityId + 100;
 
-            let px = WORLD_SIZE / 2, py = WORLD_SIZE / 2;
+            let px, py;
             if (room.mode === "2TDM") {
                 px = team === 1 ? 200 : WORLD_SIZE - 200;
                 py = Math.random() * WORLD_SIZE;
@@ -1244,6 +1305,11 @@ wss.on('connection', (ws, req) => {
                 else if (team === 2) { px = WORLD_SIZE - offset; py = WORLD_SIZE - offset; }
                 else if (team === 3) { px = WORLD_SIZE - offset; py = offset; }
                 else if (team === 4) { px = offset; py = WORLD_SIZE - offset; }
+            } else {
+                do {
+                    px = Math.random() * WORLD_SIZE;
+                    py = Math.random() * WORLD_SIZE;
+                } while (Math.abs(px - WORLD_SIZE/2) < 800 && Math.abs(py - WORLD_SIZE/2) < 800);
             }
             
             client.player = new Entity(room, px, py, 'tank', data.name || "Unnamed", team, true, ws);
