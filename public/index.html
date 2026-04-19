@@ -215,6 +215,35 @@ select:focus, select:hover {
     overflow-y: auto;
     text-align: left;
 }
+        .square-upgrade {
+        width: 85px;
+        height: 85px;
+        background: #eee;
+        border: 4px solid #555;
+        border-radius: 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: transform 0.1s, background 0.2s;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.4);
+        font-weight: bold;
+        color: #333;
+    }
+    .square-upgrade:hover {
+        background: #ddd;
+        transform: scale(1.05);
+    }
+    .stat-upgrade-row button {
+        background: #eee;
+        border: 3px solid #555;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: bold;
+        box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+    }
+    .stat-upgrade-row button:hover { background: #ddd; }
     </style>
 </head>
 <body>
