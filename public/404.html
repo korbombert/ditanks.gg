@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 Not Found</title>
+    <style>
+        body { margin: 0; background-color: #121212; color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; text-align: center; overflow: hidden; }
+        .container { max-width: 600px; padding: 2rem; }
+        .error-code { font-size: 6rem; font-weight: 800; margin: 0; color: #ff4757; text-shadow: 0 0 20px rgba(255, 71, 87, 0.4); }
+        .icon { width: 120px; height: 120px; margin-bottom: 1rem; animation: float 3s ease-in-out infinite; }
+        .title { font-size: 2rem; margin: 0.5rem 0 1rem; font-weight: 600; }
+        .desc { font-size: 1.1rem; color: #a4b0be; margin-bottom: 2rem; line-height: 1.5; }
+        .btn { display: inline-block; background-color: #3742fa; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; transition: all 0.2s; box-shadow: 0 4px 15px rgba(55, 66, 250, 0.3); }
+        .btn:hover { background-color: #5352ed; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(55, 66, 250, 0.5); }
+        @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0px); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#ff4757" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <circle cx="12" cy="12" r="6"></circle>
+            <circle cx="12" cy="12" r="2"></circle>
+            <line x1="12" y1="12" x2="19.07" y2="4.93"></line>
+        </svg>
+        <h1 class="error-code">404</h1>
+        <h2 class="title">Out of Bounds</h2>
+        <p class="desc">The sector you are looking for does not exist or has been destroyed. Check your coordinates and try again.</p>
+        <a href="/" class="btn">Return to Base</a>
+    </div>
+</body>
+</html>
