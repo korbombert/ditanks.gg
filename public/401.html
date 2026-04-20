@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>401 Unauthorized</title>
+    <style>
+        body { margin: 0; background-color: #121212; color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; text-align: center; overflow: hidden; }
+        .container { max-width: 600px; padding: 2rem; }
+        .error-code { font-size: 6rem; font-weight: 800; margin: 0; color: #eccc68; text-shadow: 0 0 20px rgba(236, 204, 104, 0.4); }
+        .icon { width: 120px; height: 120px; margin-bottom: 1rem; animation: pulse 2s infinite; }
+        .title { font-size: 2rem; margin: 0.5rem 0 1rem; font-weight: 600; }
+        .desc { font-size: 1.1rem; color: #a4b0be; margin-bottom: 2rem; line-height: 1.5; }
+        .btn { display: inline-block; background-color: #3742fa; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; transition: all 0.2s; box-shadow: 0 4px 15px rgba(55, 66, 250, 0.3); }
+        .btn:hover { background-color: #5352ed; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(55, 66, 250, 0.5); }
+        @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.05); opacity: 0.8; } 100% { transform: scale(1); opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#eccc68" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+            <rect x="15" y="11" width="6" height="6" rx="1"></rect>
+            <path d="M18 11V9a2 2 0 0 0-4 0v2"></path>
+        </svg>
+        <h1 class="error-code">401</h1>
+        <h2 class="title">Unauthorized</h2>
+        <p class="desc">You are unauthorized to access this material.</p>
+        <a href="/" class="btn">Return to Base</a>
+    </div>
+</body>
+</html>
