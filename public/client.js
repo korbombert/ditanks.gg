@@ -1115,6 +1115,20 @@ window.onmouseup = (e) => {
     if (e.button === 2) mouse.rightDown = false;
 };
 
-window.oncontextmenu = e => e.preventDefault(); 
-window.onresize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
-canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+window.oncontextmenu = e => e.preventDefault(); function resizeGame() {
+    // Set the actual internal resolution
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    // Force the CSS layout to match the window exactly
+    canvas.style.width = `${window.innerWidth}px`;
+    canvas.style.height = `${window.innerHeight}px`;
+    
+    // Center the camera immediately to prevent visual stutter on resize
+    if (!myId && camera) {
+        camera.x = WORLD_SIZE/2 - canvas.width/2;
+        camera.y = WORLD_SIZE/2 - canvas.height/2;
+    }
+}
+window.addEventListener('resize', resizeGame);
+resizeGame();
