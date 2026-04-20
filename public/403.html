@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>403 Forbidden</title>
+    <style>
+        body { margin: 0; background-color: #121212; color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; text-align: center; overflow: hidden; }
+        .container { max-width: 600px; padding: 2rem; }
+        .error-code { font-size: 6rem; font-weight: 800; margin: 0; color: #ff6b81; text-shadow: 0 0 20px rgba(255, 107, 129, 0.4); }
+        .icon { width: 120px; height: 120px; margin-bottom: 1rem; animation: shake 0.5s ease-in-out infinite alternate; }
+        .title { font-size: 2rem; margin: 0.5rem 0 1rem; font-weight: 600; }
+        .desc { font-size: 1.1rem; color: #a4b0be; margin-bottom: 2rem; line-height: 1.5; }
+        .btn { display: inline-block; background-color: #2f3542; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; transition: all 0.2s; border: 1px solid #57606f; }
+        .btn:hover { background-color: #57606f; transform: translateY(-2px); }
+        @keyframes shake { 0% { transform: rotate(-2deg); } 100% { transform: rotate(2deg); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#ff6b81" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <h1 class="error-code">403</h1>
+        <h2 class="title">Access Denied</h2>
+        <p class="desc">You are trying to access material that is restricted.</p>
+        <a href="/" class="btn">Retreat to base</a>
+    </div>
+</body>
+</html>
