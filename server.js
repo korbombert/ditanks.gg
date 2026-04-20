@@ -294,9 +294,6 @@ app.post('/api/admin/action', requireAdmin, (req, res) => {
     } else if (action === 'rename') {
         if (targetClient && targetClient.player) {
             targetClient.player.name = newName || "Unnamed";
-            if (targetClient.dbId) {
-                db.prepare("UPDATE users SET username = ? WHERE id = ?").run(targetClient.player.name, targetClient.dbId);
-            }
         }
         return res.json({ success: true });
     }
