@@ -205,11 +205,13 @@ const requireAdmin = (req, res, next) => {
         if (match) token = match[1];
     }
     
-    if (!token) return res.status(401).send("Unauthorized");
+    if (!token) {
+        return res.status(401).sendFile(path.join(__dirname, 'public', '401.html'));
+    }
     
     const user = db.prepare("SELECT username FROM users WHERE session_token = ?").get(token);
     if (!user || user.username !== process.env.ADMIN_USERNAME) {
-        return res.status(403).send("Forbidden");
+        return res.status(403).sendFile(path.join(__dirname, 'public', '403.html'));
     }
     next();
 };
@@ -368,7 +370,9 @@ app.delete('/api/admin/changelogs/:id', requireAdmin, (req, res) => {
     db.prepare("DELETE FROM changelogs WHERE id = ?").run(req.params.id);
     res.json({ success: true });
 });
-
+app.use((req, res, next) => {
+    res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
+});
 const GAME_SPEED = 1.2; 
 const VIEW_DISTANCE = 1000; 
 const WORLD_SIZE = 4000;
