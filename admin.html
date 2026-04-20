@@ -261,7 +261,7 @@
                     <td style="color:${p.team === 1 ? '#00b2e1' : (p.team === 2 ? '#f14e54' : 'white')}">${p.name || "Unnamed"}</td>
                     <td style="font-weight: bold; color: #40f252;">${p.score.toLocaleString()}</td>
                     <td>
-                        <button class="btn btn-blue" style="padding: 5px 10px; font-size: 12px; margin-right: 5px;" onclick="takeAction('rename', ${p.id}, '${p.ipHash}')">CLEAR/RENAME</button>
+                        <button class="btn btn-blue" style="padding: 5px 10px; font-size: 12px; margin-right: 5px;" onclick="takeAction('rename', ${p.id}, '${p.ipHash}')">RENAME</button>
                         <button class="btn btn-kick" style="padding: 5px 10px; font-size: 12px;" onclick="takeAction('kick', ${p.id}, '${p.ipHash}')">KICK</button>
                         <button class="btn btn-ban" style="padding: 5px 10px; font-size: 12px;" onclick="takeAction('ban', ${p.id}, '${p.ipHash}')">BAN</button>
                     </td>
