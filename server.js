@@ -389,29 +389,28 @@ try {
 
 const TANK_SPECS = {
     'Basic': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0, spread: 0}], dmg: 1, spd: 1, rel: 1, maxDrones: 0 },
-    'Twin': { barrels: [{x:0, y:-10, w:16, l:1.8, angle:0, spread: 0}, {x:0, y:10, w:16, l:1.8, angle:0, spread: 0}], dmg: 0.64, spd: 1, rel: 1, maxDrones: 0 },
+    'Twin': { barrels: [{x:0, y:-10, w:16, l:1.8, angle:0, spread: 0}, {x:0, y:10, w:16, l:1.8, angle:0, spread: 0}], dmg: 0.67, spd: 1, rel: 1, maxDrones: 0 },
     'Sniper': { barrels: [{x:0, y:0, w:18, l:2.4, angle:0, spread: 0}], dmg: 1.1, spd: 2, rel: 1.66, maxDrones: 0 },
-    'Machine Gun': { barrels: [{x:0, y:0, w:22, w2: 32, l:1.6, angle:0, spread: 0.5}], dmg: 0.71, spd: 1, rel: 0.5, maxDrones: 0 },
+    'Machine Gun': { barrels: [{x:0, y:0, w:22, w2: 32, l:1.6, angle:0, spread: 0.5}], dmg: 0.745, spd: 1, rel: 0.5, maxDrones: 0 },
     'Flank Guard': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0, spread: 0}, {x:0, y:0, w:18, l:1.5, angle:Math.PI, spread: 0}], dmg: 1, spd: 1, rel: 1, maxDrones: 0 },
-    'Overseer': { barrels: [{x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI/2, spread:0}, {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2, spread:0}], dmg: 1.5, spd: 0.8, rel: 1.5, maxDrones: 7, isDroneSpawner: true },
+    'Overseer': { barrels: [{x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI/2, spread:0}, {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2, spread:0}], dmg: 1.461, spd: 0.8, rel: 1.5, maxDrones: 8, isDroneSpawner: true },
     'Destroyer': { barrels: [{x:0, y:0, w:35, l:1.9, angle:0, spread: 0}], dmg: 7.8, spd: 0.8, rel: 3, maxDrones: 0 },
     'Octo Tank': { barrels: [
         {x:0, y:0, w:16, l:1.8, angle:0, spread: 0}, {x:0, y:0, w:16, l:1.8, angle:Math.PI/4, spread: 0},
         {x:0, y:0, w:16, l:1.8, angle:Math.PI/2, spread: 0}, {x:0, y:0, w:16, l:1.8, angle:3*Math.PI/4, spread: 0},
         {x:0, y:0, w:16, l:1.8, angle:Math.PI, spread: 0}, {x:0, y:0, w:16, l:1.8, angle:-3*Math.PI/4, spread: 0},
         {x:0, y:0, w:16, l:1.8, angle:-Math.PI/2, spread: 0}, {x:0, y:0, w:16, l:1.8, angle:-Math.PI/4, spread: 0}
-    ], dmg: 0.5, spd: 1, rel: 1.1, maxDrones: 0 },
+    ], dmg: 0.51, spd: 1, rel: 1.1, maxDrones: 0 },
     'Triplet': { barrels: [
         {x:0, y:-12, w:14, l:1.6, angle:0, spread: 0}, {x:0, y:12, w:14, l:1.6, angle:0, spread: 0},
         {x:0, y:0, w:14, l:1.8, angle:0, spread: 0}
-    ], dmg: 0.5, spd: 1, rel: 0.8, maxDrones: 0 },
+    ], dmg: 0.47, spd: 1, rel: 0.8, maxDrones: 0 },
     'Tri-angle': { barrels: [
         {x:0, y:0, w:18, l:1.8, angle:0, spread: 0},
         {x:0, y:0, w:16, l:1.6, angle:5*Math.PI/6, spread: 0, recoilMult: 2.5},
         {x:0, y:0, w:16, l:1.6, angle:-5*Math.PI/6, spread: 0, recoilMult: 2.5}
     ], dmg: 0.8, spd: 0.9, rel: 1, maxDrones: 0 }
 };
-
 class SpatialGrid {
     constructor(size, cellSize) {
         this.cellSize = cellSize;
