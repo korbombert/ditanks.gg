@@ -503,19 +503,18 @@ class Room {
     spawnShape() {
         let x = Math.random() * WORLD_SIZE, y = Math.random() * WORLD_SIZE;
         
-        // Center is 2000, 2000. This is the true center box.
-        let isCenter = x > 1600 && x < 2400 && y > 1600 && y < 2400;
+        let isCenter = x > 1400 && x < 2600 && y > 1400 && y < 2600;
         let type;
 
         if (isCenter && Math.random() < 0.08) {
-            // Hexagons spawn strictly clustered in the exact middle
             x = WORLD_SIZE / 2 + (Math.random() * 200 - 100);
             y = WORLD_SIZE / 2 + (Math.random() * 200 - 100);
             type = 'hexagon';
         } else {
             type = isCenter 
                 ? ['pentagon', 'pentagon', 'triangle', 'pentagon'][Math.floor(Math.random()*4)]
-                : ['square','square','square','triangle'][Math.floor(Math.random()*4)];
+                // Added a chance for pentagons to spawn in the outer areas
+                : ['square','square','square','triangle','pentagon'][Math.floor(Math.random()*5)]; 
         }
         this.entities.push(new Entity(this, x, y, type));
     }
@@ -683,19 +682,24 @@ class Entity {
                     if (distSq < 90000 && distSq < minDroneDistSq) { minDroneDistSq = distSq; droneTarget = d; } 
                 });
 
-                nearby.entities.forEach(e => {
+nearby.entities.forEach(e => {
                     if(e === this || e.markedForDeletion) return;
                     let isTank = ['tank', 'ai'].includes(e.type);
-                    if (isTank && (this.score < 1000 || e.score < 1000)) return; 
-
                     let isSameTeam = this.room.mode.includes("TDM") && e.team === this.team && e.team !== 0;
                     let isShape = ['square','triangle','pentagon','hexagon'].includes(e.type);
                     if (isSameTeam && !isShape) return;
 
                     let distSq = (this.x - e.x)**2 + (this.y - e.y)**2;
 
-                    if (!isShape && !isSameTeam) {
-                        if(distSq < 360000 && distSq < minEnemyDistSq) { minEnemyDistSq = distSq; enemyTarget = e; }
+                    if (!isShape && !isSameTeam && isTank) {
+                        // Base detection of 300, maxes out at 1000 distance for 17,000+ score
+                        let detectionDist = 300 + (Math.min(e.score, 17000) / 17000) * 700;
+                        let detectionSq = detectionDist * detectionDist;
+                        
+                        if(distSq < detectionSq && distSq < minEnemyDistSq) { 
+                            minEnemyDistSq = distSq; 
+                            enemyTarget = e; 
+                        }
                    } else if (isShape) {
                         if(distSq < minShapeDistSq) { minShapeDistSq = distSq; shapeTarget = e; }
                    }
@@ -753,7 +757,7 @@ class Entity {
                         this.vx -= Math.cos(evadeAngle) * moveSpeed;
                         this.vy -= Math.sin(evadeAngle) * moveSpeed;
                     } else {
-                        let keepDist = this.tankType === 'Sniper' ? 300 : (target.isShape ? 50 : 150); 
+                        let keepDist = this.tankType === 'Overseer' ? 450 : (this.tankType === 'Sniper' ? 300 : (target.isShape ? 50 : 150));
                         let dx = target.x - this.x;
                         let dy = target.y - this.y;
                         let distSq = dx*dx + dy*dy;
@@ -858,17 +862,34 @@ class Drone {
                 tx = this.x + Math.cos(ang) * 500; ty = this.y + Math.sin(ang) * 500;
             }
         } else {
-            let target = null; let minDistSq = Infinity;
-            let nearby = this.room.grid.getNearby(this.x, this.y, 800); 
+            let target = null; 
             
-            nearby.entities.forEach(e => {
-                if(e === this.owner || e.markedForDeletion) return;
-                if(this.room.mode.includes("TDM") && e.team === this.owner.team && ['ai','tank'].includes(e.type)) return;
-                let distSq = (this.x - e.x)**2 + (this.y - e.y)**2;
-                if(distSq < 640000 && distSq < minDistSq) { minDistSq = distSq; target = e; }
-            });
+            // AI Drone coordination: Sync with owner's brain
+            if (this.owner.aiTarget && !this.owner.aiTarget.markedForDeletion) {
+                if (this.owner.isFleeing) {
+                    // Repel behavior when AI is low HP
+                    let ang = Math.atan2(this.y - this.owner.y, this.x - this.owner.x);
+                    tx = this.x + Math.cos(ang) * 500; 
+                    ty = this.y + Math.sin(ang) * 500; 
+                    moving = true;
+                } else {
+                    // Attack owner's primary target
+                    target = this.owner.aiTarget;
+                }
+            } else {
+                // Idle scanning behavior if owner has no target
+                let minDistSq = Infinity;
+                let nearby = this.room.grid.getNearby(this.x, this.y, 800); 
+                nearby.entities.forEach(e => {
+                    if(e === this.owner || e.markedForDeletion) return;
+                    if(this.room.mode.includes("TDM") && e.team === this.owner.team && ['ai','tank'].includes(e.type)) return;
+                    let distSq = (this.x - e.x)**2 + (this.y - e.y)**2;
+                    if(distSq < 640000 && distSq < minDistSq) { minDistSq = distSq; target = e; }
+                });
+            }
+
             if(target) { tx = target.x; ty = target.y; moving = true; }
-            else { tx = this.owner.x; ty = this.owner.y; moving = true; }
+            else if (!moving) { tx = this.owner.x; ty = this.owner.y; moving = true; }
         }
 
         if (moving) {
