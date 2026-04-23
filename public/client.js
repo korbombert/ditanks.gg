@@ -144,9 +144,9 @@ let spectateId = null;
 let myTeam = null;
 let gameMode = "FFA";
 let camera = { x: WORLD_SIZE/2, y: WORLD_SIZE/2 };
+let fovScale = 1; // Add this line
 let mouse = { x: 0, y: 0, rx: 0, ry: 0, pressed: false, rightDown: false, repel: false };
 let keys = { w:false, a:false, s:false, d:false, shift: false };
-
 let autoFire = false;
 let autoSpin = false;
 let spinAngle = 0;
@@ -508,7 +508,7 @@ function connectWS(regionStr, modeStr) {
                     
                     finalAngle = Math.atan2(mouse.ry - myY, mouse.rx - myX);
                 } else {
-                    finalAngle = Math.atan2(mouse.ry - (camera.y + canvas.height/2), mouse.rx - (camera.x + canvas.width/2));
+                    finalAngle = Math.atan2(mouse.ry - (camera.y + (canvas.height / fovScale) / 2), mouse.rx - (camera.x + (canvas.width / fovScale) / 2));
                 }
 
                 if (autoSpin) { spinAngle += 0.08; finalAngle = spinAngle; }
@@ -769,21 +769,29 @@ function draw() {
         if (fpsEl) fpsEl.innerText = `FPS: ${currentFps}`;
     }
 
-    // 2. Draw Solid Background
-    ctx.fillStyle = COLORS.bg; 
-    ctx.fillRect(0,0,canvas.width,canvas.height);
+    // Define the scaled view boundaries
+    let viewWidth = canvas.width / fovScale;
+    let viewHeight = canvas.height / fovScale;
 
-    // Camera targeting logic stays exactly the same...
-    let targetCamX = WORLD_SIZE/2 - canvas.width/2;
-    let targetCamY = WORLD_SIZE/2 - canvas.height/2;
+    // 2. Draw Solid Background (Unscaled)
+    ctx.fillStyle = COLORS.bg; 
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Apply the scaling factor for the rest of the game world
+    ctx.save();
+    ctx.scale(fovScale, fovScale);
+
+    // Camera targeting logic
+    let targetCamX = WORLD_SIZE/2 - viewWidth/2;
+    let targetCamY = WORLD_SIZE/2 - viewHeight/2;
 
     if (myId) {
         let me = gameState.entities.find(e => e.id === myId);
         if(me) {
             if (!renderEntities.has(me.id)) renderEntities.set(me.id, { ...me, renderX: me.x, renderY: me.y });
             let rMe = renderEntities.get(me.id);
-            targetCamX = rMe.renderX - canvas.width/2;
-            targetCamY = rMe.renderY - canvas.height/2;
+            targetCamX = rMe.renderX - viewWidth/2;
+            targetCamY = rMe.renderY - viewHeight/2;
 
             if (myStats.tankType === 'Sniper' && (mouse.rightDown || keys.shift)) {
                 let mouseAngle = Math.atan2(mouse.ry - rMe.renderY, mouse.rx - rMe.renderX);
@@ -796,22 +804,25 @@ function draw() {
         if(spec) {
             if (!renderEntities.has(spec.id)) renderEntities.set(spec.id, { ...spec, renderX: spec.x, renderY: spec.y });
             let rSpec = renderEntities.get(spec.id);
-            targetCamX = rSpec.renderX - canvas.width/2;
-            targetCamY = rSpec.renderY - canvas.height/2;
+            targetCamX = rSpec.renderX - viewWidth/2;
+            targetCamY = rSpec.renderY - viewHeight/2;
         }
     }
 
     camera.x += (targetCamX - camera.x) * 0.1;
     camera.y += (targetCamY - camera.y) * 0.1;
 
-    mouse.rx = mouse.x + camera.x; 
-    mouse.ry = mouse.y + camera.y;
+    // Update mouse world coordinates using the new scale
+    mouse.rx = (mouse.x / fovScale) + camera.x; 
+    mouse.ry = (mouse.y / fovScale) + camera.y;
+
     if (!gridPattern) gridPattern = ctx.createPattern(gridCanvas, 'repeat');
     ctx.save();
     ctx.fillStyle = gridPattern;
     ctx.translate(-(camera.x % 50), -(camera.y % 50));
-    ctx.fillRect(-50, -50, canvas.width + 100, canvas.height + 100);
+    ctx.fillRect(-50, -50, viewWidth + 100, viewHeight + 100);
     ctx.restore();
+
     if(gameMode === "2TDM") {
         ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(-camera.x, -camera.y, 400, WORLD_SIZE); // Decreased width, full height
         ctx.fillStyle = "rgba(241, 78, 84, 0.15)"; ctx.fillRect(WORLD_SIZE-400-camera.x, -camera.y, 400, WORLD_SIZE);
@@ -830,7 +841,7 @@ function draw() {
         if (!activeIds.includes(id)) {
             const sx = rEnt.renderX - camera.x;
             const sy = rEnt.renderY - camera.y;
-            if (sx > -200 && sx < canvas.width + 200 && sy > -200 && sy < canvas.height + 200) {
+            if (sx > -200 && sx < viewWidth + 200 && sy > -200 && sy < viewHeight + 200) {
                 dyingEntities.push({ ...rEnt, deathType: 'entity', deathTime: Date.now() });
             }
             renderEntities.delete(id);
@@ -841,7 +852,7 @@ function draw() {
     for (let [id, b] of lastBullets.entries()) {
         if (!activeBulletIds.has(id)) {
             const sx = b.x - camera.x; const sy = b.y - camera.y;
-            if (sx > -50 && sx < canvas.width + 50 && sy > -50 && sy < canvas.height + 50) {
+            if (sx > -50 && sx < viewWidth + 50 && sy > -50 && sy < viewHeight + 50) {
                 dyingEntities.push({ ...b, renderX: b.x, renderY: b.y, deathType: 'bullet', deathTime: Date.now() });
             }
             lastBullets.delete(id);
@@ -853,7 +864,7 @@ function draw() {
     for (let [id, d] of lastDrones.entries()) {
         if (!activeDroneIds.has(id)) {
             const sx = d.x - camera.x; const sy = d.y - camera.y;
-            if (sx > -100 && sx < canvas.width + 100 && sy > -100 && sy < canvas.height + 100) {
+            if (sx > -100 && sx < viewWidth + 100 && sy > -100 && sy < viewHeight + 100) {
                 dyingEntities.push({ ...d, renderX: d.x, renderY: d.y, deathType: 'drone', deathTime: Date.now() });
             }
             lastDrones.delete(id);
@@ -868,7 +879,7 @@ function draw() {
 
     gameState.drones.forEach(d => {
         const sx = d.x - camera.x; const sy = d.y - camera.y;
-        if(sx < -50 || sx > canvas.width+50 || sy < -50 || sy > canvas.height+50) return;
+        if(sx < -50 || sx > viewWidth+50 || sy < -50 || sy > viewHeight+50) return;
         ctx.save(); ctx.translate(sx, sy); ctx.rotate(d.angle);
         ctx.lineWidth = 3; ctx.fillStyle = getTeamColor(d.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30);
         ctx.beginPath(); ctx.lineTo(d.radius, 0); ctx.lineTo(-d.radius*0.8, d.radius*0.8); ctx.lineTo(-d.radius*0.8, -d.radius*0.8); ctx.closePath();
@@ -883,7 +894,7 @@ function draw() {
 
         const sx = e.renderX - camera.x;
         const sy = e.renderY - camera.y;
-        if(sx < -150 || sx > canvas.width+150 || sy < -150 || sy > canvas.height+150) return;
+        if(sx < -150 || sx > viewWidth+150 || sy < -150 || sy > viewHeight+150) return;
 
         deathCtx.clearRect(0, 0, 300, 300);
         deathCtx.save();
@@ -961,7 +972,7 @@ function draw() {
         rPos.renderY = ry + (en.y - ry) * 0.35;
 
         const sx = rPos.renderX - camera.x; const sy = rPos.renderY - camera.y;
-        if(sx < -100 || sx > canvas.width+100 || sy < -100 || sy > canvas.height+100) return;
+        if(sx < -100 || sx > viewWidth+100 || sy < -100 || sy > viewHeight+100) return;
 
         if (['tank', 'ai'].includes(en.type)) {
             const isWhite = !en.nameColor || en.nameColor === "white" || en.nameColor === "#fff" || en.nameColor === "#ffffff";
@@ -993,6 +1004,9 @@ function draw() {
         drawEntityBody(ctx, en);
         ctx.restore();
     });
+
+    // Restore the canvas scale before rendering any DOM/Minimap UI
+    ctx.restore();
 
     const escapeHTML = (str) => {
         const p = document.createElement('p'); p.textContent = str; return p.innerHTML;
@@ -1047,7 +1061,6 @@ function draw() {
 
     requestAnimationFrame(draw);
 }
-
 // Variables and State
 let holdingM = false;
 
@@ -1102,8 +1115,8 @@ window.onkeyup = e => {
 window.onmousemove = e => { 
     mouse.x = e.clientX; 
     mouse.y = e.clientY; 
-    mouse.rx = mouse.x + camera.x; 
-    mouse.ry = mouse.y + camera.y; 
+    mouse.rx = (mouse.x / fovScale) + camera.x; 
+    mouse.ry = (mouse.y / fovScale) + camera.y; 
 };
 
 window.onmousedown = (e) => {
@@ -1116,20 +1129,27 @@ window.onmouseup = (e) => {
     if (e.button === 2) mouse.rightDown = false;
 };
 
-window.oncontextmenu = e => e.preventDefault(); function resizeGame() {
+window.oncontextmenu = e => e.preventDefault();function resizeGame() {
+    // Set the actual internal resolution
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     
-    // Calculate how much we need to zoom to match our reference width
-    fovFactor = window.innerWidth / REFERENCE_WIDTH;
-
+    // Force the CSS layout to match the window exactly
     canvas.style.width = `${window.innerWidth}px`;
     canvas.style.height = `${window.innerHeight}px`;
     
+    // Calculate FOV scale to keep visible area relatively constant
+    const baseArea = 1920 * 1080;
+    const currentArea = window.innerWidth * window.innerHeight;
+    fovScale = Math.sqrt(currentArea / baseArea);
+    
+    // Cap the scale so it doesn't get unplayable on tiny/huge screens
+    fovScale = Math.max(0.4, Math.min(fovScale, 1.5));
+
+    // Center the camera immediately to prevent visual stutter on resize
     if (!myId && camera) {
-        // Center camera using the scaled dimensions
-        camera.x = WORLD_SIZE/2 - (canvas.width / fovFactor) / 2;
-        camera.y = WORLD_SIZE/2 - (canvas.height / fovFactor) / 2;
+        camera.x = WORLD_SIZE/2 - (canvas.width / fovScale) / 2;
+        camera.y = WORLD_SIZE/2 - (canvas.height / fovScale) / 2;
     }
 }window.addEventListener('resize', resizeGame);
 resizeGame();
