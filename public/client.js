@@ -312,7 +312,8 @@ function exportColors() {
     saveColors();
     navigator.clipboard.writeText(JSON.stringify(COLORS)).then(() => alert("Colors successfully copied!")).catch(err => alert("Failed to copy colors."));
 }
-
+const REFERENCE_WIDTH = 1920;
+let fovFactor = 1;
 function importColors() {
     let input = prompt("Paste your color settings JSON string here:");
     if (input) {
@@ -1116,19 +1117,19 @@ window.onmouseup = (e) => {
 };
 
 window.oncontextmenu = e => e.preventDefault(); function resizeGame() {
-    // Set the actual internal resolution
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     
-    // Force the CSS layout to match the window exactly
+    // Calculate how much we need to zoom to match our reference width
+    fovFactor = window.innerWidth / REFERENCE_WIDTH;
+
     canvas.style.width = `${window.innerWidth}px`;
     canvas.style.height = `${window.innerHeight}px`;
     
-    // Center the camera immediately to prevent visual stutter on resize
     if (!myId && camera) {
-        camera.x = WORLD_SIZE/2 - canvas.width/2;
-        camera.y = WORLD_SIZE/2 - canvas.height/2;
+        // Center camera using the scaled dimensions
+        camera.x = WORLD_SIZE/2 - (canvas.width / fovFactor) / 2;
+        camera.y = WORLD_SIZE/2 - (canvas.height / fovFactor) / 2;
     }
-}
-window.addEventListener('resize', resizeGame);
+}window.addEventListener('resize', resizeGame);
 resizeGame();
