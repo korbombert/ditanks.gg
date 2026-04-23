@@ -63,9 +63,7 @@ document.head.appendChild(style);
 const WORLD_SIZE = 4000;
 const BASE_SIZE = 600;
 const TICK_RATE = 45;
-const entryCount = 7;
-const ZOOM = 0.75; // 2x FOV CHANGE: Zoom factor (0.5 = 2x field of view)
-
+const entryCount = 7
 let myProfile = null;
 const shopItems = { 
     colors: [
@@ -166,7 +164,7 @@ let myStats = { xp: 0, level: 1, statPoints: 0, stats: [0,0,0,0,0,0,0,0], tankTy
 
 const DEFAULT_COLORS = { 
     bg: "#cdcdcd", team1: "#0099ff", team2: "#fb3c42", 
-    team3: "#be7ff5", team4: "#00e16e", 
+    team3: "#be7ff5", team4: "#00e16e", // Purple & Green
     square: "#f8de4d", triangle: "#fc6868", pentagon: "#6d77fb", hexagon: "#6df5f5" 
 };
 let COLORS = { ...DEFAULT_COLORS };
@@ -194,6 +192,7 @@ const STAT_INFO = [
     { name: "Reload", color: "#ade88d" }, { name: "Movement Speed", color: "#8de8e1" }
 ];
 
+// Updated TANK_SPECS with Smasher removed
 const TANK_SPECS = {
     'Basic': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0}] },
     'Twin': { barrels: [{x:0, y:-10, w:16, l:1.8, angle:0}, {x:0, y:10, w:16, l:1.8, angle:0}] },
@@ -369,7 +368,7 @@ function populateModes() {
 function populateRegions() {
     const mode = document.getElementById('gameModeInput').value;
     const regionSelect = document.getElementById('regionInput');
-    regionSelect.innerHTML = ''; 
+    regionSelect.innerHTML = ''; // Clear options
     
     if (serverData[mode]) {
         serverData[mode].forEach(srv => {
@@ -380,7 +379,7 @@ function populateRegions() {
         });
     }
     
-    initConnection();
+    initConnection(); // Automatically connect to the selected room
 }
 
 function initConnection() {
@@ -389,6 +388,7 @@ function initConnection() {
     
     const playBtn = document.getElementById('playBtn');
     
+    // Reset Play Button styling & setup tweening transition
     playBtn.style.transition = "background 0.3s ease, border-bottom-color 0.3s ease, transform 0.1s";
     playBtn.style.background = ""; 
     playBtn.style.borderBottomColor = "";
@@ -401,11 +401,14 @@ function initConnection() {
     connectWS(region, gameMode);
 }
 
+// Map the new listeners
 document.getElementById('gameModeInput').addEventListener('change', () => {
-    populateRegions(); 
+    populateRegions(); // changing mode repopulates regions AND reconnects
 });
 document.getElementById('regionInput').addEventListener('change', initConnection);
 window.onload = fetchServersAndInit;
+
+// Locate these functions in client.js and update them:
 
 function spawnPlayer() {
     saveColors();
@@ -430,6 +433,7 @@ function continueToMenu() {
     document.getElementById('exit-btn').style.display = 'none';
     document.getElementById('menu-overlay').style.display = 'flex';
     document.getElementById('account-panel').style.display = 'block';
+    // Add this line to show the changelog again:
     document.getElementById('changelog-panel').style.display = 'block'; 
 }
 function exitGame() {
@@ -438,7 +442,7 @@ function exitGame() {
 
 function initUI() {
     const container = document.getElementById('stats-container');
-    if (!container) return; 
+    if (!container) return; // Safety check
     container.innerHTML = '';
     STAT_INFO.forEach((s, i) => {
         const d = document.createElement('div');
@@ -491,6 +495,7 @@ function connectWS(regionStr, modeStr) {
         window.pingInterval = setInterval(() => { if(ws.readyState === 1) ws.send(JSON.stringify({ type: 'ping', time: performance.now() })); }, 10);
         
         if (window.inputInterval) clearInterval(window.inputInterval);
+        if (window.inputInterval) clearInterval(window.inputInterval);
         window.inputInterval = setInterval(() => {
             if(myId) {
                 let finalAngle = 0;
@@ -502,8 +507,7 @@ function connectWS(regionStr, modeStr) {
                     
                     finalAngle = Math.atan2(mouse.ry - myY, mouse.rx - myX);
                 } else {
-                    // 2x FOV CHANGE: Scaled angle calculation when entity isn't fully initialized/spectating
-                    finalAngle = Math.atan2(mouse.ry - (camera.y + (canvas.height/ZOOM)/2), mouse.rx - (camera.x + (canvas.width/ZOOM)/2));
+                    finalAngle = Math.atan2(mouse.ry - (camera.y + canvas.height/2), mouse.rx - (camera.x + canvas.width/2));
                 }
 
                 if (autoSpin) { spinAngle += 0.08; finalAngle = spinAngle; }
@@ -587,12 +591,14 @@ function connectWS(regionStr, modeStr) {
             document.getElementById('ds-time').innerText = "--";
         }
         
+        // Tween button to Red & Add Redo Icon
         const btn = document.getElementById('playBtn');
         btn.innerHTML = `<img src="" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 8px; filter: brightness(0) invert(1);"> Disconnected`;
         btn.style.background = "#f14e54"; 
         btn.style.borderBottomColor = "#c83d42"; 
         btn.disabled = false;
 
+        // Show Reason
         const reasonText = e.reason || "Connection lost to the server.";
         const reasonDiv = document.getElementById('disconnect-reason');
         reasonDiv.innerText = reasonText;
@@ -605,6 +611,7 @@ function checkUpgrades() {
     const upPanel = document.getElementById('upgrades-panel');
     let options = [];
     
+    // Removed Smasher from the evolution pool
     if (myStats.level >= 15 && myStats.tankType === 'Basic') {
         options = ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard']; 
     } else if (myStats.level >= 30) {
@@ -620,6 +627,7 @@ function checkUpgrades() {
     
     upPanel.innerHTML = '';
     
+    // Animate Upgrade Panel Left Slide
     if (options.length > 0) {
         upPanel.style.transform = 'translateX(0)';
     } else {
@@ -632,6 +640,7 @@ function checkUpgrades() {
         
         let iconUrl = getCachedTankIcon(c, getTeamColor(myTeam));
         
+        // Bigger icon size
         btn.innerHTML = `
             <img src="${iconUrl}" style="width:55px; height:55px; margin-bottom:4px;">
             <span>${c}</span>
@@ -641,7 +650,7 @@ function checkUpgrades() {
             ws.send(JSON.stringify({ type: 'upgradeTank', tank: c })); 
             currentUpgradesShown = "";
             upPanel.style.transform = 'translateX(-150%)';
-            setTimeout(() => upPanel.innerHTML = '', 400); 
+            setTimeout(() => upPanel.innerHTML = '', 400); // Wait for anim
         };
         upPanel.appendChild(btn);
     });
@@ -677,6 +686,7 @@ function updateUI() {
         }
     }
 
+    // Wrapped in safe-checks to ensure no HTML absence breaks the function
     myStats.stats.forEach((val, i) => {
         let slotContainer = document.getElementById(`slots-${i}`);
         if (slotContainer) {
@@ -689,6 +699,7 @@ function updateUI() {
         }
     });
 }
+
 
 function drawPoly(context, sides, r) {
     context.beginPath();
@@ -733,7 +744,7 @@ function drawEntityBody(context, en) {
 let lastFpsTime = 0;
 let frames = 0;
 let currentFps = 0;
-
+// --- Cache the Grid Pattern ---
 const gridCanvas = document.createElement('canvas');
 gridCanvas.width = 50; 
 gridCanvas.height = 50;
@@ -745,8 +756,8 @@ gCtx.moveTo(0, 0); gCtx.lineTo(0, 50);
 gCtx.moveTo(0, 0); gCtx.lineTo(50, 0);
 gCtx.stroke();
 let gridPattern = null;
-
 function draw() {
+    // 1. Calculate FPS
     let now = performance.now();
     frames++;
     if (now - lastFpsTime >= 1000) {
@@ -757,27 +768,26 @@ function draw() {
         if (fpsEl) fpsEl.innerText = `FPS: ${currentFps}`;
     }
 
+    // 2. Draw Solid Background
     ctx.fillStyle = COLORS.bg; 
     ctx.fillRect(0,0,canvas.width,canvas.height);
 
-    // 2x FOV CHANGE: Virtual bounds accounting for Zoom
-    const vWidth = canvas.width / ZOOM;
-    const vHeight = canvas.height / ZOOM;
-
-    let targetCamX = WORLD_SIZE/2 - vWidth/2;
-    let targetCamY = WORLD_SIZE/2 - vHeight/2;
+    // Camera targeting logic stays exactly the same...
+    let targetCamX = WORLD_SIZE/2 - canvas.width/2;
+    let targetCamY = WORLD_SIZE/2 - canvas.height/2;
 
     if (myId) {
         let me = gameState.entities.find(e => e.id === myId);
         if(me) {
             if (!renderEntities.has(me.id)) renderEntities.set(me.id, { ...me, renderX: me.x, renderY: me.y });
             let rMe = renderEntities.get(me.id);
-            targetCamX = rMe.renderX - vWidth/2;
-            targetCamY = rMe.renderY - vHeight/2;
+            targetCamX = rMe.renderX - canvas.width/2;
+            targetCamY = rMe.renderY - canvas.height/2;
 
             if (myStats.tankType === 'Sniper' && (mouse.rightDown || keys.shift)) {
                 let mouseAngle = Math.atan2(mouse.ry - rMe.renderY, mouse.rx - rMe.renderX);
                 targetCamX += Math.cos(mouseAngle) * 450;
+                targetCamY += Math.sin(mouseAngle) * 450;
             }
         }
     } else if (spectateId) {
@@ -785,37 +795,30 @@ function draw() {
         if(spec) {
             if (!renderEntities.has(spec.id)) renderEntities.set(spec.id, { ...spec, renderX: spec.x, renderY: spec.y });
             let rSpec = renderEntities.get(spec.id);
-            targetCamX = rSpec.renderX - vWidth/2;
-            targetCamY = rSpec.renderY - vHeight/2;
+            targetCamX = rSpec.renderX - canvas.width/2;
+            targetCamY = rSpec.renderY - canvas.height/2;
         }
     }
 
     camera.x += (targetCamX - camera.x) * 0.1;
     camera.y += (targetCamY - camera.y) * 0.1;
 
-    // 2x FOV CHANGE: Update mouse context for drawing calculations
-    mouse.rx = (mouse.x / ZOOM) + camera.x; 
-    mouse.ry = (mouse.y / ZOOM) + camera.y;
-
-    // 2x FOV CHANGE: Scale all drawing calculations down by our ZOOM
-    ctx.save();
-    ctx.scale(ZOOM, ZOOM);
-
+    mouse.rx = mouse.x + camera.x; 
+    mouse.ry = mouse.y + camera.y;
     if (!gridPattern) gridPattern = ctx.createPattern(gridCanvas, 'repeat');
     ctx.save();
     ctx.fillStyle = gridPattern;
     ctx.translate(-(camera.x % 50), -(camera.y % 50));
-    ctx.fillRect(-50, -50, vWidth + 100, vHeight + 100);
+    ctx.fillRect(-50, -50, canvas.width + 100, canvas.height + 100);
     ctx.restore();
-    
     if(gameMode === "2TDM") {
-        ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(-camera.x, -camera.y, 400, WORLD_SIZE);
+        ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(-camera.x, -camera.y, 400, WORLD_SIZE); // Decreased width, full height
         ctx.fillStyle = "rgba(241, 78, 84, 0.15)"; ctx.fillRect(WORLD_SIZE-400-camera.x, -camera.y, 400, WORLD_SIZE);
     } else if (gameMode === "4TDM") {
-        ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(-camera.x, -camera.y, BASE_SIZE, BASE_SIZE);
-        ctx.fillStyle = "rgba(190, 127, 245, 0.15)"; ctx.fillRect(WORLD_SIZE-BASE_SIZE-camera.x, -camera.y, BASE_SIZE, BASE_SIZE);
-        ctx.fillStyle = "rgba(0, 225, 110, 0.15)"; ctx.fillRect(-camera.x, WORLD_SIZE-BASE_SIZE-camera.y, BASE_SIZE, BASE_SIZE);
-        ctx.fillStyle = "rgba(241, 78, 84, 0.15)"; ctx.fillRect(WORLD_SIZE-BASE_SIZE-camera.x, WORLD_SIZE-BASE_SIZE-camera.y, BASE_SIZE, BASE_SIZE);
+        ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(-camera.x, -camera.y, BASE_SIZE, BASE_SIZE); // TL (Blue)
+        ctx.fillStyle = "rgba(190, 127, 245, 0.15)"; ctx.fillRect(WORLD_SIZE-BASE_SIZE-camera.x, -camera.y, BASE_SIZE, BASE_SIZE); // TR (Purple)
+        ctx.fillStyle = "rgba(0, 225, 110, 0.15)"; ctx.fillRect(-camera.x, WORLD_SIZE-BASE_SIZE-camera.y, BASE_SIZE, BASE_SIZE); // BL (Green)
+        ctx.fillStyle = "rgba(241, 78, 84, 0.15)"; ctx.fillRect(WORLD_SIZE-BASE_SIZE-camera.x, WORLD_SIZE-BASE_SIZE-camera.y, BASE_SIZE, BASE_SIZE); // BR (Red)
     }
 
     ctx.fillStyle = "rgba(0,0,0,0.02)"; 
@@ -826,8 +829,7 @@ function draw() {
         if (!activeIds.includes(id)) {
             const sx = rEnt.renderX - camera.x;
             const sy = rEnt.renderY - camera.y;
-            // 2x FOV CHANGE: Use updated vWidth/vHeight limits for culling boundaries
-            if (sx > -200 && sx < vWidth + 200 && sy > -200 && sy < vHeight + 200) {
+            if (sx > -200 && sx < canvas.width + 200 && sy > -200 && sy < canvas.height + 200) {
                 dyingEntities.push({ ...rEnt, deathType: 'entity', deathTime: Date.now() });
             }
             renderEntities.delete(id);
@@ -838,7 +840,7 @@ function draw() {
     for (let [id, b] of lastBullets.entries()) {
         if (!activeBulletIds.has(id)) {
             const sx = b.x - camera.x; const sy = b.y - camera.y;
-            if (sx > -50 && sx < vWidth + 50 && sy > -50 && sy < vHeight + 50) {
+            if (sx > -50 && sx < canvas.width + 50 && sy > -50 && sy < canvas.height + 50) {
                 dyingEntities.push({ ...b, renderX: b.x, renderY: b.y, deathType: 'bullet', deathTime: Date.now() });
             }
             lastBullets.delete(id);
@@ -850,7 +852,7 @@ function draw() {
     for (let [id, d] of lastDrones.entries()) {
         if (!activeDroneIds.has(id)) {
             const sx = d.x - camera.x; const sy = d.y - camera.y;
-            if (sx > -100 && sx < vWidth + 100 && sy > -100 && sy < vHeight + 100) {
+            if (sx > -100 && sx < canvas.width + 100 && sy > -100 && sy < canvas.height + 100) {
                 dyingEntities.push({ ...d, renderX: d.x, renderY: d.y, deathType: 'drone', deathTime: Date.now() });
             }
             lastDrones.delete(id);
@@ -865,7 +867,7 @@ function draw() {
 
     gameState.drones.forEach(d => {
         const sx = d.x - camera.x; const sy = d.y - camera.y;
-        if(sx < -50 || sx > vWidth+50 || sy < -50 || sy > vHeight+50) return;
+        if(sx < -50 || sx > canvas.width+50 || sy < -50 || sy > canvas.height+50) return;
         ctx.save(); ctx.translate(sx, sy); ctx.rotate(d.angle);
         ctx.lineWidth = 3; ctx.fillStyle = getTeamColor(d.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30);
         ctx.beginPath(); ctx.lineTo(d.radius, 0); ctx.lineTo(-d.radius*0.8, d.radius*0.8); ctx.lineTo(-d.radius*0.8, -d.radius*0.8); ctx.closePath();
@@ -880,7 +882,7 @@ function draw() {
 
         const sx = e.renderX - camera.x;
         const sy = e.renderY - camera.y;
-        if(sx < -150 || sx > vWidth+150 || sy < -150 || sy > vHeight+150) return;
+        if(sx < -150 || sx > canvas.width+150 || sy < -150 || sy > canvas.height+150) return;
 
         deathCtx.clearRect(0, 0, 300, 300);
         deathCtx.save();
@@ -958,7 +960,7 @@ function draw() {
         rPos.renderY = ry + (en.y - ry) * 0.35;
 
         const sx = rPos.renderX - camera.x; const sy = rPos.renderY - camera.y;
-        if(sx < -100 || sx > vWidth+100 || sy < -100 || sy > vHeight+100) return;
+        if(sx < -100 || sx > canvas.width+100 || sy < -100 || sy > canvas.height+100) return;
 
         if (['tank', 'ai'].includes(en.type)) {
             const isWhite = !en.nameColor || en.nameColor === "white" || en.nameColor === "#fff" || en.nameColor === "#ffffff";
@@ -990,8 +992,6 @@ function draw() {
         drawEntityBody(ctx, en);
         ctx.restore();
     });
-
-    ctx.restore(); // 2x FOV CHANGE: Restore scale so DOM-driven or static layout elements aren't impacted.
 
     const escapeHTML = (str) => {
         const p = document.createElement('p'); p.textContent = str; return p.innerHTML;
@@ -1047,26 +1047,31 @@ function draw() {
     requestAnimationFrame(draw);
 }
 
+// Variables and State
 let holdingM = false;
 
 window.onkeydown = e => { 
     let key = e.key.toLowerCase();
     keys[key] = true; 
 
+    // Shift Logic
     if (key === 'shift') { 
         mouse.repel = true; 
         keys.shift = true; 
     } 
 
+    // Menu Logic (M key)
     if (key === 'm') { 
         holdingM = true; 
         const panel = document.getElementById('upgrades-panel');
         if (panel) panel.style.transform = 'translateX(0)'; 
     }
 
+    // Toggles
     if (key === 'e') autoFire = !autoFire;
     if (key === 'c') autoSpin = !autoSpin;
 
+    // Stat Upgrades (1-8)
     if (key >= '1' && key <= '8') {
         if (ws && ws.readyState === 1) { 
             ws.send(JSON.stringify({ 
@@ -1081,11 +1086,13 @@ window.onkeyup = e => {
     let key = e.key.toLowerCase();
     keys[key] = false; 
 
+    // Reset Shift
     if (key === 'shift') { 
         mouse.repel = false; 
         keys.shift = false; 
     } 
 
+    // Reset M
     if (key === 'm') { 
         holdingM = false; 
     }
@@ -1094,9 +1101,8 @@ window.onkeyup = e => {
 window.onmousemove = e => { 
     mouse.x = e.clientX; 
     mouse.y = e.clientY; 
-    // 2x FOV CHANGE: Update global mouse layout handling taking ZOOM into account
-    mouse.rx = (mouse.x / ZOOM) + camera.x; 
-    mouse.ry = (mouse.y / ZOOM) + camera.y; 
+    mouse.rx = mouse.x + camera.x; 
+    mouse.ry = mouse.y + camera.y; 
 };
 
 window.onmousedown = (e) => {
@@ -1109,18 +1115,19 @@ window.onmouseup = (e) => {
     if (e.button === 2) mouse.rightDown = false;
 };
 
-window.oncontextmenu = e => e.preventDefault(); 
-function resizeGame() {
+window.oncontextmenu = e => e.preventDefault(); function resizeGame() {
+    // Set the actual internal resolution
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     
+    // Force the CSS layout to match the window exactly
     canvas.style.width = `${window.innerWidth}px`;
     canvas.style.height = `${window.innerHeight}px`;
     
+    // Center the camera immediately to prevent visual stutter on resize
     if (!myId && camera) {
-        // 2x FOV CHANGE: Handle layout bounds centering divided by ZOOM
-        camera.x = WORLD_SIZE/2 - (canvas.width / ZOOM)/2;
-        camera.y = WORLD_SIZE/2 - (canvas.height / ZOOM)/2;
+        camera.x = WORLD_SIZE/2 - canvas.width/2;
+        camera.y = WORLD_SIZE/2 - canvas.height/2;
     }
 }
 window.addEventListener('resize', resizeGame);
