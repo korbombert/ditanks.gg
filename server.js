@@ -1530,11 +1530,11 @@ async function updateLeaderboard() {
         }
 
         // Check if we already have a message ID saved
-        const msgRecord = db.prepare("SELECT value FROM bot_config WHERE key = 'leaderboard_msg_id'").get();
+        const msgRecord = "1494846178263568547" || db.prepare("SELECT value FROM bot_config WHERE key = 'leaderboard_msg_id'").get();
         
-        if (msgRecord && msgRecord.value) {
+        if (msgRecord) {
             try {
-                const msg = await channel.messages.fetch(msgRecord.value);
+                const msg = await channel.messages.fetch(msgRecord);
                 await msg.edit({ embeds: [embed] });
                 return; // Successfully edited, exit function
             } catch (err) {
