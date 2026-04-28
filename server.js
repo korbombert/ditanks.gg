@@ -1292,7 +1292,6 @@ wss.on('connection', (ws, req) => {
             })
             .catch(err => console.error("GeoIP lookup failed:", err));
     }
-    });
 
     ws.on('message', (message) => {
         const data = JSON.parse(message);
