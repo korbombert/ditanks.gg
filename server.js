@@ -1283,16 +1283,16 @@ wss.on('connection', (ws, req) => {
     let client = { ws: ws, player: null, room: null, spectatingId: null, ipHash: ipHash, country: 'xx' };
 
     if (rawIp && !rawIp.includes('127.0.0.1') && !rawIp.includes('::1') && !rawIp.startsWith('192.168.')) {
-    fetch(`http://ip-api.com/json/${rawIp}?fields=status,countryCode`)
-        .then(res => res.json())
-        .then(data => {
-            if (data.status === 'success') {
-                client.country = data.countryCode.toLowerCase();
-            }
-        })
-        .catch(err => console.error("GeoIP lookup failed:", err));
-});
+        fetch(`http://ip-api.com/json/${rawIp}?fields=status,countryCode`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    client.country = data.countryCode.toLowerCase();
+                }
+            })
+            .catch(err => console.error("GeoIP lookup failed:", err));
     }
+    });
 
     ws.on('message', (message) => {
         const data = JSON.parse(message);
