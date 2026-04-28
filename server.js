@@ -1283,12 +1283,15 @@ wss.on('connection', (ws, req) => {
     let client = { ws: ws, player: null, room: null, spectatingId: null, ipHash: ipHash, country: 'xx' };
 
     if (rawIp && !rawIp.includes('127.0.0.1') && !rawIp.includes('::1') && !rawIp.startsWith('192.168.')) {
-        fetch(`https://1.1.1.1/cdn-cgi/trace`)
-    .then(res => res.text())
-    .then(data => {
-        const countryMatch = data.match(/loc=([A-Z]{2})/);
-        if (countryMatch) client.country = countryMatch[1].toLowerCase();
-    });
+    fetch(`http://ip-api.com/json/${rawIp}?fields=status,countryCode`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                client.country = data.countryCode.toLowerCase();
+            }
+        })
+        .catch(err => console.error("GeoIP lookup failed:", err));
+});
     }
 
     ws.on('message', (message) => {
@@ -1625,7 +1628,7 @@ discordClient.on('interactionCreate', async interaction => {
                 leaderboardStr = '*No players or bots in this lobby.*';
             } else {
                 leaderboardStr = topPlayers.map((p, index) => {
-                    const icon = p.isPlayer ? '👤' : '👤'; 
+                    const icon = '👤'; 
                     return `**${index + 1}.** ${icon} ${p.name || 'Unnamed'} - ${Math.floor(p.score)} pts`;
                 }).join('\n');
             }
@@ -1659,7 +1662,5 @@ server.listen(PORT, '0.0.0.0', () => {
     const protocol = process.env.RAILWAY_STATIC_URL ? 'wss' : 'ws';
     const httpProtocol = process.env.RAILWAY_STATIC_URL ? 'https' : 'http';
 
-    console.log(`server is live:`);
-    console.log(` port: ${PORT}`);
-    console.log(` WS:     ${protocol}://${PUBLIC_URL}`);
+    console.log(`server is live`);
 });
