@@ -1,4 +1,6 @@
-// node --env-file=C:\Users\chris\OneDrive\Documents\ditanks.gg\.env C:\Users\chris\OneDrive\Documents\ditanks.gg\server.js
+const ServerState = { "gateway": true, "game": true };
+const { game: isGame, gateway: isGateway } = ServerState;
+
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
