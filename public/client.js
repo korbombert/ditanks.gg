@@ -483,7 +483,11 @@ function numberWithCommas(x) {
 function connectWS(regionStr, modeStr) {
     const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
     ws = new WebSocket(protocol + window.location.host);
-
+    function sendPing() {
+        if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'ping', time: performance.now() }));
+        }
+    }
     ws.onopen = () => {
         ws.send(JSON.stringify({ type: 'spectate', mode: modeStr, region: regionStr }));
         document.getElementById('playBtn').innerText = "Play";
@@ -491,9 +495,7 @@ function connectWS(regionStr, modeStr) {
         if (sessionToken) {
             ws.send(JSON.stringify({ type: 'auth_login', token: sessionToken }));
         }
-        if (window.pingInterval) clearInterval(window.pingInterval);
-        window.pingInterval = setInterval(() => { if(ws.readyState === 1) ws.send(JSON.stringify({ type: 'ping', time: performance.now() })); }, 10);
-        
+        sendPing();
         if (window.inputInterval) clearInterval(window.inputInterval);
         if (window.inputInterval) clearInterval(window.inputInterval);
         window.inputInterval = setInterval(() => {
@@ -532,7 +534,11 @@ function connectWS(regionStr, modeStr) {
     ws.onmessage = (e) => {
         const data = JSON.parse(e.data);
         if(data.type === 'init') { myId = data.id; myTeam = data.team; spectateId = null; }
-        else if(data.type === 'pong') { document.getElementById('ping-display').innerText = ` ${(performance.now() - data.time).toFixed(1)} ms ${data.locationl}`; }
+        else if(data.type === 'pong') {
+            const latency = performance.now() - data.time;
+            document.getElementById('ping-display').innerText = ` ${latency.toFixed(1)} ms ${data.locationl}`;
+            setTimeout(sendPing, latency*2);
+        }
         else if(data.type === 'state') { 
             gameState = data; 
             if (!window.drawing) { window.drawing = true; requestAnimationFrame(draw); }
