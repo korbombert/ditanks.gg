@@ -388,30 +388,43 @@ try {
         BOT_NAMES = Array.isArray(rawData[0]) ? rawData.flat() : rawData; 
     }
 } catch (err) {}
-
 const TANK_SPECS = {
-    'Basic': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0, spread: 0}], dmg: 1, spd: 1, rel: 1, maxDrones: 0 },
-    'Twin': { barrels: [{x:0, y:-10, w:16, l:1.8, angle:0, spread: 0}, {x:0, y:10, w:16, l:1.8, angle:0, spread: 0}], dmg: 0.67, spd: 1, rel: 1, maxDrones: 0 },
-    'Sniper': { barrels: [{x:0, y:0, w:18, l:2.4, angle:0, spread: 0}], dmg: 1.1, spd: 2, rel: 1.66, maxDrones: 0 },
-    'Machine Gun': { barrels: [{x:0, y:0, w:22, w2: 32, l:1.6, angle:0, spread: 0.5}], dmg: 0.745, spd: 1, rel: 0.5, maxDrones: 0 },
-    'Flank Guard': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0, spread: 0}, {x:0, y:0, w:18, l:1.5, angle:Math.PI, spread: 0}], dmg: 1, spd: 1, rel: 1, maxDrones: 0 },
-    'Overseer': { barrels: [{x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI/2, spread:0}, {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2, spread:0}], dmg: 1.461, spd: 0.8, rel: 1.5, maxDrones: 8, isDroneSpawner: true },
-    'Destroyer': { barrels: [{x:0, y:0, w:35, l:1.9, angle:0, spread: 0}], dmg: 7.8, spd: 0.8, rel: 3, maxDrones: 0 },
+    'Basic': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}] },
+    'Twin': { barrels: [
+        {x:0, y:-10, w:16, l:1.8, angle:0, spread: 0, dmg: 0.67, spd: 1, rel: 1, size: 1, delay: 0}, 
+        {x:0, y:10, w:16, l:1.8, angle:0, spread: 0, dmg: 0.67, spd: 1, rel: 1, size: 1, delay: 0.5}
+    ]},
+    'Sniper': { barrels: [{x:0, y:0, w:18, l:2.4, angle:0, spread: 0, dmg: 1.1, spd: 2, rel: 1.66, size: 1, delay: 0}] },
+    'Machine Gun': { barrels: [{x:0, y:0, w:22, w2: 32, l:1.6, angle:0, spread: 0.5, dmg: 0.745, spd: 1, rel: 0.5, size: 1, delay: 0}] },
+    'Flank Guard': { barrels: [
+        {x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}, 
+        {x:0, y:0, w:18, l:1.5, angle:Math.PI, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}
+    ]},
+    'Overseer': { isDroneSpawner: true, maxDrones: 8, barrels: [
+        {x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI/2, spread:0, dmg: 1.461, spd: 0.8, rel: 1.5, size: 1, delay: 0}, 
+        {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2, spread:0, dmg: 1.461, spd: 0.8, rel: 1.5, size: 1, delay: 0}
+    ]},
+    'Destroyer': { barrels: [{x:0, y:0, w:35, l:1.9, angle:0, spread: 0, dmg: 7.8, spd: 0.8, rel: 3, size: 1.5, delay: 0}] },
     'Octo Tank': { barrels: [
-        {x:0, y:0, w:16, l:1.8, angle:0, spread: 0}, {x:0, y:0, w:16, l:1.8, angle:Math.PI/4, spread: 0},
-        {x:0, y:0, w:16, l:1.8, angle:Math.PI/2, spread: 0}, {x:0, y:0, w:16, l:1.8, angle:3*Math.PI/4, spread: 0},
-        {x:0, y:0, w:16, l:1.8, angle:Math.PI, spread: 0}, {x:0, y:0, w:16, l:1.8, angle:-3*Math.PI/4, spread: 0},
-        {x:0, y:0, w:16, l:1.8, angle:-Math.PI/2, spread: 0}, {x:0, y:0, w:16, l:1.8, angle:-Math.PI/4, spread: 0}
-    ], dmg: 0.51, spd: 1, rel: 1.1, maxDrones: 0 },
+        {x:0, y:0, w:16, l:1.8, angle:0, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
+        {x:0, y:0, w:16, l:1.8, angle:Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
+        {x:0, y:0, w:16, l:1.8, angle:Math.PI/2, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
+        {x:0, y:0, w:16, l:1.8, angle:3*Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
+        {x:0, y:0, w:16, l:1.8, angle:Math.PI, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
+        {x:0, y:0, w:16, l:1.8, angle:-3*Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
+        {x:0, y:0, w:16, l:1.8, angle:-Math.PI/2, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
+        {x:0, y:0, w:16, l:1.8, angle:-Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5}
+    ]},
     'Triplet': { barrels: [
-        {x:0, y:-12, w:14, l:1.6, angle:0, spread: 0}, {x:0, y:12, w:14, l:1.6, angle:0, spread: 0},
-        {x:0, y:0, w:14, l:1.8, angle:0, spread: 0}
-    ], dmg: 0.47, spd: 1, rel: 0.8, maxDrones: 0 },
+        {x:0, y:-12, w:14, l:1.6, angle:0, spread: 0, dmg: 0.47, spd: 1, rel: 0.8, size: 1, delay: 0.5}, 
+        {x:0, y:12, w:14, l:1.6, angle:0, spread: 0, dmg: 0.47, spd: 1, rel: 0.8, size: 1, delay: 0.5},
+        {x:0, y:0, w:14, l:1.8, angle:0, spread: 0, dmg: 0.47, spd: 1, rel: 0.8, size: 1, delay: 0}
+    ]},
     'Tri-angle': { barrels: [
-        {x:0, y:0, w:18, l:1.8, angle:0, spread: 0},
-        {x:0, y:0, w:16, l:1.6, angle:5*Math.PI/6, spread: 0, recoilMult: 2.5},
-        {x:0, y:0, w:16, l:1.6, angle:-5*Math.PI/6, spread: 0, recoilMult: 2.5}
-    ], dmg: 0.8, spd: 0.9, rel: 1, maxDrones: 0 }
+        {x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 0.8, spd: 0.9, rel: 1, size: 1, delay: 0},
+        {x:0, y:0, w:16, l:1.6, angle:5*Math.PI/6, spread: 0, recoilMult: 2.5, dmg: 0.8, spd: 0.9, rel: 1, size: 1, delay: 0.5},
+        {x:0, y:0, w:16, l:1.6, angle:-5*Math.PI/6, spread: 0, recoilMult: 2.5, dmg: 0.8, spd: 0.9, rel: 1, size: 1, delay: 0.5}
+    ]}
 };
 class SpatialGrid {
     constructor(size, cellSize) {
@@ -570,7 +583,7 @@ class Entity {
         this.hp = 100; this.maxHp = 100;
         this.radius = 20; this.angle = 0;
         this.vx = 0; this.vy = 0;
-        this.reloadTimer = 0; this.activeDrones = 0;
+        this.barrelTimers = []; this.wasShooting = false; this.activeDrones = 0;
         this.inputs = { up: false, down: false, left: false, right: false, shooting: false, angle: 0, repel: false };
         this.markedForDeletion = false;
         this.spawnTime = Date.now();
@@ -612,7 +625,15 @@ class Entity {
         this.x = Math.max(0, Math.min(WORLD_SIZE, this.x));
         this.y = Math.max(0, Math.min(WORLD_SIZE, this.y));
 
-        if(this.reloadTimer > 0) this.reloadTimer--;
+        // --- NEW: Barrel Timers Tick ---
+        const specs = TANK_SPECS[this.tankType];
+        if (!this.barrelTimers || this.barrelTimers.length !== (specs?.barrels?.length || 0)) {
+            this.barrelTimers = new Array(specs?.barrels?.length || 0).fill(0);
+        }
+        for(let i=0; i<this.barrelTimers.length; i++) {
+            if(this.barrelTimers[i] > 0) this.barrelTimers[i]--;
+        }
+        // -------------------------------
         let effectiveMaxHp = this.maxHp + (this.stats[1] * 20); 
 
         if (this.hp < effectiveMaxHp) {
@@ -638,9 +659,9 @@ class Entity {
                 this.vx += (inputX / length) * moveSpeed;
                 this.vy += (inputY / length) * moveSpeed;
             }
-
             this.angle = this.inputs.angle;
-            if(this.inputs.shooting) shoot(this);
+            if(this.inputs.shooting) isShooting = true;
+
         } else if(this.type === 'ai') {
             this.thinkTimer++;
             if (this.thinkTimer >= 9) {
@@ -727,31 +748,27 @@ nearby.entities.forEach(e => {
                     let dy = target.y - this.y;
                     let dTargetSq = dx*dx + dy*dy;
                     let dTarget = Math.sqrt(dTargetSq);
-                    let bSpd = ((6 * 0.998) + (this.stats[3] * (0.4 * 0.995))) * (TANK_SPECS[this.tankType].spd || 1);
+                    let bSpd = ((6 * 0.998) + (this.stats[3] * (0.4 * 0.995))) * (TANK_SPECS[this.tankType].barrels[0]?.spd || 1);
                     let timeToHit = dTarget / (bSpd || 1);
                     predX += (target.vx || 0) * timeToHit;
                     predY += (target.vy || 0) * timeToHit;
                 }              
                 
                 if (this.isFleeing && !target.isShape) {
-                    // NEW: Fleeing recoil jump! Turn backwards and shoot to escape faster.
                     this.angle = Math.atan2(this.y - predY, this.x - predX);
-                    shoot(this);
+                    isShooting = true; // REPLACED shoot()
                     
                     if (this.tankType === 'Tri-angle') {
-                        // Tri-angle runs faster forward
                         this.angle = Math.atan2(predY - this.y, predX - this.x);
                         this.vx -= Math.cos(this.angle) * moveSpeed;
                         this.vy -= Math.sin(this.angle) * moveSpeed;
                     } else {
-                        // Regular tanks run faster by shooting backward
                         this.vx += Math.cos(this.angle) * moveSpeed;
                         this.vy += Math.sin(this.angle) * moveSpeed;
                     }
                 } else {
-                    // Normal chase & shoot
                     this.angle = Math.atan2(predY - this.y, predX - this.x);
-                    shoot(this);
+                    isShooting = true; // REPLACED shoot()
 
                     if (isDrone && target.owner) {
                         let evadeAngle = Math.atan2(target.owner.y - this.y, target.owner.x - this.x);
@@ -777,9 +794,8 @@ nearby.entities.forEach(e => {
                 let centerY = WORLD_SIZE / 2;
                 let distToCenterSq = (this.x - centerX)**2 + (this.y - centerY)**2;
                 
-                if (distToCenterSq > 1000000) { // If far from center
+                if (distToCenterSq > 1000000) {
                     let centerAngle = Math.atan2(centerY - this.y, centerX - this.x);
-                    // Smoothly turn towards the middle
                     let angleDiff = centerAngle - this.angle;
                     while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
                     while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
@@ -791,12 +807,22 @@ nearby.entities.forEach(e => {
                 this.vx += Math.cos(this.angle) * (moveSpeed * 0.4);
                 this.vy += Math.sin(this.angle) * (moveSpeed * 0.4);
 
-                // Occasionally shoot at nothing to farm off-screen shapes
                 if (Math.random() < 0.03) {
-                    shoot(this);
+                    isShooting = true; // REPLACED shoot()
                 }
             }
-            
+            // --- NEW: Firing & Delay initialization logic ---
+        if (isShooting && !this.wasShooting) {
+            let baseReload = Math.max(5, ((30 * 1.002) - (this.stats[6] * (3 * 0.995))));
+            specs.barrels.forEach((b, i) => {
+                if (this.barrelTimers[i] <= 0) {
+                    this.barrelTimers[i] = (baseReload * (b.rel || 1)) * (b.delay || 0); // Inject the delay offset
+                }
+            });
+        }
+        
+        if (isShooting) shoot(this);
+        this.wasShooting = isShooting;
             if (this.thinkTimer === 0) {
                 if (this.level >= 15 && this.tankType === 'Basic' && this.type === 'ai') {
                     if (Math.random() > 0.20) { 
@@ -911,13 +937,23 @@ class Drone {
 
         this.x += this.vx; this.y += this.vy;
         
+        // Inside Drone class update() method...
         let nearbyDrones = this.room.grid.getNearby(this.x, this.y, this.radius * 2);
         nearbyDrones.drones.forEach(d => {
             if(d !== this && !d.markedForDeletion) {
                 let dx = this.x - d.x, dy = this.y - d.y;
-                if(dx*dx + dy*dy < (this.radius * 2)**2) {
+                let radSum = this.radius + d.radius;
+                let distSq = dx*dx + dy*dy;
+                
+                // If they overlap, apply a smooth repulsion force
+                if(distSq < radSum*radSum) {
+                    let dist = Math.sqrt(distSq) || 1;
+                    let overlap = radSum - dist;
                     let pushAngle = Math.atan2(dy, dx);
-                    this.x += Math.cos(pushAngle) * 1; this.y += Math.sin(pushAngle) * 1;
+                    let pushForce = overlap * 0.15; // Smoothly spreads them out
+                    
+                    this.x += Math.cos(pushAngle) * pushForce; 
+                    this.y += Math.sin(pushAngle) * pushForce;
                 }
             }
         });
@@ -937,43 +973,56 @@ const UPGRADE_TREE = {
     'Flank Guard': ['Tri-angle', 'Octo Tank']
 };
 function shoot(who) {
-    if(who.reloadTimer > 0 || who.markedForDeletion) return;
+    if(who.markedForDeletion) return;
     const specs = TANK_SPECS[who.tankType];
     const room = who.room;
 
+    if (!who.barrelTimers || who.barrelTimers.length !== specs.barrels.length) {
+        who.barrelTimers = new Array(specs.barrels.length).fill(0);
+    }
+
+    let baseReload = Math.max(5, ((30 * 1.002) - (who.stats[6] * (3 * 0.995))));
+    let baseSpeed = (6 * 0.998) + (who.stats[3] * (0.4 * 0.995));
+    let baseDmg = 8 + (who.stats[5]*3);
+    let basePen = 1 + (who.stats[4]*0.5);
+
     if(specs.isDroneSpawner) {
-        if(who.activeDrones < specs.maxDrones) {
-            room.drones.push(new Drone(room, who.x, who.y, who));
-            who.reloadTimer = Math.max(10, ((40 * 1.002) - (who.stats[6] * (4 * 0.995))) * specs.rel);
-        }
+        specs.barrels.forEach((b, i) => {
+            if (who.barrelTimers[i] <= 0 && who.activeDrones < specs.maxDrones) {
+                room.drones.push(new Drone(room, who.x, who.y, who));
+                who.barrelTimers[i] = Math.max(10, baseReload * (b.rel || 1));
+            }
+        });
         return;
     }
 
-    let bSpeed = ((6 * 0.998) + (who.stats[3] * (0.4 * 0.995))) * specs.spd; 
-    let bDmg = (8 + (who.stats[5]*3)) * specs.dmg;
-    let bPen = 1 + (who.stats[4]*0.5);
+    specs.barrels.forEach((b, i) => {
+        if (who.barrelTimers[i] <= 0) {
+            let bSpeed = baseSpeed * (b.spd || 1);
+            let bDmg = baseDmg * (b.dmg || 1);
+            let spreadAngle = (Math.random() - 0.5) * (b.spread || 0);
+            let finalAngle = who.angle + (b.angle || 0) + spreadAngle;
+            let bx = who.x + Math.cos(who.angle + (b.angle || 0)) * (b.l || 1.8) * who.radius - Math.sin(who.angle) * (b.y || 0);
+            let by = who.y + Math.sin(who.angle + (b.angle || 0)) * (b.l || 1.8) * who.radius + Math.cos(who.angle) * (b.y || 0);
 
-    specs.barrels.forEach(b => {
-        let spreadAngle = (Math.random() - 0.5) * b.spread;
-        let finalAngle = who.angle + b.angle + spreadAngle;
-        let bx = who.x + Math.cos(who.angle + b.angle) * b.l * who.radius - Math.sin(who.angle) * b.y;
-        let by = who.y + Math.sin(who.angle + b.angle) * b.l * who.radius + Math.cos(who.angle) * b.y;
+            let recoilMult = b.recoilMult || 1;
+            let recoilForce = (1.5 + bDmg * 0.05) * (b.dmg || 1) * recoilMult;
+            
+            who.vx -= Math.cos(finalAngle) * recoilForce * 0.25;
+            who.vy -= Math.sin(finalAngle) * recoilForce * 0.25;
 
-        let recoilMult = b.recoilMult || 1;
-        let recoilForce = (1.5 + bDmg * 0.05) * specs.dmg * recoilMult;
-        
-        who.vx -= Math.cos(finalAngle) * recoilForce * 0.25;
-        who.vy -= Math.sin(finalAngle) * recoilForce * 0.25;
+            let bulletSize = (8 + (who.stats[5]*0.5)) * (b.size || 1); // Uses new bullet size property
 
-        room.bullets.push({ 
-            id: room.nextBulletId++, 
-            x: bx, y: by, vx: Math.cos(finalAngle)*bSpeed, vy: Math.sin(finalAngle)*bSpeed, 
-            r: 8 + (who.stats[5]*0.5), life: 100 * (1 + who.stats[3]*0.1), dmg: bDmg, pen: bPen, 
-            owner: who, team: who.team 
-        });
+            room.bullets.push({ 
+                id: room.nextBulletId++, 
+                x: bx, y: by, vx: Math.cos(finalAngle)*bSpeed, vy: Math.sin(finalAngle)*bSpeed, 
+                r: bulletSize, life: 100 * (1 + who.stats[3]*0.1), dmg: bDmg, pen: basePen, 
+                owner: who, team: who.team 
+            });
+
+            who.barrelTimers[i] = Math.max(5, baseReload * (b.rel || 1));
+        }
     });
-
-    who.reloadTimer = Math.max(5, ((30 * 1.002) - (who.stats[6] * (3 * 0.995))) * specs.rel);
 }
 
 function updateRoom(room) {
@@ -1359,14 +1408,16 @@ wss.on('connection', (ws, req) => {
             }
         }
         else if (data.type === 'upgradeTank' && client.player && !client.player.markedForDeletion) {
-    const player = client.player;
-    if (player.level < 15 && data.tank !== 'Basic') return;
-    if (player.level < 30 && data.tank === 'Overseer') return;
-    const current = player.tankType;
-    const possible = UPGRADE_TREE[current] || [];
-    if (!possible.includes(data.tank)) return;
-    player.tankType = data.tank;
-}
+            const player = client.player;
+            if (player.level < 15 && data.tank !== 'Basic') return;
+            if (player.level < 30 && data.tank === 'Overseer') return;
+            const current = player.tankType;
+            const possible = UPGRADE_TREE[current] || [];
+            if (!possible.includes(data.tank)) return;
+            
+            player.tankType = data.tank;
+            player.barrelTimers = [];
+        }
         if (data.type === 'auth_login') {
             let user = db.prepare("SELECT * FROM users WHERE session_token = ?").get(data.token);
             if (user) {
