@@ -1411,7 +1411,15 @@ wss.on('connection', (ws, req) => {
     });
 });
 
+let tickCount = 0;
+
 setInterval(() => {
+    tickCount++;
+    // Only package and send data every 2 ticks
+    let shouldSend = (tickCount % 2 === 0);
+
+    if (!shouldSend) return; // Skip network broadcast this tick
+
     Object.values(rooms).forEach(room => {
         if (room.status === 'stopped') return;
         room.clients.forEach(c => {
@@ -1439,12 +1447,13 @@ setInterval(() => {
                         let isVisible = Math.abs(e.x - focalX) < VIEW_DISTANCE && 
                                         Math.abs(e.y - focalY) < (VIEW_DISTANCE / 1.8);
                         
+                        // Tip: Rounding numbers before sending also saves bandwidth!
                         payloadEntities.push({
                             id: e.id, 
                             x: isVisible ? Math.round(e.x) : null, 
                             y: isVisible ? Math.round(e.y) : null, 
                             type: e.type, team: e.team, hp: e.hp, maxHp: e.maxHp, 
-                            radius: e.radius, angle: e.angle, tankType: e.tankType, 
+                            radius: e.radius, angle: Math.round(e.angle * 100) / 100, tankType: e.tankType, 
                             name: e.name, score: e.score, nameColor: e.nameColor, inView: isVisible
                         });
                     }
@@ -1456,7 +1465,7 @@ setInterval(() => {
                         payloadEntities.push({
                             id: e.id, x: Math.round(e.x), y: Math.round(e.y), 
                             type: e.type, team: e.team, hp: e.hp, maxHp: e.maxHp, 
-                            radius: e.radius, angle: e.angle, inView: true
+                            radius: e.radius, angle: Math.round(e.angle * 100) / 100, inView: true
                         });
                     }
                 }
@@ -1471,7 +1480,7 @@ setInterval(() => {
                 for(let i=0; i<nearby.drones.length; i++) {
                     let d = nearby.drones[i];
                     if (Math.abs(d.y - focalY) < VIEW_DISTANCE/1.8) {
-                        payloadDrones.push({ id: d.id, x: Math.round(d.x), y: Math.round(d.y), radius: d.radius, angle: d.angle, team: d.team });
+                        payloadDrones.push({ id: d.id, x: Math.round(d.x), y: Math.round(d.y), radius: d.radius, angle: Math.round(d.angle * 100) / 100, team: d.team });
                     }
                 }
 
