@@ -810,7 +810,7 @@ const escapeHTML = (str) => {
     };
 let drawCounter = 0;
 function draw() {
-    drawCounter++;
+    // 1. Calculate FPS
     let now = performance.now();
     frames++;
     if (now - lastFpsTime >= 1000) {
@@ -825,7 +825,7 @@ function draw() {
     ctx.fillStyle = COLORS.bg; 
     ctx.fillRect(0,0,canvas.width,canvas.height);
 
-    // Camera targeting logic stays exactly the same...
+    // Camera targeting logic
     let targetCamX = WORLD_SIZE/2 - canvas.width/2;
     let targetCamY = WORLD_SIZE/2 - canvas.height/2;
 
@@ -853,8 +853,9 @@ function draw() {
         }
     }
 
-    camera.x += (targetCamX - camera.x) * 0.1;
-    camera.y += (targetCamY - camera.y) * 0.1;
+    // --- LERP UPDATE: Camera lerping made 20% snappier (0.1 -> 0.12) ---
+    camera.x += (targetCamX - camera.x) * 0.12;
+    camera.y += (targetCamY - camera.y) * 0.12;
 
     mouse.rx = mouse.x + camera.x; 
     mouse.ry = mouse.y + camera.y;
@@ -865,77 +866,63 @@ function draw() {
     ctx.fillRect(-50, -50, canvas.width + 100, canvas.height + 100);
     ctx.restore();
     if(gameMode === "2TDM") {
-        ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(-camera.x, -camera.y, 400, WORLD_SIZE); // Decreased width, full height
+        ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(-camera.x, -camera.y, 400, WORLD_SIZE);
         ctx.fillStyle = "rgba(241, 78, 84, 0.15)"; ctx.fillRect(WORLD_SIZE-400-camera.x, -camera.y, 400, WORLD_SIZE);
     } else if (gameMode === "4TDM") {
-        ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(-camera.x, -camera.y, BASE_SIZE, BASE_SIZE); // TL (Blue)
-        ctx.fillStyle = "rgba(190, 127, 245, 0.15)"; ctx.fillRect(WORLD_SIZE-BASE_SIZE-camera.x, -camera.y, BASE_SIZE, BASE_SIZE); // TR (Purple)
-        ctx.fillStyle = "rgba(0, 225, 110, 0.15)"; ctx.fillRect(-camera.x, WORLD_SIZE-BASE_SIZE-camera.y, BASE_SIZE, BASE_SIZE); // BL (Green)
-        ctx.fillStyle = "rgba(241, 78, 84, 0.15)"; ctx.fillRect(WORLD_SIZE-BASE_SIZE-camera.x, WORLD_SIZE-BASE_SIZE-camera.y, BASE_SIZE, BASE_SIZE); // BR (Red)
+        ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(-camera.x, -camera.y, BASE_SIZE, BASE_SIZE);
+        ctx.fillStyle = "rgba(190, 127, 245, 0.15)"; ctx.fillRect(WORLD_SIZE-BASE_SIZE-camera.x, -camera.y, BASE_SIZE, BASE_SIZE);
+        ctx.fillStyle = "rgba(0, 225, 110, 0.15)"; ctx.fillRect(-camera.x, WORLD_SIZE-BASE_SIZE-camera.y, BASE_SIZE, BASE_SIZE);
+        ctx.fillStyle = "rgba(241, 78, 84, 0.15)"; ctx.fillRect(WORLD_SIZE-BASE_SIZE-camera.x, WORLD_SIZE-BASE_SIZE-camera.y, BASE_SIZE, BASE_SIZE);
     }
 
     ctx.fillStyle = "rgba(0,0,0,0.02)"; 
     ctx.fillRect(1700 - camera.x, 1700 - camera.y, 600, 600);
 
-    // --- BULLET LERPING ---
+    const activeIds = gameState.entities.map(e => e.id);
+    for (let [id, rEnt] of renderEntities.entries()) {
+        if (!activeIds.includes(id)) {
+            const sx = rEnt.renderX - camera.x;
+            const sy = rEnt.renderY - camera.y;
+            if (sx > -200 && sx < canvas.width + 200 && sy > -200 && sy < canvas.height + 200) {
+                dyingEntities.push({ ...rEnt, deathType: 'entity', deathTime: Date.now() });
+            }
+            renderEntities.delete(id);
+        }
+    }
+
     const activeBulletIds = new Set(gameState.bullets.map(b => b.id));
     for (let [id, b] of lastBullets.entries()) {
         if (!activeBulletIds.has(id)) {
-            const sx = b.renderX - camera.x; const sy = b.renderY - camera.y;
+            const sx = b.x - camera.x; const sy = b.y - camera.y;
             if (sx > -50 && sx < canvas.width + 50 && sy > -50 && sy < canvas.height + 50) {
-                dyingEntities.push({ ...b, renderX: b.renderX, renderY: b.renderY, deathType: 'bullet', deathTime: Date.now() });
+                dyingEntities.push({ ...b, renderX: b.x, renderY: b.y, deathType: 'bullet', deathTime: Date.now() });
             }
             lastBullets.delete(id);
         }
     }
-    // Update targets
-    gameState.bullets.forEach(b => {
-        if (!lastBullets.has(b.id)) {
-            lastBullets.set(b.id, { ...b, renderX: b.x, renderY: b.y });
-        } else {
-            let existing = lastBullets.get(b.id);
-            existing.x = b.x; existing.y = b.y; existing.r = b.r;
-        }
-    });
+    gameState.bullets.forEach(b => lastBullets.set(b.id, b));
 
-    // Draw & Lerp Bullets
-    lastBullets.forEach(b => {
-        b.renderX = lerp(b.renderX, b.x, 0.2);
-        b.renderY = lerp(b.renderY, b.y, 0.2);
-        ctx.fillStyle = getTeamColor(b.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30); ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(b.renderX-camera.x, b.renderY-camera.y, b.r, 0, Math.PI*2); ctx.fill(); ctx.stroke();
-    });
-
-    // --- DRONE LERPING ---
     const activeDroneIds = new Set(gameState.drones.map(d => d.id));
     for (let [id, d] of lastDrones.entries()) {
         if (!activeDroneIds.has(id)) {
-            const sx = d.renderX - camera.x; const sy = d.renderY - camera.y;
+            const sx = d.x - camera.x; const sy = d.y - camera.y;
             if (sx > -100 && sx < canvas.width + 100 && sy > -100 && sy < canvas.height + 100) {
-                dyingEntities.push({ ...d, renderX: d.renderX, renderY: d.renderY, deathType: 'drone', deathTime: Date.now() });
+                dyingEntities.push({ ...d, renderX: d.x, renderY: d.y, deathType: 'drone', deathTime: Date.now() });
             }
             lastDrones.delete(id);
         }
     }
-    // Update targets
-    gameState.drones.forEach(d => {
-        if (!lastDrones.has(d.id)) {
-            lastDrones.set(d.id, { ...d, renderX: d.x, renderY: d.y, renderAngle: d.angle });
-        } else {
-            let existing = lastDrones.get(d.id);
-            existing.x = d.x; existing.y = d.y; existing.angle = d.angle;
-        }
+    gameState.drones.forEach(d => lastDrones.set(d.id, d));
+
+    gameState.bullets.forEach(b => {
+        ctx.fillStyle = getTeamColor(b.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(b.x-camera.x, b.y-camera.y, b.r, 0, Math.PI*2); ctx.fill(); ctx.stroke();
     });
 
-    // Draw & Lerp Drones
-    lastDrones.forEach(d => {
-        d.renderX = lerp(d.renderX, d.x, 0.2);
-        d.renderY = lerp(d.renderY, d.y, 0.2);
-        d.renderAngle = lerpAngle(d.renderAngle !== undefined ? d.renderAngle : d.angle, d.angle, 0.2);
-
-        const sx = d.renderX - camera.x; const sy = d.renderY - camera.y;
+    gameState.drones.forEach(d => {
+        const sx = d.x - camera.x; const sy = d.y - camera.y;
         if(sx < -50 || sx > canvas.width+50 || sy < -50 || sy > canvas.height+50) return;
-        ctx.save(); ctx.translate(sx, sy); ctx.rotate(d.renderAngle);
+        ctx.save(); ctx.translate(sx, sy); ctx.rotate(d.angle);
         ctx.lineWidth = 3; ctx.fillStyle = getTeamColor(d.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30);
         ctx.beginPath(); ctx.lineTo(d.radius, 0); ctx.lineTo(-d.radius*0.8, d.radius*0.8); ctx.lineTo(-d.radius*0.8, -d.radius*0.8); ctx.closePath();
         ctx.fill(); ctx.stroke(); ctx.restore();
@@ -1016,33 +1003,19 @@ function draw() {
         ctx.restore();
     });
 
-    // --- ENTITY LERPING ---
     [...gameState.entities].sort((a,b) => (a.type.includes('tank')||a.type==='ai'?1:-1)).forEach(en => {
         if(!en.inView){ return; }
-        
-        // Initialize render positions if new
-        if (!renderEntities.has(en.id)) {
-            renderEntities.set(en.id, { ...en, renderX: en.x, renderY: en.y, renderAngle: en.angle });
-        }
-        
+        if (!renderEntities.has(en.id)) renderEntities.set(en.id, { ...en, renderX: en.x, renderY: en.y });
         let rPos = renderEntities.get(en.id);
-        let rx = rPos.renderX; 
-        let ry = rPos.renderY; 
-        let ra = rPos.renderAngle !== undefined ? rPos.renderAngle : en.angle;
         
+        let rx = rPos.renderX; let ry = rPos.renderY;
         Object.assign(rPos, en);
-        
-        // Apply Lerping (adjusted to 0.2 to compensate for the slower server tick)
-        rPos.renderX = lerp(rx, en.x, 0.2);
-        rPos.renderY = lerp(ry, en.y, 0.2);
-        rPos.renderAngle = lerpAngle(ra, en.angle, 0.2);
-        
-        // Feed the smoothed angle back into rPos so the draw function uses it
-        rPos.angle = rPos.renderAngle; 
 
-        const sx = rPos.renderX - camera.x; 
-        const sy = rPos.renderY - camera.y;
-        
+        // --- LERP UPDATE: Entity lerping made 20% snappier (0.35 -> 0.42) ---
+        rPos.renderX = rx + (en.x - rx) * 0.42;
+        rPos.renderY = ry + (en.y - ry) * 0.42;
+
+        const sx = rPos.renderX - camera.x; const sy = rPos.renderY - camera.y;
         if(sx < -100 || sx > canvas.width+100 || sy < -100 || sy > canvas.height+100) return;
 
         if (['tank', 'ai'].includes(en.type)) {
@@ -1072,12 +1045,49 @@ function draw() {
         
         ctx.save();
         ctx.translate(sx, sy);
-        drawEntityBody(ctx, rPos);
+
+        // --- CURSOR SNAP UPDATE: Force the local tank to face the mouse instantly ---
+        if (en.id === myId) {
+            en.angle = autoSpin ? spinAngle : Math.atan2(mouse.ry - rPos.renderY, mouse.rx - rPos.renderX);
+        }
+
+        drawEntityBody(ctx, en);
         ctx.restore();
     });
-    if (drawCounter % 10 === 0) {
-        updateLeaderboard();
-    }
+
+    const escapeHTML = (str) => {
+        const p = document.createElement('p'); p.textContent = str; return p.innerHTML;
+    };
+    
+    const updateLeaderboard = () => {
+        const entries = gameState.entities
+            .filter(e => ['tank', 'ai'].includes(e.type))
+            .sort((a, b) => b.score - a.score)
+            .slice(0, entryCount);
+
+        const leaderScore = entries.length > 0 ? Math.max(entries[0].score, 1) : 1;
+        document.getElementById('score-list').innerHTML = entries.map(s => {
+            let fillPct = Math.max(2, Math.min(100, (s.score / leaderScore) * 100));
+            let barColor = gameMode === "FFA" ? "#f0a824" : getTeamColor(s.team); 
+            let displayScore = formatScore(Math.floor(s.score));
+            let tankColor = getTeamColor(s.team); 
+            let iconUrl = getCachedTankIcon(s.tankType || 'Basic', tankColor);
+
+            return `
+                <div class="sb-entry" style="position: relative; height: 30px; margin-bottom: 2px;">
+                    <div class="sb-fill" style="width: ${fillPct}%; background-color: ${barColor}; height: 100%; position: absolute; opacity: 0.8;"></div>
+                    <div class="sb-text" style="position: relative; display: flex; align-items: center; padding: 0 6px; height: 100%; font-family: sans-serif; white-space: nowrap;">
+                        <img src="${iconUrl}" style="width: 25px; height: 25px; margin-right: 8px; flex-shrink: 0;">
+                        <span style="color: ${s.nameColor || '#fff'}; overflow: hidden; text-overflow: ellipsis; font-weight: bold;">
+                            ${escapeHTML(s.name)}
+                        </span>
+                        <span style="color: white; font-weight: bold;"> - ${displayScore}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    };
+    updateLeaderboard();
     mCtx.clearRect(0,0,150,150);
     if(gameMode === "2TDM") {
         mCtx.fillStyle = "rgba(0, 178, 225, 0.3)"; mCtx.fillRect(0, 0, (400/WORLD_SIZE)*150, 150);
