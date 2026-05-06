@@ -258,7 +258,16 @@ function getCachedTankIcon(tankType, color) {
     iconCache[key] = tc.toDataURL();
     return iconCache[key];
 }
+function lerp(start, end, t) {
+    return start + (end - start) * t;
+}
 
+function lerpAngle(a, b, t) {
+    let d = b - a;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return a + d * t;
+}
 function darkenColor(hex, percent) {
     hex = hex.replace('#', '');
     if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
@@ -767,8 +776,41 @@ gCtx.moveTo(0, 0); gCtx.lineTo(0, 50);
 gCtx.moveTo(0, 0); gCtx.lineTo(50, 0);
 gCtx.stroke();
 let gridPattern = null;
+const escapeHTML = (str) => {
+        const p = document.createElement('p'); p.textContent = str; return p.innerHTML;
+    };
+    
+    const updateLeaderboard = () => {
+        const entries = gameState.entities
+            .filter(e => ['tank', 'ai'].includes(e.type))
+            .sort((a, b) => b.score - a.score)
+            .slice(0, entryCount);
+
+        const leaderScore = entries.length > 0 ? Math.max(entries[0].score, 1) : 1;
+        document.getElementById('score-list').innerHTML = entries.map(s => {
+            let fillPct = Math.max(2, Math.min(100, (s.score / leaderScore) * 100));
+            let barColor = gameMode === "FFA" ? "#f0a824" : getTeamColor(s.team); 
+            let displayScore = formatScore(Math.floor(s.score));
+            let tankColor = getTeamColor(s.team); 
+            let iconUrl = getCachedTankIcon(s.tankType || 'Basic', tankColor);
+
+            return `
+                <div class="sb-entry" style="position: relative; height: 30px; margin-bottom: 2px;">
+                    <div class="sb-fill" style="width: ${fillPct}%; background-color: ${barColor}; height: 100%; position: absolute; opacity: 0.8;"></div>
+                    <div class="sb-text" style="position: relative; display: flex; align-items: center; padding: 0 6px; height: 100%; font-family: sans-serif; white-space: nowrap;">
+                        <img src="${iconUrl}" style="width: 25px; height: 25px; margin-right: 8px; flex-shrink: 0;">
+                        <span style="color: ${s.nameColor || '#fff'}; overflow: hidden; text-overflow: ellipsis; font-weight: bold;">
+                            ${escapeHTML(s.name)}
+                        </span>
+                        <span style="color: white; font-weight: bold;"> - ${displayScore}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    };
+let drawCounter = 0;
 function draw() {
-    // 1. Calculate FPS
+    drawCounter++;
     let now = performance.now();
     frames++;
     if (now - lastFpsTime >= 1000) {
@@ -835,51 +877,65 @@ function draw() {
     ctx.fillStyle = "rgba(0,0,0,0.02)"; 
     ctx.fillRect(1700 - camera.x, 1700 - camera.y, 600, 600);
 
-    const activeIds = gameState.entities.map(e => e.id);
-    for (let [id, rEnt] of renderEntities.entries()) {
-        if (!activeIds.includes(id)) {
-            const sx = rEnt.renderX - camera.x;
-            const sy = rEnt.renderY - camera.y;
-            if (sx > -200 && sx < canvas.width + 200 && sy > -200 && sy < canvas.height + 200) {
-                dyingEntities.push({ ...rEnt, deathType: 'entity', deathTime: Date.now() });
-            }
-            renderEntities.delete(id);
-        }
-    }
-
+    // --- BULLET LERPING ---
     const activeBulletIds = new Set(gameState.bullets.map(b => b.id));
     for (let [id, b] of lastBullets.entries()) {
         if (!activeBulletIds.has(id)) {
-            const sx = b.x - camera.x; const sy = b.y - camera.y;
+            const sx = b.renderX - camera.x; const sy = b.renderY - camera.y;
             if (sx > -50 && sx < canvas.width + 50 && sy > -50 && sy < canvas.height + 50) {
-                dyingEntities.push({ ...b, renderX: b.x, renderY: b.y, deathType: 'bullet', deathTime: Date.now() });
+                dyingEntities.push({ ...b, renderX: b.renderX, renderY: b.renderY, deathType: 'bullet', deathTime: Date.now() });
             }
             lastBullets.delete(id);
         }
     }
-    gameState.bullets.forEach(b => lastBullets.set(b.id, b));
+    // Update targets
+    gameState.bullets.forEach(b => {
+        if (!lastBullets.has(b.id)) {
+            lastBullets.set(b.id, { ...b, renderX: b.x, renderY: b.y });
+        } else {
+            let existing = lastBullets.get(b.id);
+            existing.x = b.x; existing.y = b.y; existing.r = b.r;
+        }
+    });
 
+    // Draw & Lerp Bullets
+    lastBullets.forEach(b => {
+        b.renderX = lerp(b.renderX, b.x, 0.2);
+        b.renderY = lerp(b.renderY, b.y, 0.2);
+        ctx.fillStyle = getTeamColor(b.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(b.renderX-camera.x, b.renderY-camera.y, b.r, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+    });
+
+    // --- DRONE LERPING ---
     const activeDroneIds = new Set(gameState.drones.map(d => d.id));
     for (let [id, d] of lastDrones.entries()) {
         if (!activeDroneIds.has(id)) {
-            const sx = d.x - camera.x; const sy = d.y - camera.y;
+            const sx = d.renderX - camera.x; const sy = d.renderY - camera.y;
             if (sx > -100 && sx < canvas.width + 100 && sy > -100 && sy < canvas.height + 100) {
-                dyingEntities.push({ ...d, renderX: d.x, renderY: d.y, deathType: 'drone', deathTime: Date.now() });
+                dyingEntities.push({ ...d, renderX: d.renderX, renderY: d.renderY, deathType: 'drone', deathTime: Date.now() });
             }
             lastDrones.delete(id);
         }
     }
-    gameState.drones.forEach(d => lastDrones.set(d.id, d));
-
-    gameState.bullets.forEach(b => {
-        ctx.fillStyle = getTeamColor(b.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30); ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(b.x-camera.x, b.y-camera.y, b.r, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+    // Update targets
+    gameState.drones.forEach(d => {
+        if (!lastDrones.has(d.id)) {
+            lastDrones.set(d.id, { ...d, renderX: d.x, renderY: d.y, renderAngle: d.angle });
+        } else {
+            let existing = lastDrones.get(d.id);
+            existing.x = d.x; existing.y = d.y; existing.angle = d.angle;
+        }
     });
 
-    gameState.drones.forEach(d => {
-        const sx = d.x - camera.x; const sy = d.y - camera.y;
+    // Draw & Lerp Drones
+    lastDrones.forEach(d => {
+        d.renderX = lerp(d.renderX, d.x, 0.2);
+        d.renderY = lerp(d.renderY, d.y, 0.2);
+        d.renderAngle = lerpAngle(d.renderAngle !== undefined ? d.renderAngle : d.angle, d.angle, 0.2);
+
+        const sx = d.renderX - camera.x; const sy = d.renderY - camera.y;
         if(sx < -50 || sx > canvas.width+50 || sy < -50 || sy > canvas.height+50) return;
-        ctx.save(); ctx.translate(sx, sy); ctx.rotate(d.angle);
+        ctx.save(); ctx.translate(sx, sy); ctx.rotate(d.renderAngle);
         ctx.lineWidth = 3; ctx.fillStyle = getTeamColor(d.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30);
         ctx.beginPath(); ctx.lineTo(d.radius, 0); ctx.lineTo(-d.radius*0.8, d.radius*0.8); ctx.lineTo(-d.radius*0.8, -d.radius*0.8); ctx.closePath();
         ctx.fill(); ctx.stroke(); ctx.restore();
@@ -960,17 +1016,33 @@ function draw() {
         ctx.restore();
     });
 
+    // --- ENTITY LERPING ---
     [...gameState.entities].sort((a,b) => (a.type.includes('tank')||a.type==='ai'?1:-1)).forEach(en => {
         if(!en.inView){ return; }
-        if (!renderEntities.has(en.id)) renderEntities.set(en.id, { ...en, renderX: en.x, renderY: en.y });
-        let rPos = renderEntities.get(en.id);
         
-        let rx = rPos.renderX; let ry = rPos.renderY;
+        // Initialize render positions if new
+        if (!renderEntities.has(en.id)) {
+            renderEntities.set(en.id, { ...en, renderX: en.x, renderY: en.y, renderAngle: en.angle });
+        }
+        
+        let rPos = renderEntities.get(en.id);
+        let rx = rPos.renderX; 
+        let ry = rPos.renderY; 
+        let ra = rPos.renderAngle !== undefined ? rPos.renderAngle : en.angle;
+        
         Object.assign(rPos, en);
-        rPos.renderX = rx + (en.x - rx) * 0.35;
-        rPos.renderY = ry + (en.y - ry) * 0.35;
+        
+        // Apply Lerping (adjusted to 0.2 to compensate for the slower server tick)
+        rPos.renderX = lerp(rx, en.x, 0.2);
+        rPos.renderY = lerp(ry, en.y, 0.2);
+        rPos.renderAngle = lerpAngle(ra, en.angle, 0.2);
+        
+        // Feed the smoothed angle back into rPos so the draw function uses it
+        rPos.angle = rPos.renderAngle; 
 
-        const sx = rPos.renderX - camera.x; const sy = rPos.renderY - camera.y;
+        const sx = rPos.renderX - camera.x; 
+        const sy = rPos.renderY - camera.y;
+        
         if(sx < -100 || sx > canvas.width+100 || sy < -100 || sy > canvas.height+100) return;
 
         if (['tank', 'ai'].includes(en.type)) {
@@ -1000,43 +1072,12 @@ function draw() {
         
         ctx.save();
         ctx.translate(sx, sy);
-        drawEntityBody(ctx, en);
+        drawEntityBody(ctx, rPos);
         ctx.restore();
     });
-
-    const escapeHTML = (str) => {
-        const p = document.createElement('p'); p.textContent = str; return p.innerHTML;
-    };
-    
-    const updateLeaderboard = () => {
-        const entries = gameState.entities
-            .filter(e => ['tank', 'ai'].includes(e.type))
-            .sort((a, b) => b.score - a.score)
-            .slice(0, entryCount);
-
-        const leaderScore = entries.length > 0 ? Math.max(entries[0].score, 1) : 1;
-        document.getElementById('score-list').innerHTML = entries.map(s => {
-            let fillPct = Math.max(2, Math.min(100, (s.score / leaderScore) * 100));
-            let barColor = gameMode === "FFA" ? "#f0a824" : getTeamColor(s.team); 
-            let displayScore = formatScore(Math.floor(s.score));
-            let tankColor = getTeamColor(s.team); 
-            let iconUrl = getCachedTankIcon(s.tankType || 'Basic', tankColor);
-
-            return `
-                <div class="sb-entry" style="position: relative; height: 30px; margin-bottom: 2px;">
-                    <div class="sb-fill" style="width: ${fillPct}%; background-color: ${barColor}; height: 100%; position: absolute; opacity: 0.8;"></div>
-                    <div class="sb-text" style="position: relative; display: flex; align-items: center; padding: 0 6px; height: 100%; font-family: sans-serif; white-space: nowrap;">
-                        <img src="${iconUrl}" style="width: 25px; height: 25px; margin-right: 8px; flex-shrink: 0;">
-                        <span style="color: ${s.nameColor || '#fff'}; overflow: hidden; text-overflow: ellipsis; font-weight: bold;">
-                            ${escapeHTML(s.name)}
-                        </span>
-                        <span style="color: white; font-weight: bold;"> - ${displayScore}</span>
-                    </div>
-                </div>
-            `;
-        }).join('');
-    };
-    updateLeaderboard();
+    if (drawCounter % 10 === 0) {
+        updateLeaderboard();
+    }
     mCtx.clearRect(0,0,150,150);
     if(gameMode === "2TDM") {
         mCtx.fillStyle = "rgba(0, 178, 225, 0.3)"; mCtx.fillRect(0, 0, (400/WORLD_SIZE)*150, 150);
