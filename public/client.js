@@ -852,10 +852,8 @@ function draw() {
             targetCamY = rSpec.renderY - canvas.height/2;
         }
     }
-
-    // --- LERP UPDATE: Camera lerping made 20% snappier (0.1 -> 0.12) ---
-    camera.x += (targetCamX - camera.x) * 0.12;
-    camera.y += (targetCamY - camera.y) * 0.12;
+    camera.x += (targetCamX - camera.x) * 0.1;
+    camera.y += (targetCamY - camera.y) * 0.1;
 
     mouse.rx = mouse.x + camera.x; 
     mouse.ry = mouse.y + camera.y;
@@ -1010,10 +1008,8 @@ function draw() {
         
         let rx = rPos.renderX; let ry = rPos.renderY;
         Object.assign(rPos, en);
-
-        // --- LERP UPDATE: Entity lerping made 20% snappier (0.35 -> 0.42) ---
-        rPos.renderX = rx + (en.x - rx) * 0.42;
-        rPos.renderY = ry + (en.y - ry) * 0.42;
+        rPos.renderX = rx + (en.x - rx) * 0.35;
+        rPos.renderY = ry + (en.y - ry) * 0.35;
 
         const sx = rPos.renderX - camera.x; const sy = rPos.renderY - camera.y;
         if(sx < -100 || sx > canvas.width+100 || sy < -100 || sy > canvas.height+100) return;
