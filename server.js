@@ -647,7 +647,7 @@ class Entity {
             if (this.hp > effectiveMaxHp) this.hp = effectiveMaxHp;
         }
         let moveSpeed = (0.5 * 0.998) + (this.stats[7] * (0.04 * 0.995)); 
-
+let isShooting = false;
         if(this.isPlayer) {
             let inputX = 0; let inputY = 0;
             if(this.inputs.left) inputX -= 1;
