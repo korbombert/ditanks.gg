@@ -395,12 +395,14 @@ function initConnection() {
     playBtn.innerText = "Connecting...";
     playBtn.disabled = true;
     
+    // Switch the click action back to spawning
+    playBtn.onclick = spawnPlayer; 
+    
     document.getElementById('disconnect-reason').style.display = 'none';
 
     if (ws) { ws.onclose = null; ws.close(); }
     connectWS(region, gameMode);
 }
-
 // Map the new listeners
 document.getElementById('gameModeInput').addEventListener('change', () => {
     populateRegions(); // changing mode repopulates regions AND reconnects
@@ -588,7 +590,7 @@ function connectWS(regionStr, modeStr) {
         }
     };
 
-    ws.onclose = (e) => {
+   ws.onclose = (e) => {
         if(myId) {
             document.getElementById('death-screen').style.display = 'flex';
             document.querySelector('.ds-title').innerText = "Disconnected";
@@ -597,18 +599,21 @@ function connectWS(regionStr, modeStr) {
             document.getElementById('ds-time').innerText = "--";
         }
         
-        // Tween button to Red & Add Redo Icon
+        // Use an inline SVG refresh/reconnect icon and change the text
         const btn = document.getElementById('playBtn');
-        btn.innerHTML = `<img src="" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 8px; filter: brightness(0) invert(1);"> Disconnected`;
+        btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px;"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg> Reconnect`;
         btn.style.background = "#f14e54"; 
         btn.style.borderBottomColor = "#c83d42"; 
         btn.disabled = false;
+        
+        // Change the button's click behavior to attempt a reconnection
+        btn.onclick = initConnection;
 
         // Show Reason
         const reasonText = e.reason || "Connection lost to the server.";
         const reasonDiv = document.getElementById('disconnect-reason');
         reasonDiv.innerText = reasonText;
-        reasonDiv.style.display = 'block';
+        reasonDiv.style.display = 'flex'; // Changed to flex so the icon inside aligns properly
     };
 }
 
