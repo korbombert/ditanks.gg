@@ -811,18 +811,8 @@ nearby.entities.forEach(e => {
                     isShooting = true; // REPLACED shoot()
                 }
             }
-            // --- NEW: Firing & Delay initialization logic ---
-        if (isShooting && !this.wasShooting) {
-            let baseReload = Math.max(5, ((30 * 1.002) - (this.stats[6] * (3 * 0.995))));
-            specs.barrels.forEach((b, i) => {
-                if (this.barrelTimers[i] <= 0) {
-                    this.barrelTimers[i] = (baseReload * (b.rel || 1)) * (b.delay || 0); // Inject the delay offset
-                }
-            });
-        }
-        
-        if (isShooting) shoot(this);
-        this.wasShooting = isShooting;
+            
+            // AI Upgrades remain inside the AI block
             if (this.thinkTimer === 0) {
                 if (this.level >= 15 && this.tankType === 'Basic' && this.type === 'ai') {
                     if (Math.random() > 0.20) { 
@@ -842,8 +832,23 @@ nearby.entities.forEach(e => {
                     }
                 }
             }
+        } // <--- CLOSE THE AI BLOCK HERE
+
+        // ✅ MOVED OUTSIDE: Now this runs for both players AND AI
+        // --- NEW: Firing & Delay initialization logic ---
+        if (isShooting && !this.wasShooting) {
+            let baseReload = Math.max(5, ((30 * 1.002) - (this.stats[6] * (3 * 0.995))));
+            specs.barrels.forEach((b, i) => {
+                if (this.barrelTimers[i] <= 0) {
+                    this.barrelTimers[i] = (baseReload * (b.rel || 1)) * (b.delay || 0); // Inject the delay offset
+                }
+            });
         }
         
+        if (isShooting) shoot(this);
+        this.wasShooting = isShooting;
+        
+        // AI Stat point spending (leave this where it is, it's already safely scoped)
         if(this.type === 'ai' && this.statPoints > 0){
             const bulletStats = [3,4,5,6];
             const otherStats = [0,1,2,7]; 
