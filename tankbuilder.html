@@ -462,57 +462,40 @@ function refreshBarrelList(){
     list.innerHTML = '';
 
     tank.barrels.forEach((b,i)=>{
-    ctx.rotate(b.angle || 0);
 
-    ctx.fillStyle =
-        i===selectedBarrel
-        ? '#95e7ff'
-        : '#999';
+        const card = document.createElement('div');
 
-    ctx.strokeStyle = '#555';
-    ctx.lineWidth = 5;
+        card.className =
+            'barrelCard' +
+            (i === selectedBarrel ? ' active' : '');
 
-    const width = b.w || 18;
-    const length = 35 * (b.l || 1.8);
+        card.innerHTML = `
+            <div class="barrelHeader">
+                <span>Barrel ${i+1}</span>
+                <span class="barrelMini">
+                    ${Math.round(radToDeg(b.angle || 0))}°
+                </span>
+            </div>
 
-    if(b.w2){
+            <div class="barrelMini">
+                x:${b.x || 0}
+                y:${b.y || 0}
+                w:${b.w || 18}
+                l:${b.l || 1.8}
+            </div>
+        `;
 
-        ctx.beginPath();
+        card.onclick = ()=>{
 
-        ctx.moveTo(0, -width/2 + (b.y || 0));
+            selectedBarrel = i;
 
-        ctx.lineTo(length, -(b.w2/2) + (b.y || 0));
+            refreshBarrelList();
+            loadEditor();
+        };
 
-        ctx.lineTo(length, (b.w2/2) + (b.y || 0));
-
-        ctx.lineTo(0, width/2 + (b.y || 0));
-
-        ctx.closePath();
-
-        ctx.fill();
-        ctx.stroke();
-
-    } else {
-
-        ctx.fillRect(
-            0,
-            -width/2 + (b.y || 0),
-            length,
-            width
-        );
-
-        ctx.strokeRect(
-            0,
-            -width/2 + (b.y || 0),
-            length,
-            width
-        );
-    }
-
-    ctx.restore();
-});
+        list.appendChild(card);
+    });
 }
-
 document.getElementById('addBarrelBtn').onclick = ()=>{
 
     tank.barrels.push(defaultBarrel());
