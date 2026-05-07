@@ -155,7 +155,7 @@ let lastBullets = new Map();
 let lastDrones = new Map();
 let dyingEntities = [];
 
-let fov = 1.5;
+let fov = 1.4;
 function worldToScreenX(x) {
     return (x - camera.x) / fov;
 }
@@ -216,7 +216,7 @@ const TANK_SPECS = {
     'Sniper': { barrels: [{x:0, y:0, w:18, l:2.4, angle:0}] },
     'Machine Gun': { barrels: [{x:0, y:0, w:22, w2: 32, l:1.6, angle:0}] },
     'Flank Guard': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0}, {x:0, y:0, w:18, l:1.5, angle:Math.PI}] },
-    'Overseer': { barrels: [{x:0, y:0, w:25, w2:32, l:1.5, angle:Math.PI/2}, {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2}] },
+    'Overseer': { barrels: [{x:0, y:0, w:25, w2:33, l:1.5, angle:Math.PI/2}, {x:0, y:0, w:25, w2:33, l:1.3, angle:-Math.PI/2}] },
     'Destroyer': { barrels: [{x:0, y:0, w:35, l:1.9, angle:0}] },
     'Octo Tank': { barrels: [
         {x:0, y:0, w:16, l:1.8, angle:0}, {x:0, y:0, w:16, l:1.8, angle:Math.PI/4},
@@ -738,7 +738,8 @@ function updateUI() {
 }
 
 
-function drawPoly(context, sides, r) {
+function drawPoly(context, sides, r)
+r = scaleSize(r)
     context.beginPath();
     for(let i=0; i<sides; i++){
         let a = (i * Math.PI * 2 / sides);
@@ -748,7 +749,7 @@ function drawPoly(context, sides, r) {
 }
 
 function drawEntityBody(context, en) {
-    context.lineWidth = 4;
+    context.lineWidth = 4/fov;
     const radius = scaleSize(en.radius);
     if (['tank', 'ai'].includes(en.type)) {
         let col = getTeamColor(en.team);
