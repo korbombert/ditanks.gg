@@ -796,12 +796,14 @@ function drawEntityBody(context, en) {
 
     } else {
 
-        if(en.type==='square'){
-            context.fillStyle=COLORS.square;
-            context.strokeStyle=darkenColor(COLORS.square, 30);
-            context.fillRect(-12,-12,24,24);
-            context.strokeRect(-12,-12,24,24);
-        }
+        if(en.type === 'square'){
+        context.fillStyle = COLORS.square;
+        context.strokeStyle = darkenColor(COLORS.square, 30);
+        // Scale the size based on FOV (original was roughly 12 radius)
+        let s = scaleSize(12);
+        context.fillRect(-s, -s, s * 2, s * 2);
+        context.strokeRect(-s, -s, s * 2, s * 2);
+    }
 
         if(en.type==='triangle'){
             context.fillStyle=COLORS.triangle;
@@ -930,13 +932,18 @@ function draw() {
 );
     ctx.fillRect(-50, -50, canvas.width + 100, canvas.height + 100);
     ctx.restore();
+    // --- TDM BASE DRAWING ---
     if(gameMode === "2TDM") {
+        // Left Base (Team 1 - Blue)
+        ctx.fillStyle = COLORS.team1 + "26"; // Added 15% opacity (hex 26)
         ctx.fillRect(
             worldToScreenX(0),
             worldToScreenY(0),
             scaleSize(400),
             scaleSize(WORLD_SIZE)
         );
+        // Right Base (Team 2 - Red)
+        ctx.fillStyle = COLORS.team2 + "26";
         ctx.fillRect(
             worldToScreenX(WORLD_SIZE - 400),
             worldToScreenY(0),
@@ -944,30 +951,22 @@ function draw() {
             scaleSize(WORLD_SIZE)
         );
     } else if (gameMode === "4TDM") {
-        ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(
-            worldToScreenX(0),
-            worldToScreenY(0),
-            scaleSize(BASE_SIZE),
-            scaleSize(BASE_SIZE)
-        ); // TL (Blue)
-        ctx.fillStyle = "rgba(190, 127, 245, 0.15)";ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(
-            worldToScreenX(WORLD_SIZE-BASE_SIZE),
-            worldToScreenY(0),
-            scaleSize(BASE_SIZE),
-            scaleSize(BASE_SIZE)
-        ); // TR (Purple)
-        ctx.fillStyle = "rgba(0, 225, 110, 0.15)"; ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(
-            worldToScreenX(0),
-            worldToScreenY(WORLD_SIZE-BASE_SIZE),
-            scaleSize(BASE_SIZE),
-            scaleSize(BASE_SIZE)
-        ); // BL (Green)
-        ctx.fillStyle = "rgba(241, 78, 84, 0.15)"; ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(
-            worldToScreenX(WORLD_SIZE-BASE_SIZE),
-            worldToScreenY(WORLD_SIZE-BASE_SIZE),
-            scaleSize(BASE_SIZE),
-            scaleSize(BASE_SIZE)
-        );  // BR (Red)
+        let bs = scaleSize(BASE_SIZE);
+        // TL (Team 1 - Blue)
+        ctx.fillStyle = COLORS.team1 + "26"; 
+        ctx.fillRect(worldToScreenX(0), worldToScreenY(0), bs, bs);
+        
+        // TR (Team 3 - Purple)
+        ctx.fillStyle = (COLORS.team3 || "#be7ff5") + "26"; 
+        ctx.fillRect(worldToScreenX(WORLD_SIZE-BASE_SIZE), worldToScreenY(0), bs, bs);
+        
+        // BL (Team 4 - Green)
+        ctx.fillStyle = (COLORS.team4 || "#00e16e") + "26"; 
+        ctx.fillRect(worldToScreenX(0), worldToScreenY(WORLD_SIZE-BASE_SIZE), bs, bs);
+        
+        // BR (Team 2 - Red)
+        ctx.fillStyle = COLORS.team2 + "26"; 
+        ctx.fillRect(worldToScreenX(WORLD_SIZE-BASE_SIZE), worldToScreenY(WORLD_SIZE-BASE_SIZE), bs, bs);
     }
 
     ctx.fillStyle = "rgba(0,0,0,0.02)"; 
@@ -1196,23 +1195,32 @@ const sy = worldToScreenY(d.renderY);
             ctx.lineJoin = "round"; 
             ctx.strokeStyle = isWhite ? "black" : (darkenColor(en.nameColor, 50) || "black");
             ctx.lineWidth = 3;
-            ctx.font = "bold 14px Ubuntu";
+            // Instead of 14px constant:
+            let fontSize = Math.max(8, 14 / fov); 
+            ctx.font = `bold ${fontSize}px Ubuntu`;
             ctx.textAlign = "center";
             
-            ctx.strokeText(en.name, sx, sy - scaleSize(en.radius) - 25);
-            ctx.fillText(en.name, sx, sy - scaleSize(en.radius) - 25);
+            ctx.strokeText(en.name, sx, sy - en.radius - 25);
+            ctx.fillText(en.name, sx, sy - en.radius - 25);
             ctx.font = "11px Ubuntu";
             ctx.fillStyle = "white";
             ctx.strokeStyle = "black";
             const displayScore = formatScore(Math.floor(en.score));
-            ctx.strokeText(displayScore, sx, sy - scaleSize(en.radius) - 12);
-            ctx.fillText(displayScore, sx, sy - scaleSize(en.radius) - 12);
+            ctx.strokeText(displayScore, sx, sy - en.radius - 12);
+            ctx.fillText(displayScore, sx, sy - en.radius - 12);
         }
         
         if(en.hp < en.maxHp) {
-            ctx.fillStyle = '#555'; ctx.fillRect(sx-20, sy+scaleSize(en.radius)+10, 40, 6);
-            ctx.fillStyle = '#85e37d'; ctx.fillRect(sx-20, sy+scaleSize(en.radius)+10, 40*(en.hp/en.maxHp), 6);
-        }
+        let barWidth = scaleSize(40);
+        let barHeight = scaleSize(6);
+        let barOffset = scaleSize(en.radius) + scaleSize(10);
+        
+        ctx.fillStyle = '#555'; 
+        ctx.fillRect(sx - barWidth / 2, sy + barOffset, barWidth, barHeight);
+        
+        ctx.fillStyle = '#85e37d'; 
+        ctx.fillRect(sx - barWidth / 2, sy + barOffset, barWidth * (en.hp / en.maxHp), barHeight);
+    }
         
         ctx.save();
         ctx.translate(sx, sy);
