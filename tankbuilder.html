@@ -332,6 +332,46 @@ const bgCtx = bgCanvas.getContext('2d');
 
 let selectedBarrel = 0;
 
+function degToRad(d){
+    return d * Math.PI / 180;
+}
+
+function radToDeg(r){
+    return r * 180 / Math.PI;
+}
+
+function angleToCode(rad){
+
+    const pi = Math.PI;
+
+    const values = [
+        [0, '0'],
+        [pi/6, 'Math.PI/6'],
+        [pi/4, 'Math.PI/4'],
+        [pi/3, 'Math.PI/3'],
+        [pi/2, 'Math.PI/2'],
+        [2*pi/3, '2*Math.PI/3'],
+        [3*pi/4, '3*Math.PI/4'],
+        [5*pi/6, '5*Math.PI/6'],
+        [pi, 'Math.PI'],
+        [-pi/6, '-Math.PI/6'],
+        [-pi/4, '-Math.PI/4'],
+        [-pi/3, '-Math.PI/3'],
+        [-pi/2, '-Math.PI/2'],
+        [-2*pi/3, '-2*Math.PI/3'],
+        [-3*pi/4, '-3*Math.PI/4'],
+        [-5*pi/6, '-5*Math.PI/6'],
+    ];
+
+    for(const [val,str] of values){
+        if(Math.abs(rad - val) < 0.001){
+            return str;
+        }
+    }
+
+    return Number(rad.toFixed(4));
+}
+
 const defaultBarrel = () => ({
     x:0,
     y:0,
@@ -352,24 +392,33 @@ let tank = {
 };
 
 const properties = [
-    'x','y','w','w2','l','angle',
-    'spread','dmg','spd','rel',
-    'size','delay'
+    'x','y','w','w2','l',
+    'angle',
+    'spread','dmg','spd',
+    'rel','size','delay'
 ];
 
 const editorGrid = document.getElementById('editorGrid');
 
 properties.forEach(prop=>{
+
     const wrap = document.createElement('div');
 
     wrap.innerHTML = `
-        <div class="smallLabel">${prop}</div>
-        <input class="smallInput" type="number" step="0.1" id="prop_${prop}">
+        <div class="smallLabel">
+            ${prop}${prop === 'angle' ? ' (deg)' : ''}
+        </div>
+
+        <input class="smallInput"
+               type="number"
+               step="0.1"
+               id="prop_${prop}">
     `;
 
     editorGrid.appendChild(wrap);
 
     wrap.querySelector('input').addEventListener('input',e=>{
+
         let b = tank.barrels[selectedBarrel];
         if(!b) return;
 
@@ -378,7 +427,12 @@ properties.forEach(prop=>{
         if(isNaN(val)){
             delete b[prop];
         }else{
-            b[prop] = val;
+
+            if(prop === 'angle'){
+                b[prop] = degToRad(val);
+            }else{
+                b[prop] = val;
+            }
         }
 
         refreshBarrelList();
@@ -386,31 +440,44 @@ properties.forEach(prop=>{
 });
 
 function loadEditor(){
+
     let b = tank.barrels[selectedBarrel];
     if(!b) return;
 
     properties.forEach(prop=>{
+
         const input = document.getElementById('prop_'+prop);
-        input.value = b[prop] ?? '';
+
+        if(prop === 'angle'){
+            input.value = Number(radToDeg(b[prop] || 0).toFixed(2));
+        }else{
+            input.value = b[prop] ?? '';
+        }
     });
 }
 
 function refreshBarrelList(){
+
     const list = document.getElementById('barrelList');
     list.innerHTML = '';
 
     tank.barrels.forEach((b,i)=>{
+
         const div = document.createElement('div');
-        div.className = 'barrelCard' + (i===selectedBarrel?' active':'');
+
+        div.className =
+            'barrelCard' +
+            (i===selectedBarrel?' active':'');
 
         div.innerHTML = `
             <div class="barrelHeader">
                 <span>Barrel ${i+1}</span>
-                <span>${Math.round((b.angle||0)*57.2958)}°</span>
+                <span>${Math.round(radToDeg(b.angle || 0))}°</span>
             </div>
 
             <div class="barrelMini">
-                x:${b.x} y:${b.y}
+                x:${b.x}
+                y:${b.y}
                 • w:${b.w}
                 • l:${b.l}
             </div>
@@ -427,27 +494,68 @@ function refreshBarrelList(){
 }
 
 document.getElementById('addBarrelBtn').onclick = ()=>{
+
     tank.barrels.push(defaultBarrel());
+
     selectedBarrel = tank.barrels.length-1;
+
     refreshBarrelList();
     loadEditor();
 };
 
 document.getElementById('deleteBarrelBtn').onclick = ()=>{
+
     if(tank.barrels.length <= 1) return;
 
     tank.barrels.splice(selectedBarrel,1);
-    selectedBarrel = Math.max(0,selectedBarrel-1);
+
+    selectedBarrel =
+        Math.max(0,selectedBarrel-1);
 
     refreshBarrelList();
     loadEditor();
 };
 
-document.getElementById('tankName').addEventListener('input',e=>{
+/* DUPLICATE BUTTON */
+
+const dupBtn = document.createElement('button');
+
+dupBtn.className = 'btn';
+dupBtn.innerText = 'Duplicate';
+
+document.getElementById('deleteBarrelBtn')
+.parentNode.appendChild(dupBtn);
+
+dupBtn.onclick = ()=>{
+
+    const copy = JSON.parse(
+        JSON.stringify(
+            tank.barrels[selectedBarrel]
+        )
+    );
+
+    copy.x += 10;
+    copy.y += 10;
+
+    tank.barrels.splice(
+        selectedBarrel+1,
+        0,
+        copy
+    );
+
+    selectedBarrel++;
+
+    refreshBarrelList();
+    loadEditor();
+};
+
+document.getElementById('tankName')
+.addEventListener('input',e=>{
     tank.name = e.target.value;
 });
 
 document.getElementById('centerBtn').onclick = ()=>{
+
     tank.barrels.forEach(b=>{
         b.x = 0;
         b.y = 0;
@@ -460,52 +568,107 @@ document.getElementById('exportBtn').onclick = ()=>{
     exportTank();
 };
 
-document.getElementById('loadExampleBtn').onclick = ()=>{
-    tank = {
-        name:'Twin',
-        barrels:[
-            {
-                x:0,
-                y:-10,
-                w:16,
-                l:1.8,
-                angle:0,
-                spread:0,
-                dmg:0.67,
-                spd:1,
-                rel:1,
-                size:1,
-                delay:0
-            },
-            {
-                x:0,
-                y:10,
-                w:16,
-                l:1.8,
-                angle:0,
-                spread:0,
-                dmg:0.67,
-                spd:1,
-                rel:1,
-                size:1,
-                delay:0.5
-            }
-        ]
-    };
+/* IMPORT BUTTON */
 
-    document.getElementById('tankName').value = tank.name;
+const importBtn = document.createElement('button');
 
-    selectedBarrel = 0;
-    refreshBarrelList();
-    loadEditor();
+importBtn.className = 'btn gray';
+importBtn.innerText = 'Import Tank';
+
+document.getElementById('toolbar')
+.appendChild(importBtn);
+
+importBtn.onclick = ()=>{
+
+    const text = prompt(
+        'Paste tank object here'
+    );
+
+    if(!text) return;
+
+    try{
+
+        const wrapped = '(' + text + ')';
+
+        const obj = eval(wrapped);
+
+        const tankName =
+            Object.keys(obj)[0];
+
+        const tankData =
+            obj[tankName];
+
+        tank.name = tankName;
+
+        tank.barrels =
+            JSON.parse(
+                JSON.stringify(
+                    tankData.barrels
+                )
+            );
+
+        document.getElementById(
+            'tankName'
+        ).value = tank.name;
+
+        selectedBarrel = 0;
+
+        refreshBarrelList();
+        loadEditor();
+
+        alert('Imported successfully.');
+
+    }catch(err){
+
+        console.error(err);
+
+        alert(
+            'Import failed. Check syntax.'
+        );
+    }
 };
 
 function exportTank(){
 
+    function stringifyBarrel(b, client=false){
+
+        let entries = [];
+
+        for(let key in b){
+
+            if(client){
+
+                if([
+                    'spread',
+                    'dmg',
+                    'spd',
+                    'rel',
+                    'size',
+                    'delay'
+                ].includes(key)){
+                    continue;
+                }
+            }
+
+            let val = b[key];
+
+            if(key === 'angle'){
+                val = angleToCode(val);
+            }
+
+            entries.push(`${key}:${val}`);
+        }
+
+        return `{${entries.join(', ')}}`;
+    }
+
     const server = `
 '${tank.name}': {
     barrels: [
-${tank.barrels.map(b=>`        ${JSON.stringify(b)}`).join(',\n')}
+${tank.barrels.map(
+b=>'        '+
+stringifyBarrel(b)
+).join(',\n')}
     ]
 },
 `;
@@ -513,23 +676,17 @@ ${tank.barrels.map(b=>`        ${JSON.stringify(b)}`).join(',\n')}
     const client = `
 '${tank.name}': {
     barrels: [
-${tank.barrels.map(b=>{
-    const clone = {...b};
-
-    delete clone.spread;
-    delete clone.dmg;
-    delete clone.spd;
-    delete clone.rel;
-    delete clone.size;
-    delete clone.delay;
-
-    return `        ${JSON.stringify(clone)}`;
-}).join(',\n')}
+${tank.barrels.map(
+b=>'        '+
+stringifyBarrel(b,true)
+).join(',\n')}
     ]
 },
 `;
 
-    document.getElementById('exportArea').value =
+    document.getElementById(
+        'exportArea'
+    ).value =
 `// SERVER
 ${server}
 
@@ -538,35 +695,61 @@ ${client}`;
 }
 
 function resize(){
+
     bgCanvas.width = innerWidth;
     bgCanvas.height = innerHeight;
 
-    previewCanvas.width = previewCanvas.parentElement.clientWidth;
-    previewCanvas.height = previewCanvas.parentElement.clientHeight;
+    previewCanvas.width =
+        previewCanvas.parentElement.clientWidth;
+
+    previewCanvas.height =
+        previewCanvas.parentElement.clientHeight;
 }
 
 window.addEventListener('resize',resize);
+
 resize();
 
 function drawBackground(){
 
     bgCtx.fillStyle = '#b1b1b1';
-    bgCtx.fillRect(0,0,bgCanvas.width,bgCanvas.height);
 
-    bgCtx.strokeStyle = 'rgba(0,0,0,0.06)';
+    bgCtx.fillRect(
+        0,0,
+        bgCanvas.width,
+        bgCanvas.height
+    );
+
+    bgCtx.strokeStyle =
+        'rgba(0,0,0,0.06)';
+
     bgCtx.lineWidth = 1;
 
     for(let x=0;x<bgCanvas.width;x+=50){
+
         bgCtx.beginPath();
+
         bgCtx.moveTo(x,0);
-        bgCtx.lineTo(x,bgCanvas.height);
+
+        bgCtx.lineTo(
+            x,
+            bgCanvas.height
+        );
+
         bgCtx.stroke();
     }
 
     for(let y=0;y<bgCanvas.height;y+=50){
+
         bgCtx.beginPath();
+
         bgCtx.moveTo(0,y);
-        bgCtx.lineTo(bgCanvas.width,y);
+
+        bgCtx.lineTo(
+            bgCanvas.width,
+            y
+        );
+
         bgCtx.stroke();
     }
 }
@@ -575,7 +758,11 @@ drawBackground();
 
 function drawTank(){
 
-    ctx.clearRect(0,0,previewCanvas.width,previewCanvas.height);
+    ctx.clearRect(
+        0,0,
+        previewCanvas.width,
+        previewCanvas.height
+    );
 
     const cx = previewCanvas.width/2;
     const cy = previewCanvas.height/2;
@@ -584,26 +771,51 @@ function drawTank(){
 
         ctx.save();
 
-        ctx.translate(cx+b.x, cy+b.y);
+        ctx.translate(
+            cx+b.x,
+            cy+b.y
+        );
+
         ctx.rotate(b.angle || 0);
 
-        ctx.fillStyle = i===selectedBarrel
+        ctx.fillStyle =
+            i===selectedBarrel
             ? '#95e7ff'
             : '#999';
 
         ctx.strokeStyle = '#555';
+
         ctx.lineWidth = 5;
 
         let width = b.w || 18;
-        let length = (b.l || 1.8) * 40;
+
+        let length =
+            (b.l || 1.8) * 40;
 
         if(b.w2){
 
             ctx.beginPath();
-            ctx.moveTo(0,-width/2);
-            ctx.lineTo(length,-(b.w2/2));
-            ctx.lineTo(length,(b.w2/2));
-            ctx.lineTo(0,width/2);
+
+            ctx.moveTo(
+                0,
+                -width/2
+            );
+
+            ctx.lineTo(
+                length,
+                -(b.w2/2)
+            );
+
+            ctx.lineTo(
+                length,
+                (b.w2/2)
+            );
+
+            ctx.lineTo(
+                0,
+                width/2
+            );
+
             ctx.closePath();
 
             ctx.fill();
@@ -612,7 +824,15 @@ function drawTank(){
         }else{
 
             ctx.beginPath();
-            ctx.roundRect(0,-width/2,length,width,6);
+
+            ctx.roundRect(
+                0,
+                -width/2,
+                length,
+                width,
+                6
+            );
+
             ctx.fill();
             ctx.stroke();
         }
@@ -621,35 +841,65 @@ function drawTank(){
     });
 
     ctx.beginPath();
-    ctx.arc(cx,cy,35,0,Math.PI*2);
+
+    ctx.arc(
+        cx,
+        cy,
+        35,
+        0,
+        Math.PI*2
+    );
+
     ctx.fillStyle = '#00b2e1';
+
     ctx.fill();
 
     ctx.lineWidth = 6;
+
     ctx.strokeStyle = '#0085a8';
+
     ctx.stroke();
 }
 
 let dragging = false;
 
-previewCanvas.addEventListener('mousedown',e=>{
+previewCanvas.addEventListener(
+'mousedown',e=>{
 
-    const rect = previewCanvas.getBoundingClientRect();
+    const rect =
+        previewCanvas
+        .getBoundingClientRect();
 
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
+    const mx =
+        e.clientX - rect.left;
 
-    const cx = previewCanvas.width/2;
-    const cy = previewCanvas.height/2;
+    const my =
+        e.clientY - rect.top;
 
-    for(let i=tank.barrels.length-1;i>=0;i--){
+    const cx =
+        previewCanvas.width/2;
+
+    const cy =
+        previewCanvas.height/2;
+
+    for(
+        let i=tank.barrels.length-1;
+        i>=0;
+        i--
+    ){
 
         let b = tank.barrels[i];
 
-        let dx = mx - (cx+b.x);
-        let dy = my - (cy+b.y);
+        let dx =
+            mx - (cx+b.x);
 
-        if(Math.hypot(dx,dy) < 35){
+        let dy =
+            my - (cy+b.y);
+
+        if(
+            Math.hypot(dx,dy)
+            < 35
+        ){
 
             selectedBarrel = i;
 
@@ -663,43 +913,64 @@ previewCanvas.addEventListener('mousedown',e=>{
     }
 });
 
-window.addEventListener('mouseup',()=>{
+window.addEventListener(
+'mouseup',
+()=>{
     dragging = false;
 });
 
-window.addEventListener('mousemove',e=>{
+window.addEventListener(
+'mousemove',
+e=>{
 
     if(!dragging) return;
 
-    const rect = previewCanvas.getBoundingClientRect();
+    const rect =
+        previewCanvas
+        .getBoundingClientRect();
 
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
+    const mx =
+        e.clientX - rect.left;
 
-    const cx = previewCanvas.width/2;
-    const cy = previewCanvas.height/2;
+    const my =
+        e.clientY - rect.top;
 
-    let b = tank.barrels[selectedBarrel];
+    const cx =
+        previewCanvas.width/2;
 
-    b.x = Math.round(mx - cx);
-    b.y = Math.round(my - cy);
+    const cy =
+        previewCanvas.height/2;
+
+    let b =
+        tank.barrels[selectedBarrel];
+
+    b.x =
+        Math.round(mx - cx);
+
+    b.y =
+        Math.round(my - cy);
 
     loadEditor();
     refreshBarrelList();
 });
 
-previewCanvas.addEventListener('wheel',e=>{
+previewCanvas.addEventListener(
+'wheel',
+e=>{
 
     e.preventDefault();
 
-    let b = tank.barrels[selectedBarrel];
+    let b =
+        tank.barrels[selectedBarrel];
 
-    b.angle += e.deltaY * 0.0025;
+    b.angle +=
+        e.deltaY * 0.0025;
 
     loadEditor();
     refreshBarrelList();
 
-},{passive:false});
+},
+{passive:false});
 
 function loop(){
 
@@ -709,7 +980,9 @@ function loop(){
 }
 
 refreshBarrelList();
+
 loadEditor();
+
 loop();
 </script>
 
