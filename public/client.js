@@ -1196,17 +1196,19 @@ const sy = worldToScreenY(d.renderY);
             ctx.strokeStyle = isWhite ? "black" : (darkenColor(en.nameColor, 50) || "black");
             ctx.lineWidth = 3;
             // Instead of 14px constant:
-            let fontSize = Math.max(8, 14 / fov); 
+            let fontSize = Math.max(7, 14 / fov); 
             ctx.font = `bold ${fontSize}px Ubuntu`;
             ctx.textAlign = "center";
             
             ctx.strokeText(en.name, sx, sy - en.radius - 25);
             ctx.fillText(en.name, sx, sy - en.radius - 25);
-            ctx.font = "11px Ubuntu";
+             // Instead of 14px constant:
+            let fontSize = Math.max(5.5, 11 / fov); 
+            ctx.font = `bold ${fontSize}px Ubuntu`;
             ctx.fillStyle = "white";
             ctx.strokeStyle = "black";
             const displayScore = formatScore(Math.floor(en.score));
-            ctx.strokeText(displayScore, sx, sy - en.radius - 12);
+            ctx.strokeText(displayScore, sx, sy - en.radius- 12);
             ctx.fillText(displayScore, sx, sy - en.radius - 12);
         }
         
