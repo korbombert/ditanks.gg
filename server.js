@@ -231,6 +231,9 @@ app.get('/api/me', (req, res) => {
 app.get('/app', requireAdmin, (req, res) => {
     res.sendFile(path.join(__dirname, 'admin.html'));
 });
+app.get('/app/build/tank', requireAdmin, (req, res) => {
+    res.sendFile(path.join(__dirname, 'tankbuilder.html'));
+});
 
 app.get('/api/servers', (req, res) => {
     const serverList = {};
