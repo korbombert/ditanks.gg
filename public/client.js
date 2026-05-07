@@ -208,8 +208,8 @@ const TANK_SPECS = {
         {x:0, y:0, w:16, l:1.8, angle:-Math.PI/2}, {x:0, y:0, w:16, l:1.8, angle:-Math.PI/4}
     ] },
     'Triplet': { barrels: [
-        {x:0, y:-12, w:14, l:1.6, angle:0}, {x:0, y:12, w:14, l:1.6, angle:0},
-        {x:0, y:0, w:14, l:1.8, angle:0}
+        {x:0, y:-12, w:12, l:1.65, angle:0}, {x:0, y:12, w:12, l:1.65, angle:0},
+        {x:0, y:0, w:12, l:1.9, angle:0}
     ] },
     'Tri-angle': { barrels: [
         {x:0, y:0, w:18, l:1.8, angle:0},
@@ -610,7 +610,7 @@ function connectWS(regionStr, modeStr) {
         
         // Use an inline SVG refresh/reconnect icon and change the text
         const btn = document.getElementById('playBtn');
-        btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px;"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg> Reconnect`;
+        btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px;"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg> Disconnected`;
         btn.style.background = "#f14e54"; 
         btn.style.borderBottomColor = "#c83d42"; 
         btn.disabled = false;
