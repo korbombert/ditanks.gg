@@ -424,9 +424,9 @@ const TANK_SPECS = {
         {x:0, y:0, w:14, l:1.8, angle:0, spread: 0, dmg: 0.47, spd: 1, rel: 0.8, size: 1, delay: 0}
     ]},
     'Tri-angle': { barrels: [
-        {x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 0.8, spd: 0.9, rel: 1, size: 1, delay: 0},
-        {x:0, y:0, w:16, l:1.6, angle:5*Math.PI/6, spread: 0, recoilMult: 2.5, dmg: 0.8, spd: 0.9, rel: 1, size: 1, delay: 0.5},
-        {x:0, y:0, w:16, l:1.6, angle:-5*Math.PI/6, spread: 0, recoilMult: 2.5, dmg: 0.8, spd: 0.9, rel: 1, size: 1, delay: 0.5}
+        {x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 0.1, spd: 0.9, rel: 1, size: 1, delay: 0},
+        {x:0, y:0, w:16, l:1.6, angle:5*Math.PI/6, spread: 0, recoilMult: 2.5, dmg: 0.3, spd: 0.9, rel: 1, size: 1, delay: 0.5},
+        {x:0, y:0, w:16, l:1.6, angle:-5*Math.PI/6, spread: 0, recoilMult: 2.5, dmg: 0.3, spd: 0.9, rel: 1, size: 1, delay: 0.5}
     ]}
 };
 class SpatialGrid {
