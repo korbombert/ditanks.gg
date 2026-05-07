@@ -154,6 +154,23 @@ let renderEntities = new Map();
 let lastBullets = new Map();
 let lastDrones = new Map();
 let dyingEntities = [];
+
+let fov = 1.5;
+function worldToScreenX(x) {
+    return (x - camera.x) / fov;
+}
+function worldToScreenY(y) {
+    return (y - camera.y) / fov;
+}
+function screenToWorldX(x) {
+    return camera.x + (x * fov);
+}
+function screenToWorldY(y) {
+    return camera.y + (y * fov);
+}
+function scaleSize(v) {
+    return v / fov;
+}
 const deathCanvas = document.createElement('canvas');
 deathCanvas.width = 300;
 deathCanvas.height = 300;
@@ -732,7 +749,7 @@ function drawPoly(context, sides, r) {
 
 function drawEntityBody(context, en) {
     context.lineWidth = 4;
-
+    const radius = scaleSize(en.radius);
     if (['tank', 'ai'].includes(en.type)) {
         let col = getTeamColor(en.team);
         context.fillStyle = col;
@@ -741,18 +758,18 @@ function drawEntityBody(context, en) {
         specs.barrels.forEach(b => {
             context.save();
             context.rotate(en.angle + (b.angle || 0));
-            const offsetScale = en.radius / 20; 
+            const offsetScale = radius / 20; 
             context.translate(
                 (b.x || 0) * offsetScale,
                 (b.y || 0) * offsetScale
             );
             context.fillStyle = "#999";
             context.strokeStyle = darkenColor("#999", 30);
-            const width = en.radius * (b.w ? b.w / 20 : 0.9);
-            const length = en.radius * (b.l || 1.8);
+            const width = radius * (b.w ? b.w / 20 : 0.9);
+            const length = radius * (b.l || 1.8);
 
             if (b.w2) {
-                const width2 = en.radius * (b.w2 / 20);
+                const width2 = radius * (b.w2 / 20);
                 context.beginPath();
                 context.moveTo(0, -width / 2);
                 context.lineTo(length, -(width2 / 2));
@@ -772,7 +789,7 @@ function drawEntityBody(context, en) {
 
         // Tank body
         context.beginPath();
-        context.arc(0, 0, en.radius, 0, Math.PI * 2);
+        context.arc(0, 0, radius, 0, Math.PI * 2);
         context.fill();
         context.stroke();
 
@@ -789,28 +806,27 @@ function drawEntityBody(context, en) {
             context.fillStyle=COLORS.triangle;
             context.strokeStyle=darkenColor(COLORS.triangle, 30);
             context.rotate(en.angle);
-            drawPoly(context, 3, en.radius);
+            drawPoly(context, 3, radius);
         }
 
         if(en.type==='pentagon'){
             context.fillStyle=COLORS.pentagon;
             context.strokeStyle=darkenColor(COLORS.pentagon, 30);
             context.rotate(en.angle);
-            drawPoly(context, 5, en.radius);
+            drawPoly(context, 5, radius);
         }
 
         if(en.type==='hexagon'){
             context.fillStyle=COLORS.hexagon;
             context.strokeStyle=darkenColor(COLORS.hexagon, 30);
             context.rotate(en.angle);
-            drawPoly(context, 6, en.radius);
+            drawPoly(context, 6, radius);
         }
     }
 }
 let lastFpsTime = 0;
 let frames = 0;
 let currentFps = 0;
-// --- Cache the Grid Pattern ---
 const gridCanvas = document.createElement('canvas');
 gridCanvas.width = 50; 
 gridCanvas.height = 50;
@@ -880,13 +896,13 @@ function draw() {
         if(me) {
             if (!renderEntities.has(me.id)) renderEntities.set(me.id, { ...me, renderX: me.x, renderY: me.y });
             let rMe = renderEntities.get(me.id);
-            targetCamX = rMe.renderX - canvas.width/2;
-            targetCamY = rMe.renderY - canvas.height/2;
+            targetCamX = rMe.renderX - (canvas.width * fov) / 2;
+            targetCamY = rMe.renderY - (canvas.height * fov) / 2;
 
             if (myStats.tankType === 'Sniper' && (mouse.rightDown || keys.shift)) {
                 let mouseAngle = Math.atan2(mouse.ry - rMe.renderY, mouse.rx - rMe.renderX);
-                targetCamX += Math.cos(mouseAngle) * 450;
-                targetCamY += Math.sin(mouseAngle) * 450;
+                targetCamX += Math.cos(mouseAngle) * (450 * fov);
+                targetCamY += Math.sin(mouseAngle) * (450 * fov);
             }
         }
     } else if (spectateId) {
@@ -894,42 +910,92 @@ function draw() {
         if(spec) {
             if (!renderEntities.has(spec.id)) renderEntities.set(spec.id, { ...spec, renderX: spec.x, renderY: spec.y });
             let rSpec = renderEntities.get(spec.id);
-            targetCamX = rSpec.renderX - canvas.width/2;
-            targetCamY = rSpec.renderY - canvas.height/2;
+            targetCamX = rSpec.renderX - (canvas.width * fov) / 2;
+            targetCamY = rSpec.renderY - (canvas.height * fov) / 2;
         }
     }
 
     camera.x += (targetCamX - camera.x) * 0.1;
     camera.y += (targetCamY - camera.y) * 0.1;
 
-    mouse.rx = mouse.x + camera.x; 
-    mouse.ry = mouse.y + camera.y;
+    mouse.rx = screenToWorldX(mouse.x);
+    mouse.ry = screenToWorldY(mouse.y);
     if (!gridPattern) gridPattern = ctx.createPattern(gridCanvas, 'repeat');
     ctx.save();
     ctx.fillStyle = gridPattern;
-    ctx.translate(-(camera.x % 50), -(camera.y % 50));
+    ctx.translate(
+    -((camera.x / fov) % 50),
+    -((camera.y / fov) % 50)
+);
     ctx.fillRect(-50, -50, canvas.width + 100, canvas.height + 100);
     ctx.restore();
     if(gameMode === "2TDM") {
-        ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(-camera.x, -camera.y, 400, WORLD_SIZE); // Decreased width, full height
-        ctx.fillStyle = "rgba(241, 78, 84, 0.15)"; ctx.fillRect(WORLD_SIZE-400-camera.x, -camera.y, 400, WORLD_SIZE);
+        ctx.fillRect(
+            worldToScreenX(0),
+            worldToScreenY(0),
+            scaleSize(400),
+            scaleSize(WORLD_SIZE)
+        );
+        ctx.fillRect(
+            worldToScreenX(WORLD_SIZE - 400),
+            worldToScreenY(0),
+            scaleSize(400),
+            scaleSize(WORLD_SIZE)
+        );
     } else if (gameMode === "4TDM") {
-        ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(-camera.x, -camera.y, BASE_SIZE, BASE_SIZE); // TL (Blue)
-        ctx.fillStyle = "rgba(190, 127, 245, 0.15)"; ctx.fillRect(WORLD_SIZE-BASE_SIZE-camera.x, -camera.y, BASE_SIZE, BASE_SIZE); // TR (Purple)
-        ctx.fillStyle = "rgba(0, 225, 110, 0.15)"; ctx.fillRect(-camera.x, WORLD_SIZE-BASE_SIZE-camera.y, BASE_SIZE, BASE_SIZE); // BL (Green)
-        ctx.fillStyle = "rgba(241, 78, 84, 0.15)"; ctx.fillRect(WORLD_SIZE-BASE_SIZE-camera.x, WORLD_SIZE-BASE_SIZE-camera.y, BASE_SIZE, BASE_SIZE); // BR (Red)
+        ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(
+            worldToScreenX(0),
+            worldToScreenY(0),
+            scaleSize(BASE_SIZE),
+            scaleSize(BASE_SIZE)
+        ); // TL (Blue)
+        ctx.fillStyle = "rgba(190, 127, 245, 0.15)";ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(
+            worldToScreenX(WORLD_SIZE-BASE_SIZE),
+            worldToScreenY(0),
+            scaleSize(BASE_SIZE),
+            scaleSize(BASE_SIZE)
+        ); // TR (Purple)
+        ctx.fillStyle = "rgba(0, 225, 110, 0.15)"; ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(
+            worldToScreenX(0),
+            worldToScreenY(WORLD_SIZE-BASE_SIZE),
+            scaleSize(BASE_SIZE),
+            scaleSize(BASE_SIZE)
+        ); // BL (Green)
+        ctx.fillStyle = "rgba(241, 78, 84, 0.15)"; ctx.fillStyle = "rgba(0, 178, 225, 0.15)"; ctx.fillRect(
+            worldToScreenX(WORLD_SIZE-BASE_SIZE),
+            worldToScreenY(WORLD_SIZE-BASE_SIZE),
+            scaleSize(BASE_SIZE),
+            scaleSize(BASE_SIZE)
+        );  // BR (Red)
     }
 
     ctx.fillStyle = "rgba(0,0,0,0.02)"; 
-    ctx.fillRect(1700 - camera.x, 1700 - camera.y, 600, 600);
+    ctx.fillRect(
+    worldToScreenX(1700),
+    worldToScreenY(1700),
+    scaleSize(600),
+    scaleSize(600)
+);
 
     // --- BULLET LERPING ---
     const activeBulletIds = new Set(gameState.bullets.map(b => b.id));
     for (let [id, b] of lastBullets.entries()) {
         if (!activeBulletIds.has(id)) {
-            const sx = b.renderX - camera.x; const sy = b.renderY - camera.y;
-            if (sx > -50 && sx < canvas.width + 50 && sy > -50 && sy < canvas.height + 50) {
-                dyingEntities.push({ ...b, renderX: b.renderX, renderY: b.renderY, deathType: 'bullet', deathTime: Date.now() });
+            const sx = worldToScreenX(b.renderX);
+            const sy = worldToScreenY(b.renderY);
+            if (
+                sx > -scaleSize(50) &&
+                sx < canvas.width + scaleSize(50) &&
+                sy > -scaleSize(50) &&
+                sy < canvas.height + scaleSize(50)
+              ){
+                dyingEntities.push({
+                    ...b,
+                    renderX: b.renderX,
+                    renderY: b.renderY,
+                    deathType: 'bullet',
+                    deathTime: Date.now()
+                });
             }
             lastBullets.delete(id);
         }
@@ -949,17 +1015,32 @@ function draw() {
         b.renderX = lerp(b.renderX, b.x, 0.2);
         b.renderY = lerp(b.renderY, b.y, 0.2);
         ctx.fillStyle = getTeamColor(b.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30); ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(b.renderX-camera.x, b.renderY-camera.y, b.r, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(
+    worldToScreenX(b.renderX),
+    worldToScreenY(b.renderY),
+    scaleSize(b.r), 0, Math.PI*2); ctx.fill(); ctx.stroke();
     });
 
     // --- DRONE LERPING ---
     const activeDroneIds = new Set(gameState.drones.map(d => d.id));
     for (let [id, d] of lastDrones.entries()) {
         if (!activeDroneIds.has(id)) {
-            const sx = d.renderX - camera.x; const sy = d.renderY - camera.y;
-            if (sx > -100 && sx < canvas.width + 100 && sy > -100 && sy < canvas.height + 100) {
-                dyingEntities.push({ ...d, renderX: d.renderX, renderY: d.renderY, deathType: 'drone', deathTime: Date.now() });
-            }
+            const sx = worldToScreenX(d.renderX);
+const sy = worldToScreenY(d.renderY);
+            if (
+    sx > -scaleSize(100) &&
+    sx < canvas.width + scaleSize(100) &&
+    sy > -scaleSize(100) &&
+    sy < canvas.height + scaleSize(100)
+) {
+    dyingEntities.push({
+        ...d,
+        renderX: d.renderX,
+        renderY: d.renderY,
+        deathType: 'drone',
+        deathTime: Date.now()
+    });
+}
             lastDrones.delete(id);
         }
     }
@@ -979,11 +1060,17 @@ function draw() {
         d.renderY = lerp(d.renderY, d.y, 0.2);
         d.renderAngle = lerpAngle(d.renderAngle !== undefined ? d.renderAngle : d.angle, d.angle, 0.2);
 
-        const sx = d.renderX - camera.x; const sy = d.renderY - camera.y;
-        if(sx < -50 || sx > canvas.width+50 || sy < -50 || sy > canvas.height+50) return;
+        const sx = worldToScreenX(d.renderX);
+        const sy = worldToScreenY(d.renderY);
+        if (
+    sx < -scaleSize(50) ||
+    sx > canvas.width + scaleSize(50) ||
+    sy < -scaleSize(50) ||
+    sy > canvas.height + scaleSize(50)
+) return;
         ctx.save(); ctx.translate(sx, sy); ctx.rotate(d.renderAngle);
         ctx.lineWidth = 3; ctx.fillStyle = getTeamColor(d.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30);
-        ctx.beginPath(); ctx.lineTo(d.radius, 0); ctx.lineTo(-d.radius*0.8, d.radius*0.8); ctx.lineTo(-d.radius*0.8, -d.radius*0.8); ctx.closePath();
+        ctx.beginPath(); ctx.lineTo(scaleSize(d.radius), 0); ctx.lineTo(scaleSize(-d.radius)s*0.8, scaleSize(d.radius)*0.8); ctx.lineTo(scaleSize(-d.radius)*0.8, scaleSize(-d.radius)*0.8); ctx.closePath();
         ctx.fill(); ctx.stroke(); ctx.restore();
     });
     
@@ -993,9 +1080,14 @@ function draw() {
         let scale = 1 + (progress * 0.45); 
         let alpha = 1 - progress;
 
-        const sx = e.renderX - camera.x;
-        const sy = e.renderY - camera.y;
-        if(sx < -150 || sx > canvas.width+150 || sy < -150 || sy > canvas.height+150) return;
+        const sx = worldToScreenX(e.renderX);
+        const sy = worldToScreenY(e.renderY);
+        if (
+    sx < -scaleSize(150) ||
+    sx > canvas.width + scaleSize(150) ||
+    sy < -scaleSize(150) ||
+    sy > canvas.height + scaleSize(150)
+) return;
 
         deathCtx.clearRect(0, 0, 300, 300);
         deathCtx.save();
@@ -1007,7 +1099,7 @@ function draw() {
             deathCtx.strokeStyle = darkenColor(deathCtx.fillStyle, 30); 
             deathCtx.lineWidth = 2;
             deathCtx.beginPath(); 
-            deathCtx.arc(0, 0, e.r, 0, Math.PI*2); 
+            deathCtx.arc(0, 0, scaleSize(e.r), 0, Math.PI*2); 
             deathCtx.fill(); 
             deathCtx.stroke();
         } else if (e.deathType === 'drone') {
@@ -1017,8 +1109,8 @@ function draw() {
             deathCtx.strokeStyle = darkenColor(deathCtx.fillStyle, 30);
             deathCtx.beginPath(); 
             deathCtx.lineTo(e.radius, 0); 
-            deathCtx.lineTo(-e.radius*0.8, e.radius*0.8); 
-            deathCtx.lineTo(-e.radius*0.8, -e.radius*0.8); 
+            deathCtx.lineTo(scaleSize(-e.radius)*0.8, scaleSize(e.radius)*0.8); 
+            deathCtx.lineTo(scaleSize(-e.radius)*0.8, scaleSize(-e.radius)*0.8); 
             deathCtx.closePath();
             deathCtx.fill(); 
             deathCtx.stroke();
@@ -1034,18 +1126,18 @@ function draw() {
                 deathCtx.font = "bold 14px Ubuntu";
                 deathCtx.textAlign = "center";
                 
-                deathCtx.strokeText(e.name, 0, -e.radius - 25);
-                deathCtx.fillText(e.name, 0, -e.radius - 25);
+                deathCtx.strokeText(e.name, 0, scaleSize(-e.radius) - 25);
+                deathCtx.fillText(e.name, 0, scaleSize(-e.radius) - 25);
                 
                 deathCtx.font = "11px Ubuntu";
                 deathCtx.fillStyle = "white";
                 deathCtx.strokeStyle = "black";
                 const displayScore = formatScore(Math.floor(e.score || 0));
-                deathCtx.strokeText(displayScore, 0, -e.radius - 12);
-                deathCtx.fillText(displayScore, 0, -e.radius - 12);
+                deathCtx.strokeText(displayScore, 0, scaleSize(-e.radius) - 12);
+                deathCtx.fillText(displayScore, 0, scaleSize(-e.radius) - 12);
                 
                 deathCtx.fillStyle = '#555'; 
-                deathCtx.fillRect(-20, e.radius+10, 40, 6);
+                deathCtx.fillRect(-20, scaleSize(e.radius)+10, 40, 6);
                 let hpRatio = Math.max(0, e.hp / (e.maxHp || 100));
                 if (hpRatio > 0) {
                     deathCtx.fillStyle = '#85e37d'; 
@@ -1086,10 +1178,15 @@ function draw() {
         // Feed the smoothed angle back into rPos so the draw function uses it
         rPos.angle = rPos.renderAngle; 
 
-        const sx = rPos.renderX - camera.x; 
-        const sy = rPos.renderY - camera.y;
+        const sx = worldToScreenX(rPos.renderX);
+        const sy = worldToScreenY(rPos.renderY);
         
-        if(sx < -100 || sx > canvas.width+100 || sy < -100 || sy > canvas.height+100) return;
+        if (
+    sx < -scaleSize(100) ||
+    sx > canvas.width + scaleSize(100) ||
+    sy < -scaleSize(100) ||
+    sy > canvas.height + scaleSize(100)
+) return;
 
         if (['tank', 'ai'].includes(en.type)) {
             const isWhite = !en.nameColor || en.nameColor === "white" || en.nameColor === "#fff" || en.nameColor === "#ffffff";
@@ -1101,19 +1198,19 @@ function draw() {
             ctx.font = "bold 14px Ubuntu";
             ctx.textAlign = "center";
             
-            ctx.strokeText(en.name, sx, sy - en.radius - 25);
-            ctx.fillText(en.name, sx, sy - en.radius - 25);
+            ctx.strokeText(en.name, sx, sy - scaleSize(en.radius) - 25);
+            ctx.fillText(en.name, sx, sy - scaleSize(en.radius) - 25);
             ctx.font = "11px Ubuntu";
             ctx.fillStyle = "white";
             ctx.strokeStyle = "black";
             const displayScore = formatScore(Math.floor(en.score));
-            ctx.strokeText(displayScore, sx, sy - en.radius - 12);
-            ctx.fillText(displayScore, sx, sy - en.radius - 12);
+            ctx.strokeText(displayScore, sx, sy - scaleSize(en.radius) - 12);
+            ctx.fillText(displayScore, sx, sy - scaleSize(en.radius) - 12);
         }
         
         if(en.hp < en.maxHp) {
-            ctx.fillStyle = '#555'; ctx.fillRect(sx-20, sy+en.radius+10, 40, 6);
-            ctx.fillStyle = '#85e37d'; ctx.fillRect(sx-20, sy+en.radius+10, 40*(en.hp/en.maxHp), 6);
+            ctx.fillStyle = '#555'; ctx.fillRect(sx-20, sy+scaleSize(en.radius)+10, 40, 6);
+            ctx.fillStyle = '#85e37d'; ctx.fillRect(sx-20, sy+scaleSize(en.radius)+10, 40*(en.hp/en.maxHp), 6);
         }
         
         ctx.save();
@@ -1198,9 +1295,10 @@ window.onkeyup = e => {
 
 window.onmousemove = e => { 
     mouse.x = e.clientX; 
-    mouse.y = e.clientY; 
-    mouse.rx = mouse.x + camera.x; 
-    mouse.ry = mouse.y + camera.y; 
+    mouse.y = e.clientY;
+
+    mouse.rx = screenToWorldX(mouse.x);
+    mouse.ry = screenToWorldY(mouse.y);
 };
 
 window.onmousedown = (e) => {
