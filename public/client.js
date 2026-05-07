@@ -3,7 +3,6 @@ const ctx = canvas.getContext('2d');
 const mCanvas = document.getElementById('minimapCanvas');
 const mCtx = mCanvas.getContext('2d');
 
-// --- INJECT CUSTOM CSS FOR ANIMATIONS & UI ---
 const style = document.createElement('style');
 style.innerHTML = `
     #upgrades-panel {
