@@ -731,85 +731,40 @@ function drawPoly(context, sides, r) {
 }
 
 function drawEntityBody(context, en) {
-
     context.lineWidth = 4;
 
     if (['tank', 'ai'].includes(en.type)) {
-
         let col = getTeamColor(en.team);
-
         context.fillStyle = col;
         context.strokeStyle = darkenColor(col, 30);
-
-        let specs =
-            TANK_SPECS[en.tankType] ||
-            TANK_SPECS['Basic'];
-
+        let specs = TANK_SPECS[en.tankType] || TANK_SPECS['Basic'];
         specs.barrels.forEach(b => {
-
             context.save();
-
-            // Rotate into barrel direction
             context.rotate(en.angle + (b.angle || 0));
-
-            // Apply LOCAL barrel offsets
+            const offsetScale = en.radius / 20; 
             context.translate(
-                b.x || 0,
-                b.y || 0
+                (b.x || 0) * offsetScale,
+                (b.y || 0) * offsetScale
             );
-
             context.fillStyle = "#999";
-            context.strokeStyle =
-                darkenColor("#999", 30);
-
-            const width = b.w || 18;
-            const length =
-                en.radius * (b.l || 1.8);
+            context.strokeStyle = darkenColor("#999", 30);
+            const width = en.radius * (b.w ? b.w / 20 : 0.9);
+            const length = en.radius * (b.l || 1.8);
 
             if (b.w2) {
-
+                const width2 = en.radius * (b.w2 / 20);
                 context.beginPath();
-
-                context.moveTo(
-                    0,
-                    -width / 2
-                );
-
-                context.lineTo(
-                    length,
-                    -(b.w2 / 2)
-                );
-
-                context.lineTo(
-                    length,
-                    (b.w2 / 2)
-                );
-
-                context.lineTo(
-                    0,
-                    width / 2
-                );
-
+                context.moveTo(0, -width / 2);
+                context.lineTo(length, -(width2 / 2));
+                context.lineTo(length, (width2 / 2));
+                context.lineTo(0, width / 2);
                 context.closePath();
 
                 context.fill();
                 context.stroke();
-
             } else {
-
-                context.fillRect(
-                    0,
-                    -width / 2,
-                    length,
-                    width
-                );
-
-                context.strokeRect(
-                    0,
-                    -width / 2,
-                    length,
-                    width
-                );
+                context.fillRect(0, -width / 2, length, width);
+                context.strokeRect(0, -width / 2, length, width);
             }
 
             context.restore();
@@ -817,15 +772,7 @@ function drawEntityBody(context, en) {
 
         // Tank body
         context.beginPath();
-
-        context.arc(
-            0,
-            0,
-            en.radius,
-            0,
-            Math.PI * 2
-        );
-
+        context.arc(0, 0, en.radius, 0, Math.PI * 2);
         context.fill();
         context.stroke();
 
