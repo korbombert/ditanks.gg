@@ -1070,7 +1070,7 @@ const sy = worldToScreenY(d.renderY);
 ) return;
         ctx.save(); ctx.translate(sx, sy); ctx.rotate(d.renderAngle);
         ctx.lineWidth = 3; ctx.fillStyle = getTeamColor(d.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30);
-        ctx.beginPath(); ctx.lineTo(scaleSize(d.radius), 0); ctx.lineTo(scaleSize(-d.radius)s*0.8, scaleSize(d.radius)*0.8); ctx.lineTo(scaleSize(-d.radius)*0.8, scaleSize(-d.radius)*0.8); ctx.closePath();
+        ctx.beginPath(); ctx.lineTo(scaleSize(d.radius), 0); ctx.lineTo(scaleSize(-d.radius)*0.8, scaleSize(d.radius)*0.8); ctx.lineTo(scaleSize(-d.radius)*0.8, scaleSize(-d.radius)*0.8); ctx.closePath();
         ctx.fill(); ctx.stroke(); ctx.restore();
     });
     
