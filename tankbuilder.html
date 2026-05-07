@@ -462,11 +462,6 @@ function refreshBarrelList(){
     list.innerHTML = '';
 
     tank.barrels.forEach((b,i)=>{
-
-    ctx.save();
-
-    ctx.translate(cx, cy);
-
     ctx.rotate(b.angle || 0);
 
     ctx.fillStyle =
