@@ -739,7 +739,7 @@ function updateUI() {
 
 
 function drawPoly(context, sides, r)
-r = scaleSize(r)
+    r = scaleSize(r);
     context.beginPath();
     for(let i=0; i<sides; i++){
         let a = (i * Math.PI * 2 / sides);
