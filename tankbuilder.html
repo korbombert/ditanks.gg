@@ -775,82 +775,65 @@ function drawTank() {
 
     tank.barrels.forEach((b, i) => {
 
-        ctx.save();
+    ctx.save();
 
-        // Move to tank center
-        ctx.translate(cx, cy);
+    ctx.translate(cx, cy);
 
-        // Rotate barrel
-        ctx.rotate(b.angle || 0);
+    // EXACT CLIENT LOGIC
+    ctx.rotate(b.angle || 0);
 
-        // Apply LOCAL offsets
-        ctx.translate(
-            b.x || 0,
-            b.y || 0
+    ctx.translate(
+        b.x || 0,
+        b.y || 0
+    );
+
+    ctx.fillStyle =
+        i === selectedBarrel
+            ? '#95e7ff'
+            : '#999';
+
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 5;
+
+    const width = b.w || 18;
+    const length = tankRadius * (b.l || 1.8);
+
+    if (b.w2) {
+
+        ctx.beginPath();
+
+        ctx.moveTo(0, -width/2);
+
+        ctx.lineTo(length, -(b.w2/2));
+
+        ctx.lineTo(length, (b.w2/2));
+
+        ctx.lineTo(0, width/2);
+
+        ctx.closePath();
+
+        ctx.fill();
+        ctx.stroke();
+
+    } else {
+
+        ctx.fillRect(
+            0,
+            -width/2,
+            length,
+            width
         );
 
-        ctx.fillStyle =
-            i === selectedBarrel
-                ? '#95e7ff'
-                : '#999';
+        ctx.strokeRect(
+            0,
+            -width/2,
+            length,
+            width
+        );
+    }
 
-        ctx.strokeStyle = '#555';
-
-        ctx.lineWidth = 5;
-
-        const width = b.w || 18;
-
-        const length =
-            tankRadius * (b.l || 1.8);
-
-        if (b.w2) {
-
-            ctx.beginPath();
-
-            ctx.moveTo(
-                0,
-                -width / 2
-            );
-
-            ctx.lineTo(
-                length,
-                -(b.w2 / 2)
-            );
-
-            ctx.lineTo(
-                length,
-                (b.w2 / 2)
-            );
-
-            ctx.lineTo(
-                0,
-                width / 2
-            );
-
-            ctx.closePath();
-
-            ctx.fill();
-            ctx.stroke();
-
-        } else {
-
-            ctx.fillRect(
-                0,
-                -width / 2,
-                length,
-                width
-            );
-
-            ctx.strokeRect(
-                0,
-                -width / 2,
-                length,
-                width
-            );
-        }
-
-        ctx.restore();
-    });
+    ctx.restore();
+});
 
     // Draw tank body
     ctx.beginPath();
