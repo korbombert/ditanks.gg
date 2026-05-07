@@ -738,7 +738,7 @@ function updateUI() {
 }
 
 
-function drawPoly(context, sides, r)
+function drawPoly(context, sides, r){
     r = scaleSize(r);
     context.beginPath();
     for(let i=0; i<sides; i++){
