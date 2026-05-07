@@ -731,34 +731,133 @@ function drawPoly(context, sides, r) {
 }
 
 function drawEntityBody(context, en) {
+
     context.lineWidth = 4;
-    if(['tank','ai'].includes(en.type)) {
+
+    if (['tank', 'ai'].includes(en.type)) {
+
         let col = getTeamColor(en.team);
 
-        context.fillStyle = col; context.strokeStyle = darkenColor(col, 30); 
-            
-        let specs = TANK_SPECS[en.tankType] || TANK_SPECS['Basic'];
-        specs.barrels.forEach(b => {
-            context.save(); context.rotate(en.angle + b.angle);
-            context.fillStyle = "#999"; context.strokeStyle = darkenColor("#999", 30); 
+        context.fillStyle = col;
+        context.strokeStyle = darkenColor(col, 30);
 
-            if(b.w2) {
-                context.beginPath(); context.moveTo(0, -b.w/2); context.lineTo(en.radius * b.l, -b.w2/2);
-                context.lineTo(en.radius * b.l, b.w2/2); context.lineTo(0, b.w/2); context.closePath();
-                context.fill(); context.stroke();
+        let specs =
+            TANK_SPECS[en.tankType] ||
+            TANK_SPECS['Basic'];
+
+        specs.barrels.forEach(b => {
+
+            context.save();
+
+            // Rotate into barrel direction
+            context.rotate(en.angle + (b.angle || 0));
+
+            // Apply LOCAL barrel offsets
+            context.translate(
+                b.x || 0,
+                b.y || 0
+            );
+
+            context.fillStyle = "#999";
+            context.strokeStyle =
+                darkenColor("#999", 30);
+
+            const width = b.w || 18;
+            const length =
+                en.radius * (b.l || 1.8);
+
+            if (b.w2) {
+
+                context.beginPath();
+
+                context.moveTo(
+                    0,
+                    -width / 2
+                );
+
+                context.lineTo(
+                    length,
+                    -(b.w2 / 2)
+                );
+
+                context.lineTo(
+                    length,
+                    (b.w2 / 2)
+                );
+
+                context.lineTo(
+                    0,
+                    width / 2
+                );
+
+                context.closePath();
+
+                context.fill();
+                context.stroke();
+
             } else {
-                context.fillRect(0, -b.w/2 + (b.y||0), en.radius * b.l, b.w);
-                context.strokeRect(0, -b.w/2 + (b.y||0), en.radius * b.l, b.w);
+
+                context.fillRect(
+                    0,
+                    -width / 2,
+                    length,
+                    width
+                );
+
+                context.strokeRect(
+                    0,
+                    -width / 2,
+                    length,
+                    width
+                );
             }
+
             context.restore();
         });
 
-        context.beginPath(); context.arc(0, 0, en.radius, 0, Math.PI*2); context.fill(); context.stroke();
+        // Tank body
+        context.beginPath();
+
+        context.arc(
+            0,
+            0,
+            en.radius,
+            0,
+            Math.PI * 2
+        );
+
+        context.fill();
+        context.stroke();
+
     } else {
-        if(en.type==='square'){ context.fillStyle=COLORS.square; context.strokeStyle=darkenColor(COLORS.square, 30); context.fillRect(-12,-12,24,24); context.strokeRect(-12,-12,24,24); }
-        if(en.type==='triangle'){ context.fillStyle=COLORS.triangle; context.strokeStyle=darkenColor(COLORS.triangle, 30); context.rotate(en.angle); drawPoly(context, 3, en.radius); }
-        if(en.type==='pentagon'){ context.fillStyle=COLORS.pentagon; context.strokeStyle=darkenColor(COLORS.pentagon, 30); context.rotate(en.angle); drawPoly(context, 5, en.radius); }
-        if(en.type==='hexagon'){ context.fillStyle=COLORS.hexagon; context.strokeStyle=darkenColor(COLORS.hexagon, 30); context.rotate(en.angle); drawPoly(context, 6, en.radius); }
+
+        if(en.type==='square'){
+            context.fillStyle=COLORS.square;
+            context.strokeStyle=darkenColor(COLORS.square, 30);
+            context.fillRect(-12,-12,24,24);
+            context.strokeRect(-12,-12,24,24);
+        }
+
+        if(en.type==='triangle'){
+            context.fillStyle=COLORS.triangle;
+            context.strokeStyle=darkenColor(COLORS.triangle, 30);
+            context.rotate(en.angle);
+            drawPoly(context, 3, en.radius);
+        }
+
+        if(en.type==='pentagon'){
+            context.fillStyle=COLORS.pentagon;
+            context.strokeStyle=darkenColor(COLORS.pentagon, 30);
+            context.rotate(en.angle);
+            drawPoly(context, 5, en.radius);
+        }
+
+        if(en.type==='hexagon'){
+            context.fillStyle=COLORS.hexagon;
+            context.strokeStyle=darkenColor(COLORS.hexagon, 30);
+            context.rotate(en.angle);
+            drawPoly(context, 6, en.radius);
+        }
     }
 }
 let lastFpsTime = 0;
