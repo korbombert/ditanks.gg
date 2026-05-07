@@ -922,8 +922,7 @@ e=>{
     if(!dragging) return;
 
     const rect =
-        previewCanvas
-        .getBoundingClientRect();
+        previewCanvas.getBoundingClientRect();
 
     const mx =
         e.clientX - rect.left;
@@ -932,24 +931,33 @@ e=>{
         e.clientY - rect.top;
 
     const cx =
-        previewCanvas.width/2;
+        previewCanvas.width / 2;
 
     const cy =
-        previewCanvas.height/2;
+        previewCanvas.height / 2;
 
     let b =
         tank.barrels[selectedBarrel];
 
-    b.x =
-        Math.round(mx - cx);
+    // Convert mouse into tank-local coordinates
+    let dx = mx - cx;
+    let dy = my - cy;
 
-    b.y =
-        Math.round(my - cy);
+    // Rotate into barrel local space
+    let cos = Math.cos(-b.angle);
+    let sin = Math.sin(-b.angle);
+
+    b.x = Math.round(
+        dx * cos - dy * sin
+    );
+
+    b.y = Math.round(
+        dx * sin + dy * cos
+    );
 
     loadEditor();
     refreshBarrelList();
 });
-
 previewCanvas.addEventListener(
 'wheel',
 e=>{
