@@ -401,8 +401,8 @@ const TANK_SPECS = {
         {x:0, y:0, w:18, l:1.5, angle:Math.PI, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}
     ]},
     'Overseer': { isDroneSpawner: true, maxDrones: 8, barrels: [
-        {x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI/2, spread:0, dmg: 1.461, spd: 0.8, rel: 1.5, size: 1, delay: 0}, 
-        {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2, spread:0, dmg: 1.461, spd: 0.8, rel: 1.5, size: 1, delay: 0}
+        {x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI/2, spread:0, dmg: 1.461, spd: 0.8, rel: 3.4, size: 1, delay: 0}, 
+        {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2, spread:0, dmg: 1.461, spd: 0.8, rel: 3.4, size: 1, delay: 0}
     ]},
     'Destroyer': { barrels: [{x:0, y:0, w:35, l:1.9, angle:0, spread: 0, dmg: 7.8, spd: 0.8, rel: 3, size: 1.5, delay: 0}] },
     'Octo Tank': { barrels: [
