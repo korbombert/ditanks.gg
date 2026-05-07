@@ -216,7 +216,7 @@ const TANK_SPECS = {
     'Sniper': { barrels: [{x:0, y:0, w:18, l:2.4, angle:0}] },
     'Machine Gun': { barrels: [{x:0, y:0, w:22, w2: 32, l:1.6, angle:0}] },
     'Flank Guard': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0}, {x:0, y:0, w:18, l:1.5, angle:Math.PI}] },
-    'Overseer': { barrels: [{x:0, y:0, w:25, w2:33, l:1.5, angle:Math.PI/2}, {x:0, y:0, w:25, w2:33, l:1.3, angle:-Math.PI/2}] },
+    'Overseer': { barrels: [{x:0, y:0, w:25, w2:35, l:1.4, angle:Math.PI/2}, {x:0, y:0, w:25, w2:35, l:1.4, angle:-Math.PI/2}] },
     'Destroyer': { barrels: [{x:0, y:0, w:35, l:1.9, angle:0}] },
     'Octo Tank': { barrels: [
         {x:0, y:0, w:16, l:1.8, angle:0}, {x:0, y:0, w:16, l:1.8, angle:Math.PI/4},
@@ -739,7 +739,6 @@ function updateUI() {
 
 
 function drawPoly(context, sides, r){
-    r = scaleSize(r);
     context.beginPath();
     for(let i=0; i<sides; i++){
         let a = (i * Math.PI * 2 / sides);
@@ -925,10 +924,8 @@ function draw() {
     mouse.ry = screenToWorldY(mouse.y);
     if (!gridPattern) gridPattern = ctx.createPattern(gridCanvas, 'repeat');
     ctx.save();
-    ctx.fillStyle = gridPattern;
-    ctx.translate(
-    -((camera.x / fov) % 50),
-    -((camera.y / fov) % 50)
+    ctx.fillStyle = gridPattern;let scaledGridSize = 50 / fov; 
+ctx.translate(-((camera.x / fov) % scaledGridSize), -((camera.y / fov) % scaledGridSize));
 );
     ctx.fillRect(-50, -50, canvas.width + 100, canvas.height + 100);
     ctx.restore();
@@ -1117,33 +1114,36 @@ const sy = worldToScreenY(d.renderY);
         } else {
             drawEntityBody(deathCtx, e);
             
-            if (['tank', 'ai'].includes(e.type)) {
-                const isWhite = !e.nameColor || e.nameColor === "white" || e.nameColor === "#fff" || e.nameColor === "#ffffff";
-                deathCtx.fillStyle = e.nameColor || "white";
-                deathCtx.lineJoin = "round"; 
-                deathCtx.strokeStyle = isWhite ? "black" : (darkenColor(e.nameColor, 50) || "black");
-                deathCtx.lineWidth = 3;
-                deathCtx.font = "bold 14px Ubuntu";
-                deathCtx.textAlign = "center";
-                
-                deathCtx.strokeText(e.name, 0, scaleSize(-e.radius) - 25);
-                deathCtx.fillText(e.name, 0, scaleSize(-e.radius) - 25);
-                
-                deathCtx.font = "11px Ubuntu";
-                deathCtx.fillStyle = "white";
-                deathCtx.strokeStyle = "black";
-                const displayScore = formatScore(Math.floor(e.score || 0));
-                deathCtx.strokeText(displayScore, 0, scaleSize(-e.radius) - 12);
-                deathCtx.fillText(displayScore, 0, scaleSize(-e.radius) - 12);
-                
-                deathCtx.fillStyle = '#555'; 
-                deathCtx.fillRect(-20, scaleSize(e.radius)+10, 40, 6);
-                let hpRatio = Math.max(0, e.hp / (e.maxHp || 100));
-                if (hpRatio > 0) {
-                    deathCtx.fillStyle = '#85e37d'; 
-                    deathCtx.fillRect(-20, e.radius+10, 40*hpRatio, 6);
-                }
-            }
+            if (['tank', 'ai'].includes(en.type)) {
+    const isWhite = !en.nameColor || ["white", "#fff", "#ffffff"].includes(en.nameColor);
+    
+    // 1. Calculate scaled values once for this entity
+    const sRadius = scaleSize(en.radius);
+    const nameOffset = scaleSize(25);  // Scaled gap for name
+    const scoreOffset = scaleSize(12); // Scaled gap for score
+    
+    // 2. Set Font Size (Already correctly scaled in your code)
+    let fontSize = Math.max(7, 14 / fov); 
+    ctx.font = `bold ${fontSize}px Ubuntu`;
+    ctx.textAlign = "center";
+    
+    // 3. Render Name
+    ctx.fillStyle = en.nameColor || "white";
+    ctx.strokeStyle = isWhite ? "black" : (darkenColor(en.nameColor, 50) || "black");
+    ctx.lineWidth = 3;
+    // Use sx, sy (which are worldToScreen results) and subtract scaled offsets
+    ctx.strokeText(en.name, sx, sy - sRadius - nameOffset);
+    ctx.fillText(en.name, sx, sy - sRadius - nameOffset);
+    
+    // 4. Render Score
+    fontSize = Math.max(5.5, 11 / fov); 
+    ctx.font = `bold ${fontSize}px Ubuntu`;
+    ctx.fillStyle = "white";
+    ctx.strokeStyle = "black";
+    const displayScore = formatScore(Math.floor(en.score));
+    ctx.strokeText(displayScore, sx, sy - sRadius - scoreOffset);
+    ctx.fillText(displayScore, sx, sy - sRadius - scoreOffset);
+}
         }
         
         deathCtx.restore();
@@ -1202,8 +1202,8 @@ const sy = worldToScreenY(d.renderY);
             
             ctx.strokeText(en.name, sx, sy - en.radius - 25);
             ctx.fillText(en.name, sx, sy - en.radius - 25);
-             // Instead of 14px constant:
-            let fontSize = Math.max(5.5, 11 / fov); 
+            
+            fontSize = Math.max(5.5, 11 / fov); 
             ctx.font = `bold ${fontSize}px Ubuntu`;
             ctx.fillStyle = "white";
             ctx.strokeStyle = "black";
@@ -1212,17 +1212,18 @@ const sy = worldToScreenY(d.renderY);
             ctx.fillText(displayScore, sx, sy - en.radius - 12);
         }
         
-        if(en.hp < en.maxHp) {
-        let barWidth = scaleSize(40);
-        let barHeight = scaleSize(6);
-        let barOffset = scaleSize(en.radius) + scaleSize(10);
-        
-        ctx.fillStyle = '#555'; 
-        ctx.fillRect(sx - barWidth / 2, sy + barOffset, barWidth, barHeight);
-        
-        ctx.fillStyle = '#85e37d'; 
-        ctx.fillRect(sx - barWidth / 2, sy + barOffset, barWidth * (en.hp / en.maxHp), barHeight);
-    }
+       if(en.hp < en.maxHp) {
+    let barWidth = scaleSize(40);
+    let barHeight = scaleSize(6);
+    // Use scaleSize for the gap between the tank and the bar (10)
+    let barOffset = scaleSize(en.radius) + scaleSize(10); 
+    
+    ctx.fillStyle = '#555'; 
+    ctx.fillRect(sx - barWidth / 2, sy + barOffset, barWidth, barHeight);
+    
+    ctx.fillStyle = '#85e37d'; 
+    ctx.fillRect(sx - barWidth / 2, sy + barOffset, barWidth * (en.hp / en.maxHp), barHeight);
+}
         
         ctx.save();
         ctx.translate(sx, sy);
