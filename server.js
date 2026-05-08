@@ -578,7 +578,72 @@ class Room {
         this.entities.push(bot);
     }
 }
+function isInProtectedBase(room, obj, viewerTeam = 0) {
+    if (!obj) return false;
 
+    const PROX = 350;
+    const BASE_SIZE_4 = 600;
+    const BASE_WIDTH_2 = 400;
+
+    // Same team can always interact
+    if (
+        viewerTeam !== 0 &&
+        obj.team !== 0 &&
+        obj.team === viewerTeam
+    ) {
+        return false;
+    }
+
+    if (room.mode === "2TDM") {
+
+        // Left base
+        if (obj.x < BASE_WIDTH_2 + PROX) {
+
+            // Team 1 protected
+            if (obj.team === 1) return true;
+
+            // Neutral shapes inside base are protected too
+            if (obj.team === 0) return true;
+        }
+
+        // Right base
+        if (obj.x > WORLD_SIZE - BASE_WIDTH_2 - PROX) {
+
+            // Team 2 protected
+            if (obj.team === 2) return true;
+
+            // Neutral shapes inside base are protected too
+            if (obj.team === 0) return true;
+        }
+    }
+
+    if (room.mode === "4TDM") {
+
+        let inTL =
+            obj.x < BASE_SIZE_4 + PROX &&
+            obj.y < BASE_SIZE_4 + PROX;
+
+        let inTR =
+            obj.x > WORLD_SIZE - BASE_SIZE_4 - PROX &&
+            obj.y < BASE_SIZE_4 + PROX;
+
+        let inBL =
+            obj.x < BASE_SIZE_4 + PROX &&
+            obj.y > WORLD_SIZE - BASE_SIZE_4 - PROX;
+
+        let inBR =
+            obj.x > WORLD_SIZE - BASE_SIZE_4 - PROX &&
+            obj.y > WORLD_SIZE - BASE_SIZE_4 - PROX;
+
+        // Team bases
+        if (inTL && (obj.team === 1 || obj.team === 0)) return true;
+        if (inBR && (obj.team === 2 || obj.team === 0)) return true;
+        if (inTR && (obj.team === 3 || obj.team === 0)) return true;
+        if (inBL && (obj.team === 4 || obj.team === 0)) return true;
+    }
+
+    return false;
+}
 class Entity {
     constructor(room, x, y, type, name = "", team = 0, isPlayer = false, ws = null) {
         this.room = room;
@@ -707,6 +772,8 @@ let isShooting = false;
 
                 nearby.drones.forEach(d => {
                     if (d.owner === this || d.markedForDeletion) return;
+                    // Ignore enemies protected by base repel zones
+if (isInProtectedBase(this.room, e, this.team)) return;
                     let isSameTeam = this.room.mode.includes("TDM") && d.team === this.team && d.team !== 0;
                     if (isSameTeam) return;
                     let distSq = (this.x - d.x)**2 + (this.y - d.y)**2;
@@ -732,8 +799,15 @@ nearby.entities.forEach(e => {
                             enemyTarget = e; 
                         }
                    } else if (isShape) {
-                        if(distSq < minShapeDistSq) { minShapeDistSq = distSq; shapeTarget = e; }
-                   }
+
+    // Overlords ignore farming shapes
+    if (this.tankType === 'Overlord') continue;
+
+    if(distSq < minShapeDistSq) { 
+        minShapeDistSq = distSq; 
+        shapeTarget = e; 
+    }
+}
                 });
 
                 this.aiTarget = droneTarget || enemyTarget || shapeTarget;
