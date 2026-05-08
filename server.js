@@ -978,7 +978,8 @@ const UPGRADE_TREE = {
     'Basic': ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard'],
     'Sniper': ['Overseer'],
     'Twin': ['Triplet', 'Octo Tank'],
-    'Flank Guard': ['Tri-angle', 'Octo Tank']
+    'Flank Guard': ['Tri-angle', 'Octo Tank'],
+    'Machine Gun': ['Destroyer']
 };
 function shoot(who) {
     if(who.markedForDeletion) return;
