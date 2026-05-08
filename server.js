@@ -773,7 +773,7 @@ let isShooting = false;
                 nearby.drones.forEach(d => {
                     if (d.owner === this || d.markedForDeletion) return;
                     // Ignore enemies protected by base repel zones
-if (isInProtectedBase(this.room, e, this.team)) return;
+if (isInProtectedBase(this.room, d, this.team)) return;
                     let isSameTeam = this.room.mode.includes("TDM") && d.team === this.team && d.team !== 0;
                     if (isSameTeam) return;
                     let distSq = (this.x - d.x)**2 + (this.y - d.y)**2;
