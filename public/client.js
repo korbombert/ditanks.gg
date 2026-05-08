@@ -925,7 +925,7 @@ function draw() {
     ctx.save();
     ctx.fillStyle = gridPattern;let scaledGridSize = 50 / fov; 
 ctx.translate(-((camera.x / fov) % scaledGridSize), -((camera.y / fov) % scaledGridSize));
-);
+
     ctx.fillRect(-50, -50, canvas.width + 100, canvas.height + 100);
     ctx.restore();
     // --- TDM BASE DRAWING ---
