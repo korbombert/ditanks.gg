@@ -409,7 +409,7 @@ const TANK_SPECS = {
     barrels: [
         {x:0, y:0, w:30, w2:40, l:1.3, angle:0, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
         {x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
-        {x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI, spread:0, dmg:1.461, spd:0.8, rel:5,2, size:1, delay:0},
+        {x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
         {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0}
     ]
 },
@@ -801,7 +801,7 @@ nearby.entities.forEach(e => {
                    } else if (isShape) {
 
     // Overlords ignore farming shapes
-    if (this.tankType === 'Overlord') continue;
+    if (this.tankType === 'Overlord') return;
 
     if(distSq < minShapeDistSq) { 
         minShapeDistSq = distSq; 
