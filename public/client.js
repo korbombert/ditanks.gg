@@ -215,7 +215,15 @@ const TANK_SPECS = {
     'Sniper': { barrels: [{x:0, y:0, w:18, l:2.4, angle:0}] },
     'Machine Gun': { barrels: [{x:0, y:0, w:22, w2: 32, l:1.6, angle:0}] },
     'Flank Guard': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0}, {x:0, y:0, w:18, l:1.5, angle:Math.PI}] },
-    'Overseer': { barrels: [{x:0, y:0, w:25, w2:35, l:1.4, angle:Math.PI/2}, {x:0, y:0, w:25, w2:35, l:1.4, angle:-Math.PI/2}] },
+    'Overlord': { 
+    barrels: [
+        {x:0, y:-18, w:25, w2:35, l:1.4, angle:0},
+        {x:0, y:18,  w:25, w2:35, l:1.4, angle:0},
+
+        {x:0, y:-18, w:25, w2:35, l:1.4, angle:Math.PI},
+        {x:0, y:18,  w:25, w2:35, l:1.4, angle:Math.PI}
+    ] 
+},
     'Destroyer': { barrels: [{x:0, y:0, w:30, l:1.9, angle:0}] },
     'Octo Tank': { barrels: [
         {x:0, y:0, w:16, l:1.8, angle:0}, {x:0, y:0, w:16, l:1.8, angle:Math.PI/4},
