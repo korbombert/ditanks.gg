@@ -407,10 +407,10 @@ const TANK_SPECS = {
     isDroneSpawner: true,
     maxDrones: 8,
     barrels: [
-        {x:0, y:0, w:30, w2:40, l:1.3, angle:0, spread:0, dmg:1.461, spd:0.8, rel:4.8, size:1, delay:0},
-        {x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:4.8, size:1, delay:0},
-        {x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI, spread:0, dmg:1.461, spd:0.8, rel:4.8, size:1, delay:0},
-        {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:4.8, size:1, delay:0}
+        {x:0, y:0, w:30, w2:40, l:1.3, angle:0, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
+        {x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
+        {x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI, spread:0, dmg:1.461, spd:0.8, rel:5,2, size:1, delay:0},
+        {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0}
     ]
 },
     'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 19.8, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
