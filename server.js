@@ -403,10 +403,17 @@ const TANK_SPECS = {
         {x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}, 
         {x:0, y:0, w:18, l:1.5, angle:Math.PI, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}
     ]},
-    'Overseer': { isDroneSpawner: true, maxDrones: 8, barrels: [
-        {x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI/2, spread:0, dmg: 1.461, spd: 0.8, rel: 3.4, size: 1, delay: 0}, 
-        {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2, spread:0, dmg: 1.461, spd: 0.8, rel: 3.4, size: 1, delay: 0}
-    ]},
+    'Overlord': { 
+    isDroneSpawner: true, 
+    maxDrones: 8,
+    barrels: [
+        {x:0, y:-18, w:25, w2:35, l:1.4, angle:0, spread:0, dmg:1.461, spd:0.8, rel:6.8, size:1, delay:0},
+        {x:0, y:18,  w:25, w2:35, l:1.4, angle:0, spread:0, dmg:1.461, spd:0.8, rel:6.8, size:1, delay:0.5},
+
+        {x:0, y:-18, w:25, w2:35, l:1.4, angle:Math.PI, spread:0, dmg:1.461, spd:0.8, rel:6.8, size:1, delay:0},
+        {x:0, y:18,  w:25, w2:35, l:1.4, angle:Math.PI, spread:0, dmg:1.461, spd:0.8, rel:6.8, size:1, delay:0.5}
+    ]
+},
     'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 19.8, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
     'Octo Tank': { barrels: [
         {x:0, y:0, w:16, l:1.8, angle:0, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
@@ -825,7 +832,7 @@ nearby.entities.forEach(e => {
                 } else if (this.level >= 30) {
                     if (Math.random() > 0.10) { 
                         let opts = [];
-                        if (this.tankType === 'Sniper') opts = ['Overseer'];
+                        if (this.tankType === 'Sniper') opts = ['Overlord'];
                         else if (this.tankType === 'Twin') opts = ['Octo Tank', 'Triplet'];
                         else if (this.tankType === 'Flank Guard') opts = ['Tri-angle', 'Octo Tank'];
                         
@@ -976,7 +983,7 @@ const rooms = {
 };
 const UPGRADE_TREE = {
     'Basic': ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard'],
-    'Sniper': ['Overseer'],
+    'Sniper': ['Overlord'],
     'Twin': ['Triplet', 'Octo Tank'],
     'Flank Guard': ['Tri-angle', 'Octo Tank'],
     'Machine Gun': ['Destroyer']
@@ -1419,7 +1426,7 @@ wss.on('connection', (ws, req) => {
         else if (data.type === 'upgradeTank' && client.player && !client.player.markedForDeletion) {
             const player = client.player;
             if (player.level < 15 && data.tank !== 'Basic') return;
-            if (player.level < 30 && data.tank === 'Overseer') return;
+            if (player.level < 30 && data.tank === 'Overlord') return;
             const current = player.tankType;
             const possible = UPGRADE_TREE[current] || [];
             if (!possible.includes(data.tank)) return;
