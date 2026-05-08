@@ -785,7 +785,7 @@ nearby.entities.forEach(e => {
                         this.vx -= Math.cos(evadeAngle) * moveSpeed;
                         this.vy -= Math.sin(evadeAngle) * moveSpeed;
                     } else {
-                        let keepDist = this.tankType === 'Overseer' ? 450 : (this.tankType === 'Sniper' ? 300 : (target.isShape ? 50 : 150));
+                        let keepDist = this.tankType === 'Overlord' ? 450 : (this.tankType === 'Sniper' ? 300 : (target.isShape ? 50 : 150));
                         let dx = target.x - this.x;
                         let dy = target.y - this.y;
                         let distSq = dx*dx + dy*dy;
