@@ -154,7 +154,7 @@ let lastBullets = new Map();
 let lastDrones = new Map();
 let dyingEntities = [];
 
-let fov = 1.4;
+let fov = 1.2;
 function worldToScreenX(x) {
     return (x - camera.x) / fov;
 }
