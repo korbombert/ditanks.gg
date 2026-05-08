@@ -407,7 +407,7 @@ const TANK_SPECS = {
         {x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI/2, spread:0, dmg: 1.461, spd: 0.8, rel: 3.4, size: 1, delay: 0}, 
         {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2, spread:0, dmg: 1.461, spd: 0.8, rel: 3.4, size: 1, delay: 0}
     ]},
-    'Destroyer': { barrels: [{x:0, y:0, w:36, l:1.9, angle:0, spread: 0, dmg: 7.8, spd: 0.8, rel: 3, size: 2.1, delay: 0}] },
+    'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 19.8, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
     'Octo Tank': { barrels: [
         {x:0, y:0, w:16, l:1.8, angle:0, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
         {x:0, y:0, w:16, l:1.8, angle:Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
