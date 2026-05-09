@@ -660,7 +660,7 @@ function checkUpgrades() {
     if (myStats.level >= 15 && myStats.tankType === 'Basic') {
         options = ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard']; 
     } else if (myStats.level >= 30) {
-        if (myStats.tankType === 'Sniper') options = ['Overlord'];
+        if (myStats.tankType === 'Sniper') options = ['Overlord', 'Necromancer'];
         else if (myStats.tankType === 'Machine Gun') options = ['Destroyer'];
         else if (myStats.tankType === 'Twin') options = ['Octo Tank', 'Triplet'];
         else if (myStats.tankType === 'Flank Guard') options = ['Tri-angle', 'Octo Tank'];
