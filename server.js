@@ -540,7 +540,7 @@ class Room {
             type = isCenter 
                 ? ['pentagon', 'pentagon', 'triangle', 'pentagon'][Math.floor(Math.random()*4)]
                 // Added a chance for pentagons to spawn in the outer areas
-                : ['square','square','square','triangle','pentagon'][Math.floor(Math.random()*5)]; 
+                : ['square','square','square','triangle','triangle','pentagon'][Math.floor(Math.random()*5)]; 
         }
         this.entities.push(new Entity(this, x, y, type));
     }
@@ -1168,8 +1168,8 @@ function updateRoom(room) {
 
    function applyRepel(obj) {
         let team = obj.team || 0;
-        const FAN_FORCE = 0.8; // Softer push
-        const MAX_PUSH = 15;   // Prevents hyper-speed bouncebacks
+        let FAN_FORCE = 0.8; // Softer push
+        let MAX_PUSH = 15;   // Prevents hyper-speed bouncebacks
 
         if (room.mode === "2TDM" && team !== 0) {
             if (team !== 1 && obj.x < BASE_WIDTH_2 + PROX) { 
@@ -1179,6 +1179,7 @@ function updateRoom(room) {
                 obj.vx -= FAN_FORCE; if (obj.vx < -MAX_PUSH) obj.vx = -MAX_PUSH; 
             }
         } else if (room.mode === "4TDM" && team !== 0) {
+            MAX_PUSH = 10;
             let inTL = (obj.x < BASE_SIZE_4 + PROX && obj.y < BASE_SIZE_4 + PROX);
             let inTR = (obj.x > WORLD_SIZE - BASE_SIZE_4 - PROX && obj.y < BASE_SIZE_4 + PROX);
             let inBL = (obj.x < BASE_SIZE_4 + PROX && obj.y > WORLD_SIZE - BASE_SIZE_4 - PROX);
@@ -1339,8 +1340,13 @@ function updateRoom(room) {
     en.xpAwarded = true;
     let xpGain = ['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100);
     d.owner.addXP(Math.min(xpGain, 24700)); 
-    if (en.type === 'square' && d.owner.tankType === 'Necromancer' && d.owner.activeDrones < 32) {
+                    
+    let droneCount = 22+(d.owner.stats[6]*2)
+    if (en.type === 'square' && d.owner.tankType === 'Necromancer' && d.owner.activeDrones < droneCount) {
         room.drones.push(new Drone(room, en.x, en.y, d.owner));
+        if (d.owner.activeDrones < droneCount) {
+            room.drones.push(new Drone(room, en.x, en.y, d.owner));
+        }
     }
 }
                 if (d.hp <= 0) { d.markedForDeletion = true; break; }
@@ -1455,7 +1461,7 @@ function updateRoom(room) {
     respawningBots.forEach(score => room.spawnBot(Math.floor(Math.random()*100), score));
 
     let shapes = room.entities.filter(e => !['ai','tank'].includes(e.type)).length;
-    if(shapes < 200) room.spawnShape();
+    if(shapes < 230) room.spawnShape();
 }
 
 setInterval(() => { 
