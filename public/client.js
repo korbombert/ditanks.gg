@@ -806,22 +806,35 @@ function drawEntityBody(context, en) {
         });
 
         // Tank body
-        context.save();
-        context.rotate(en.angle);
+context.save();
+context.rotate(en.angle);
 
-        if (specs.square) {
-            // Draw square body
-            context.fillRect(-radius, -radius, radius * 2, radius * 2);
-            context.strokeRect(-radius, -radius, radius * 2, radius * 2);
-        } else {
-            // Draw circular body
-            context.beginPath();
-            context.arc(0, 0, radius, 0, Math.PI * 2);
-            context.fill();
-            context.stroke();
-        }
+if (specs.square) {
+    // Make square visually equal to circle size
+    const squareSize = radius * 0.7071;
 
-        context.restore();
+    context.fillRect(
+        -squareSize,
+        -squareSize,
+        squareSize * 2,
+        squareSize * 2
+    );
+
+    context.strokeRect(
+        -squareSize,
+        -squareSize,
+        squareSize * 2,
+        squareSize * 2
+    );
+} else {
+    // Circle body
+    context.beginPath();
+    context.arc(0, 0, radius, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+}
+
+context.restore();
 
     } else {
 
@@ -1101,9 +1114,47 @@ const sy = worldToScreenY(d.renderY);
 ) return;
         ctx.save(); ctx.translate(sx, sy); ctx.rotate(d.renderAngle);
         ctx.lineWidth = 3; ctx.fillStyle = getTeamColor(d.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30);
-        ctx.beginPath(); ctx.lineTo(scaleSize(d.radius), 0); ctx.lineTo(scaleSize(-d.radius)*0.8, scaleSize(d.radius)*0.8); ctx.lineTo(scaleSize(-d.radius)*0.8, scaleSize(-d.radius)*0.8); ctx.closePath();
-        ctx.fill(); ctx.stroke(); ctx.restore();
-    });
+        // Try to find drone owner
+const owner = gameState.entities.find(e => e.id === d.ownerId);
+
+let ownerSpecs = null;
+
+if (owner) {
+    ownerSpecs = TANK_SPECS[owner.tankType] || TANK_SPECS['Basic'];
+}
+
+const droneIsSquare = ownerSpecs && ownerSpecs.square;
+
+if (droneIsSquare) {
+    // Square drone
+    const s = scaleSize(d.radius * 0.7071);
+
+    ctx.beginPath();
+    ctx.rect(-s, -s, s * 2, s * 2);
+    ctx.fill();
+    ctx.stroke();
+} else {
+    // Normal triangle drone
+    ctx.beginPath();
+
+    ctx.lineTo(scaleSize(d.radius), 0);
+
+    ctx.lineTo(
+        scaleSize(-d.radius) * 0.8,
+        scaleSize(d.radius) * 0.8
+    );
+
+    ctx.lineTo(
+        scaleSize(-d.radius) * 0.8,
+        scaleSize(-d.radius) * 0.8
+    );
+
+    ctx.closePath();
+
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+}
     
     dyingEntities = dyingEntities.filter(e => Date.now() - e.deathTime < 190);
     dyingEntities.forEach(e => {
