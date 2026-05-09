@@ -1114,46 +1114,28 @@ const sy = worldToScreenY(d.renderY);
 ) return;
         ctx.save(); ctx.translate(sx, sy); ctx.rotate(d.renderAngle);
         ctx.lineWidth = 3; ctx.fillStyle = getTeamColor(d.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30);
-        // Try to find drone owner
-const owner = gameState.entities.find(e => e.id === d.ownerId);
-
-let ownerSpecs = null;
-
-if (owner) {
-    ownerSpecs = TANK_SPECS[owner.tankType] || TANK_SPECS['Basic'];
-}
-
-const droneIsSquare = ownerSpecs && ownerSpecs.square;
-
-if (droneIsSquare) {
+        if (d.square) {
     // Square drone
-    const s = scaleSize(d.radius * 0.7071);
+    const size = scaleSize(d.radius * 1.6);
 
     ctx.beginPath();
-    ctx.rect(-s, -s, s * 2, s * 2);
+    ctx.rect(
+        -size / 2,
+        -size / 2,
+        size,
+        size
+    );
     ctx.fill();
     ctx.stroke();
 } else {
-    // Normal triangle drone
+    // Triangle drone
     ctx.beginPath();
-
     ctx.lineTo(scaleSize(d.radius), 0);
-
-    ctx.lineTo(
-        scaleSize(-d.radius) * 0.8,
-        scaleSize(d.radius) * 0.8
-    );
-
-    ctx.lineTo(
-        scaleSize(-d.radius) * 0.8,
-        scaleSize(-d.radius) * 0.8
-    );
-
+    ctx.lineTo(scaleSize(-d.radius) * 0.8, scaleSize(d.radius) * 0.8);
+    ctx.lineTo(scaleSize(-d.radius) * 0.8, scaleSize(-d.radius) * 0.8);
     ctx.closePath();
-
     ctx.fill();
     ctx.stroke();
-    ctx.restore();
 }
     
     dyingEntities = dyingEntities.filter(e => Date.now() - e.deathTime < 190);
@@ -1184,18 +1166,33 @@ if (droneIsSquare) {
             deathCtx.arc(0, 0, scaleSize(e.r), 0, Math.PI*2); 
             deathCtx.fill(); 
             deathCtx.stroke();
-        } else if (e.deathType === 'drone') {
-            deathCtx.rotate(e.angle);
-            deathCtx.lineWidth = 3; 
-            deathCtx.fillStyle = getTeamColor(e.team); 
-            deathCtx.strokeStyle = darkenColor(deathCtx.fillStyle, 30);
-            deathCtx.beginPath(); 
-            deathCtx.lineTo(e.radius, 0); 
-            deathCtx.lineTo(scaleSize(-e.radius)*0.8, scaleSize(e.radius)*0.8); 
-            deathCtx.lineTo(scaleSize(-e.radius)*0.8, scaleSize(-e.radius)*0.8); 
-            deathCtx.closePath();
-            deathCtx.fill(); 
-            deathCtx.stroke();
+        } else if (e.deathType === 'drone') {deathCtx.rotate(e.angle);
+deathCtx.lineWidth = 3;
+deathCtx.fillStyle = getTeamColor(e.team);
+deathCtx.strokeStyle = darkenColor(deathCtx.fillStyle, 30);
+
+if (e.square) {
+    const size = e.radius * 1.6;
+
+    deathCtx.beginPath();
+    deathCtx.rect(
+        -size / 2,
+        -size / 2,
+        size,
+        size
+    );
+    deathCtx.fill();
+    deathCtx.stroke();
+} else {
+    deathCtx.beginPath();
+    deathCtx.lineTo(e.radius, 0);
+    deathCtx.lineTo(-e.radius * 0.8, e.radius * 0.8);
+    deathCtx.lineTo(-e.radius * 0.8, -e.radius * 0.8);
+    deathCtx.closePath();
+
+    deathCtx.fill();
+    deathCtx.stroke();
+}
         } else {
             drawEntityBody(deathCtx, e);
             
