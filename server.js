@@ -416,7 +416,7 @@ const TANK_SPECS = {
     'Necromancer': { 
     isDroneSpawner: true,
     maxDrones: 32,
-    barrels: []
+    barrels: [], square: true
     },
     'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 8, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
     'Octo Tank': { barrels: [
@@ -1101,7 +1101,7 @@ const rooms = {
 };
 const UPGRADE_TREE = {
     'Basic': ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard'],
-    'Sniper': ['Overlord'],
+    'Sniper': ['Overlord', 'Necromancer'],
     'Twin': ['Triplet', 'Octo Tank'],
     'Flank Guard': ['Tri-angle', 'Octo Tank'],
     'Machine Gun': ['Destroyer']
