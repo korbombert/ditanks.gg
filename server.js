@@ -1457,8 +1457,9 @@ function updateRoom(room) {
     if(shapes < 200) room.spawnShape();
 }
 
-setInterval(() => { Object.values(rooms).forEach(updateRoom); }, 1000 / (TICK_RATE * GAME_SPEED));     {x:0, y:0, w:16, l:1.8, angle:Math.PI/2, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
-        {x:0, y:0, w:16, l:1.8, angle:3*Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
+setInterval(() => { 
+    Object.values(rooms).forEach(updateRoom); 
+}, 1000 / (TICK_RATE * GAME_SPEED));
     
 
 wss.on('connection', (ws, req) => {
