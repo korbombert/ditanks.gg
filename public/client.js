@@ -278,7 +278,13 @@ function getCachedTankIcon(tankType, color) {
     });
 
     tctx.fillStyle = color; tctx.strokeStyle = darkenColor(color, 30);
+if (specs.square) {
+    const squareSize = r * 0.8142;
+    tctx.fillRect(-squareSize, -squareSize, squareSize * 2, squareSize * 2);
+    tctx.strokeRect(-squareSize, -squareSize, squareSize * 2, squareSize * 2);
+} else {
     tctx.beginPath(); tctx.arc(0, 0, r, 0, Math.PI*2); tctx.fill(); tctx.stroke();
+}
     
     iconCache[key] = tc.toDataURL();
     return iconCache[key];
