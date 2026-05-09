@@ -416,8 +416,7 @@ const TANK_SPECS = {
     'Necromancer': { 
     isDroneSpawner: true,
     maxDrones: 32,
-    barrels: [{x:0, y:0, w:30, w2:40, l:1.4, angle:Math.PI/2, spread:0, dmg:0, spd:0.8, rel:Infinity, size:1, delay:0},
-            {x:0, y:0, w:30, w2:40, l:1.4, angle:-Math.PI/2, spread:0, dmg:0, spd:0.8, rel:Infinity, size:1, delay:0},] 
+    barrels: []
     },
     'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 8, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
     'Octo Tank': { barrels: [
