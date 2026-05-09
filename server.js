@@ -995,7 +995,7 @@ class Drone {
         }
 
         let speed = 4 + (this.owner.stats[3] * 0.5);
-        if (this.owner.tankType === 'Necromancer') speed *= 0.85; // Slightly slower than Overlord
+        if (this.owner.tankType === 'Necromancer') speed *= 0.93; // Slightly slower than Overlord
 
         let tx = this.x, ty = this.y, moving = false;
 
@@ -1671,7 +1671,21 @@ setInterval(() => {
                 for(let i=0; i<nearby.drones.length; i++) {
                     let d = nearby.drones[i];
                     if (Math.abs(d.y - focalY) < VIEW_DISTANCE/1.8) {
-                        payloadDrones.push({ id: d.id, x: Math.round(d.x), y: Math.round(d.y), radius: d.radius, angle: Math.round(d.angle * 100) / 100, team: d.team });
+                        let droneData = { 
+                            id: d.id, 
+                            x: Math.round(d.x), 
+                            y: Math.round(d.y), 
+                            radius: d.radius, 
+                            angle: Math.round(d.angle * 100) / 100, 
+                            team: d.team 
+                        };
+                        
+                        // Check if the drone's owner is a Necromancer
+                        if (d.owner && d.owner.tankType === 'Necromancer') {
+                            droneData.square = true;
+                        }
+                        
+                        payloadDrones.push(droneData);
                     }
                 }
 
