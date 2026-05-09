@@ -413,13 +413,17 @@ const TANK_SPECS = {
                 {x:0, y:0, w:30, w2:40, l:1.4, angle:-Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0}
             ]
     },
+    'Necromancer': { 
+    isDroneSpawner: true,
+    maxDrones: 32,
+    barrels: [{x:0, y:0, w:30, w2:40, l:1.4, angle:Math.PI/2, spread:0, dmg:0, spd:0.8, rel:Infinity, size:1, delay:0},
+            {x:0, y:0, w:30, w2:40, l:1.4, angle:-Math.PI/2, spread:0, dmg:0, spd:0.8, rel:Infinity, size:1, delay:0},] 
+    },
     'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 8, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
     'Octo Tank': { barrels: [
         {x:0, y:0, w:16, l:1.8, angle:0, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
         {x:0, y:0, w:16, l:1.8, angle:Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
-        {x:0, y:0, w:16, l:1.8, angle:Math.PI/2, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
-        {x:0, y:0, w:16, l:1.8, angle:3*Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
-        {x:0, y:0, w:16, l:1.8, angle:Math.PI, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
+       {x:0, y:0, w:16, l:1.8, angle:Math.PI, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
         {x:0, y:0, w:16, l:1.8, angle:-3*Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
         {x:0, y:0, w:16, l:1.8, angle:-Math.PI/2, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
         {x:0, y:0, w:16, l:1.8, angle:-Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5}
@@ -698,7 +702,20 @@ class Entity {
         this.x += this.vx; this.y += this.vy;
         this.x = Math.max(0, Math.min(WORLD_SIZE, this.x));
         this.y = Math.max(0, Math.min(WORLD_SIZE, this.y));
-
+if (this.tankType === 'Necromancer') {
+    let nearby = this.room.grid.getNearby(this.x, this.y, this.radius + 60);
+    nearby.entities.forEach(e => {
+        if (e.type === 'square' && !e.markedForDeletion && this.activeDrones < 32) {
+            let dx = e.x - this.x, dy = e.y - this.y;
+            let radSum = this.radius + e.radius + 60; // Collection aura
+            if (dx*dx + dy*dy < radSum*radSum) {
+                e.markedForDeletion = true; // Destroy the square
+                this.room.drones.push(new Drone(this.room, e.x, e.y, this));
+                if (typeof this.addXP === 'function') this.addXP(e.xpVal || 60);
+            }
+        }
+    });
+}
         // --- NEW: Barrel Timers Tick ---
         const specs = TANK_SPECS[this.tankType];
         if (!this.barrelTimers || this.barrelTimers.length !== (specs?.barrels?.length || 0)) {
@@ -953,11 +970,22 @@ class Drone {
         this.room = room;
         this.id = room.nextDroneId++;
         this.x = x; this.y = y; this.owner = owner;
-        this.vx = 0; this.vy = 0; this.radius = 12;
-        this.hp = (20 + (owner.stats[4] * 5)) * 2.5;
-        this.dmg = 15 + (owner.stats[5] * 5);
+        this.vx = 0; this.vy = 0;
         this.team = owner.team; this.angle = 0;
         this.markedForDeletion = false;
+        
+        // Custom Stats for Necromancer vs Standard Drones
+        if (owner.tankType === 'Necromancer') {
+            this.hp = (15 + (owner.stats[4] * 5)) * 2;
+            this.dmg = 12 + (owner.stats[5] * 3); 
+            this.radius = 15; // Square size
+            this.isNecroSquare = true;
+        } else {
+            this.radius = 12;
+            this.hp = (20 + (owner.stats[4] * 5)) * 2.5;
+            this.dmg = 15 + (owner.stats[5] * 5);
+        }
+        
         owner.activeDrones++;
     }
 
@@ -967,44 +995,62 @@ class Drone {
             return;
         }
 
-        let speed = 4 + (this.owner.stats[3] * 0.5); 
+        let speed = 4 + (this.owner.stats[3] * 0.5);
+        if (this.owner.tankType === 'Necromancer') speed *= 0.85; // Slightly slower than Overlord
+
         let tx = this.x, ty = this.y, moving = false;
 
         if (this.owner.isPlayer) {
-            tx = this.owner.inputs.mouseX; ty = this.owner.inputs.mouseY; moving = true;
+            tx = this.owner.inputs.mouseX; ty = this.owner.inputs.mouseY;
+            moving = true;
             if(this.owner.inputs.repel) {
                 let ang = Math.atan2(this.y - ty, this.x - tx);
                 tx = this.x + Math.cos(ang) * 500; ty = this.y + Math.sin(ang) * 500;
             }
         } else {
-            let target = null; 
+            let target = null;
             
-            // AI Drone coordination: Sync with owner's brain
             if (this.owner.aiTarget && !this.owner.aiTarget.markedForDeletion) {
+                let distSq = (this.owner.x - this.owner.aiTarget.x)**2 + (this.owner.y - this.owner.aiTarget.y)**2;
+                
                 if (this.owner.isFleeing) {
-                    // Repel behavior when AI is low HP
                     let ang = Math.atan2(this.y - this.owner.y, this.x - this.owner.x);
                     tx = this.x + Math.cos(ang) * 500; 
                     ty = this.y + Math.sin(ang) * 500; 
                     moving = true;
+                } 
+                // AI Repel behavior: Push drones toward off-screen targets (600 to 1000 units away)
+                else if (['Overlord', 'Necromancer'].includes(this.owner.tankType) && distSq > 360000 && distSq <= 1000000) {
+                    let angToTarget = Math.atan2(this.owner.aiTarget.y - this.y, this.owner.aiTarget.x - this.x);
+                    tx = this.x + Math.cos(angToTarget) * 800; 
+                    ty = this.y + Math.sin(angToTarget) * 800; 
+                    moving = true;
                 } else {
-                    // Attack owner's primary target
                     target = this.owner.aiTarget;
                 }
             } else {
-                // Idle scanning behavior if owner has no target
                 let minDistSq = Infinity;
-                let nearby = this.room.grid.getNearby(this.x, this.y, 800); 
+                // Fix FoV scanning to View Distance (1000)
+                let nearby = this.room.grid.getNearby(this.x, this.y, 1000); 
                 nearby.entities.forEach(e => {
                     if(e === this.owner || e.markedForDeletion) return;
                     if(this.room.mode.includes("TDM") && e.team === this.owner.team && ['ai','tank'].includes(e.type)) return;
+                    
                     let distSq = (this.x - e.x)**2 + (this.y - e.y)**2;
-                    if(distSq < 640000 && distSq < minDistSq) { minDistSq = distSq; target = e; }
+                    if(distSq < 1000000 && distSq < minDistSq) { minDistSq = distSq; target = e; }
                 });
+
+                // AI Wanders with drones in front if no targets are found
+                if (!target) {
+                    tx = this.owner.x + Math.cos(this.owner.angle) * 180;
+                    ty = this.owner.y + Math.sin(this.owner.angle) * 180;
+                    moving = true;
+                }
             }
 
-            if(target) { tx = target.x; ty = target.y; moving = true; }
-            else if (!moving) { tx = this.owner.x; ty = this.owner.y; moving = true; }
+            if(target) { 
+                tx = target.x; ty = target.y; moving = true; 
+            }
         }
 
         if (moving) {
@@ -1012,7 +1058,7 @@ class Drone {
             this.angle = angle;
             this.vx *= 0.80; 
             this.vy *= 0.80;
-            this.vx += Math.cos(angle) * (speed * 0.4); 
+            this.vx += Math.cos(angle) * (speed * 0.4);
             this.vy += Math.sin(angle) * (speed * 0.4);
         }
 
@@ -1024,8 +1070,7 @@ class Drone {
         }
 
         this.x += this.vx; this.y += this.vy;
-        
-        // Inside Drone class update() method...
+
         let nearbyDrones = this.room.grid.getNearby(this.x, this.y, this.radius * 2);
         nearbyDrones.drones.forEach(d => {
             if(d !== this && !d.markedForDeletion) {
@@ -1033,12 +1078,13 @@ class Drone {
                 let radSum = this.radius + d.radius;
                 let distSq = dx*dx + dy*dy;
                 
-                // If they overlap, apply a smooth repulsion force
                 if(distSq < radSum*radSum) {
                     let dist = Math.sqrt(distSq) || 1;
                     let overlap = radSum - dist;
                     let pushAngle = Math.atan2(dy, dx);
-                    let pushForce = overlap * 0.15; // Smoothly spreads them out
+                    
+                    // Stronger overlap push for Necromancer to prevent stacking
+                    let pushForce = (this.owner && this.owner.tankType === 'Necromancer') ? overlap * 0.45 : overlap * 0.15; 
                     
                     this.x += Math.cos(pushAngle) * pushForce; 
                     this.y += Math.sin(pushAngle) * pushForce;
@@ -1290,9 +1336,12 @@ function updateRoom(room) {
                 if (d.owner) en.lastDamagedBy = d.owner.id;
                 
                 if (en.hp <= 0 && d.owner && typeof d.owner.addXP === 'function') {
-                    let xpGain = ['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100);
-                    d.owner.addXP(Math.min(xpGain, 24700)); 
-                }
+    let xpGain = ['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100);
+    d.owner.addXP(Math.min(xpGain, 24700)); 
+    if (en.type === 'square' && d.owner.tankType === 'Necromancer' && d.owner.activeDrones < 32) {
+        room.drones.push(new Drone(room, en.x, en.y, d.owner));
+    }
+}
                 if (d.hp <= 0) { d.markedForDeletion = true; break; }
             }
         }
@@ -1408,7 +1457,9 @@ function updateRoom(room) {
     if(shapes < 200) room.spawnShape();
 }
 
-setInterval(() => { Object.values(rooms).forEach(updateRoom); }, 1000 / (TICK_RATE * GAME_SPEED));
+setInterval(() => { Object.values(rooms).forEach(updateRoom); }, 1000 / (TICK_RATE * GAME_SPEED));     {x:0, y:0, w:16, l:1.8, angle:Math.PI/2, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
+        {x:0, y:0, w:16, l:1.8, angle:3*Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
+    
 
 wss.on('connection', (ws, req) => {
     const rawIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
