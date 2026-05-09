@@ -1136,7 +1136,7 @@ const sy = worldToScreenY(d.renderY);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-}
+});
     
     dyingEntities = dyingEntities.filter(e => Date.now() - e.deathTime < 190);
     dyingEntities.forEach(e => {
