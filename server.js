@@ -1307,7 +1307,8 @@ function updateRoom(room) {
                     
                     if (b.pen <= 0) b.life = 0;
                     
-                    if (en.hp <= 0 && b.owner && typeof b.owner.addXP === 'function') {
+                    if (en.hp <= 0 && !en.xpAwarded && b.owner && typeof b.owner.addXP === 'function') {
+                        en.xpAwarded = true;
                         let xpGain = ['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100);
                         b.owner.addXP(Math.min(xpGain, 24700));
                     }
@@ -1334,7 +1335,8 @@ function updateRoom(room) {
                 en.lastDamageTime = Date.now();
                 if (d.owner) en.lastDamagedBy = d.owner.id;
                 
-                if (en.hp <= 0 && d.owner && typeof d.owner.addXP === 'function') {
+                if (en.hp <= 0 && !en.xpAwarded && d.owner && typeof d.owner.addXP === 'function') {
+    en.xpAwarded = true;
     let xpGain = ['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100);
     d.owner.addXP(Math.min(xpGain, 24700)); 
     if (en.type === 'square' && d.owner.tankType === 'Necromancer' && d.owner.activeDrones < 32) {
@@ -1387,8 +1389,8 @@ function updateRoom(room) {
                     en.lastDamagedBy = other.id; 
                     other.lastDamagedBy = en.id;
                     
-                    if(en.hp <= 0 && typeof other.addXP === 'function') other.addXP(['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100));
-                    if(other.hp <= 0 && typeof en.addXP === 'function') en.addXP(['tank','ai'].includes(other.type) ? Math.max(other.xpVal||100, other.score) : (other.xpVal || 100));
+                    if(en.hp <= 0 && !en.xpAwarded && typeof other.addXP === 'function') { en.xpAwarded = true; other.addXP(['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100)); }
+                    if(other.hp <= 0 && !other.xpAwarded && typeof en.addXP === 'function') { other.xpAwarded = true; en.addXP(['tank','ai'].includes(other.type) ? Math.max(other.xpVal||100, other.score) : (other.xpVal || 100)); }
                 }
             }
         });
