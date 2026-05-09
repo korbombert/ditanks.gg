@@ -1135,7 +1135,8 @@ const sy = worldToScreenY(d.renderY);
     ctx.lineTo(scaleSize(-d.radius) * 0.8, scaleSize(-d.radius) * 0.8);
     ctx.closePath();
     ctx.fill();
-    ctx.stroke();
+    ctx.stroke();}
+    ctx.restore();
 });
     
     dyingEntities = dyingEntities.filter(e => Date.now() - e.deathTime < 190);
