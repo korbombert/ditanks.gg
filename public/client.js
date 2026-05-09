@@ -230,6 +230,8 @@ const TANK_SPECS = {
         {x:0, y:0, w:16, l:1.8, angle:Math.PI}, {x:0, y:0, w:16, l:1.8, angle:-3*Math.PI/4},
         {x:0, y:0, w:16, l:1.8, angle:-Math.PI/2}, {x:0, y:0, w:16, l:1.8, angle:-Math.PI/4}
     ] },
+    'Necromancer': {barrels: [{x:0, y:0, w:30, w2:40, l:1.4, angle:Math.PI/2, spread:0, dmg:0, spd:0.8, rel:Infinity, size:1, delay:0},
+            {x:0, y:0, w:30, w2:40, l:1.4, angle:-Math.PI/2, spread:0, dmg:0, spd:0.8, rel:Infinity, size:1, delay:0},], square: true }
     'Triplet': { barrels: [
         {x:0, y:-12, w:12, l:1.65, angle:0}, {x:0, y:12, w:12, l:1.65, angle:0},
         {x:0, y:0, w:12, l:1.9, angle:0}
@@ -754,28 +756,38 @@ function drawPoly(context, sides, r){
 }
 
 function drawEntityBody(context, en) {
-    context.lineWidth = 4/fov;
+    context.lineWidth = 4 / fov;
     const radius = scaleSize(en.radius);
+
     if (['tank', 'ai'].includes(en.type)) {
         let col = getTeamColor(en.team);
         context.fillStyle = col;
         context.strokeStyle = darkenColor(col, 30);
+
         let specs = TANK_SPECS[en.tankType] || TANK_SPECS['Basic'];
+
+        // Draw barrels
         specs.barrels.forEach(b => {
             context.save();
+
             context.rotate(en.angle + (b.angle || 0));
-            const offsetScale = radius / 20; 
+
+            const offsetScale = radius / 20;
+
             context.translate(
                 (b.x || 0) * offsetScale,
                 (b.y || 0) * offsetScale
             );
+
             context.fillStyle = "#999";
             context.strokeStyle = darkenColor("#999", 30);
+
             const width = radius * (b.w ? b.w / 20 : 0.9);
             const length = radius * (b.l || 1.8);
 
             if (b.w2) {
                 const width2 = radius * (b.w2 / 20);
+
                 context.beginPath();
                 context.moveTo(0, -width / 2);
                 context.lineTo(length, -(width2 / 2));
@@ -794,39 +806,55 @@ function drawEntityBody(context, en) {
         });
 
         // Tank body
-        context.beginPath();
-        context.arc(0, 0, radius, 0, Math.PI * 2);
-        context.fill();
-        context.stroke();
+        context.save();
+        context.rotate(en.angle);
+
+        if (specs.square) {
+            // Draw square body
+            context.fillRect(-radius, -radius, radius * 2, radius * 2);
+            context.strokeRect(-radius, -radius, radius * 2, radius * 2);
+        } else {
+            // Draw circular body
+            context.beginPath();
+            context.arc(0, 0, radius, 0, Math.PI * 2);
+            context.fill();
+            context.stroke();
+        }
+
+        context.restore();
 
     } else {
 
-        if(en.type === 'square'){
-        context.fillStyle = COLORS.square;
-        context.strokeStyle = darkenColor(COLORS.square, 30);
-        // Scale the size based on FOV (original was roughly 12 radius)
-        let s = scaleSize(12);
-        context.fillRect(-s, -s, s * 2, s * 2);
-        context.strokeRect(-s, -s, s * 2, s * 2);
-    }
+        if (en.type === 'square') {
+            context.fillStyle = COLORS.square;
+            context.strokeStyle = darkenColor(COLORS.square, 30);
 
-        if(en.type==='triangle'){
-            context.fillStyle=COLORS.triangle;
-            context.strokeStyle=darkenColor(COLORS.triangle, 30);
+            let s = scaleSize(12);
+
+            context.fillRect(-s, -s, s * 2, s * 2);
+            context.strokeRect(-s, -s, s * 2, s * 2);
+        }
+
+        if (en.type === 'triangle') {
+            context.fillStyle = COLORS.triangle;
+            context.strokeStyle = darkenColor(COLORS.triangle, 30);
+
             context.rotate(en.angle);
             drawPoly(context, 3, radius);
         }
 
-        if(en.type==='pentagon'){
-            context.fillStyle=COLORS.pentagon;
-            context.strokeStyle=darkenColor(COLORS.pentagon, 30);
+        if (en.type === 'pentagon') {
+            context.fillStyle = COLORS.pentagon;
+            context.strokeStyle = darkenColor(COLORS.pentagon, 30);
+
             context.rotate(en.angle);
             drawPoly(context, 5, radius);
         }
 
-        if(en.type==='hexagon'){
-            context.fillStyle=COLORS.hexagon;
-            context.strokeStyle=darkenColor(COLORS.hexagon, 30);
+        if (en.type === 'hexagon') {
+            context.fillStyle = COLORS.hexagon;
+            context.strokeStyle = darkenColor(COLORS.hexagon, 30);
+
             context.rotate(en.angle);
             drawPoly(context, 6, radius);
         }
