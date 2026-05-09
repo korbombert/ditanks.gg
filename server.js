@@ -404,16 +404,16 @@ const TANK_SPECS = {
         {x:0, y:0, w:18, l:1.5, angle:Math.PI, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}
     ]},
     'Overlord': { 
-    isDroneSpawner: true,
-    maxDrones: 8,
-    barrels: [
-        {x:0, y:0, w:30, w2:40, l:1.3, angle:0, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
-        {x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
-        {x:0, y:0, w:30, w2:40, l:1.3, angle:Math.PI, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
-        {x:0, y:0, w:30, w2:40, l:1.3, angle:-Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0}
-    ]
-},
-    'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 19.8, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
+            isDroneSpawner: true,
+            maxDrones: 8,
+            barrels: [
+                {x:0, y:0, w:30, w2:40, l:1.4, angle:0, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
+                {x:0, y:0, w:30, w2:40, l:1.4, angle:Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
+                {x:0, y:0, w:30, w2:40, l:1.4, angle:Math.PI, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
+                {x:0, y:0, w:30, w2:40, l:1.4, angle:-Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0}
+            ]
+    },
+    'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 8, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
     'Octo Tank': { barrels: [
         {x:0, y:0, w:16, l:1.8, angle:0, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
         {x:0, y:0, w:16, l:1.8, angle:Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
@@ -425,14 +425,14 @@ const TANK_SPECS = {
         {x:0, y:0, w:16, l:1.8, angle:-Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5}
     ]},
     'Triplet': { barrels: [
-        {x:0, y:-12, w:14, l:1.6, angle:0, spread: 0, dmg: 0.47, spd: 1, rel: 0.8, size: 1, delay: 0.5}, 
-        {x:0, y:12, w:14, l:1.6, angle:0, spread: 0, dmg: 0.47, spd: 1, rel: 0.8, size: 1, delay: 0.5},
-        {x:0, y:0, w:14, l:1.8, angle:0, spread: 0, dmg: 0.47, spd: 1, rel: 0.8, size: 1, delay: 0}
+        {x:0, y:-12, w:14, l:1.6, angle:0, spread: 0, dmg: 0.48, spd: 1, rel: 0.8, size: 1, delay: 0.5}, 
+        {x:0, y:12, w:14, l:1.6, angle:0, spread: 0, dmg: 0.48, spd: 1, rel: 0.8, size: 1, delay: 0.5},
+        {x:0, y:0, w:14, l:1.8, angle:0, spread: 0, dmg: 0.5, spd: 1, rel: 0.8, size: 1, delay: 0}
     ]},
     'Tri-angle': { barrels: [
         {x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 1, spd: 0.9, rel: 1, size: 1, delay: 0},
-        {x:0, y:0, w:16, l:1.6, angle:5*Math.PI/6, spread: 0, recoilMult: 2.5, dmg: 0.3, spd: 0.9, rel: 1, size: 1, delay: 0.5},
-        {x:0, y:0, w:16, l:1.6, angle:-5*Math.PI/6, spread: 0, recoilMult: 2.5, dmg: 0.3, spd: 0.9, rel: 1, size: 1, delay: 0.5}
+        {x:0, y:0, w:16, l:1.6, angle:5*Math.PI/6, spread: 0, recoilMult: 2.5, dmg: 0.5, spd: 0.9, rel: 1, size: 1, delay: 0.5},
+        {x:0, y:0, w:16, l:1.6, angle:-5*Math.PI/6, spread: 0, recoilMult: 2.5, dmg: 0.5, spd: 0.9, rel: 1, size: 1, delay: 0.5}
     ]}
 };
 class SpatialGrid {
