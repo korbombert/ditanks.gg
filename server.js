@@ -1083,7 +1083,7 @@ class Drone {
                     let pushAngle = Math.atan2(dy, dx);
                     
                     // Stronger overlap push for Necromancer to prevent stacking
-                    let pushForce = (this.owner && this.owner.tankType === 'Necromancer') ? overlap * 0.45 : overlap * 0.15; 
+                    let pushForce = (this.owner && this.owner.tankType === 'Necromancer') ? overlap * 0.4 : overlap * 0.2; 
                     
                     this.x += Math.cos(pushAngle) * pushForce; 
                     this.y += Math.sin(pushAngle) * pushForce;
