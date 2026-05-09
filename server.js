@@ -704,9 +704,10 @@ class Entity {
 if (this.tankType === 'Necromancer') {
     let nearby = this.room.grid.getNearby(this.x, this.y, this.radius + 60);
     nearby.entities.forEach(e => {
-        if (e.type === 'square' && !e.markedForDeletion && this.activeDrones < 32) {
+        let droneCount = 22+(this.stats[6]*2)
+        if (e.type === 'square' && !e.markedForDeletion && this.activeDrones < droneCount) {
             let dx = e.x - this.x, dy = e.y - this.y;
-            let radSum = this.radius + e.radius + 60; // Collection aura
+            let radSum = this.radius + e.radius + 50; // Collection aura
             if (dx*dx + dy*dy < radSum*radSum) {
                 e.markedForDeletion = true; // Destroy the square
                 this.room.drones.push(new Drone(this.room, e.x, e.y, this));
