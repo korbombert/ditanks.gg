@@ -217,10 +217,10 @@ const TANK_SPECS = {
     'Flank Guard': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0}, {x:0, y:0, w:18, l:1.5, angle:Math.PI}] },
     'Overlord': { 
     barrels: [
-        {x:0, y:0, w:20, w2:35, l:1.3, angle:0},
-        {x:0, y:0, w:20, w2:35, l:1.3, angle:Math.PI/2},
-        {x:0, y:0, w:20, w2:35, l:1.3, angle:Math.PI},
-        {x:0, y:0, w:20, w2:35, l:1.3, angle:-Math.PI/2}
+        {x:0, y:0, w:18, w2:35, l:1.4, angle:0},
+        {x:0, y:0, w:18, w2:35, l:1.4, angle:Math.PI/2},
+        {x:0, y:0, w:18, w2:35, l:1.4, angle:Math.PI},
+        {x:0, y:0, w:18, w2:35, l:1.4, angle:-Math.PI/2}
     ]
 },
     'Destroyer': { barrels: [{x:0, y:0, w:30, l:1.9, angle:0}] },
