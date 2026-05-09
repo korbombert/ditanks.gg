@@ -811,7 +811,7 @@ context.rotate(en.angle);
 
 if (specs.square) {
     // Make square visually equal to circle size
-    const squareSize = radius * 0.7071;
+    const squareSize = radius * 0.8142;
 
     context.fillRect(
         -squareSize,
