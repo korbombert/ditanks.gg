@@ -154,7 +154,9 @@ let lastBullets = new Map();
 let lastDrones = new Map();
 let dyingEntities = [];
 
-let fov = 1.2;
+const REF_WIDTH = 1536;
+const BASE_FOV = 1.2;
+let fov = BASE_FOV;
 function worldToScreenX(x) {
     return (x - camera.x) / fov;
 }
@@ -1427,6 +1429,9 @@ window.oncontextmenu = e => e.preventDefault(); function resizeGame() {
     canvas.style.width = `${window.innerWidth}px`;
     canvas.style.height = `${window.innerHeight}px`;
     
+    // Scale fov so every screen sees the same world coverage as 1536px wide at BASE_FOV
+    fov = (REF_WIDTH * BASE_FOV) / canvas.width;
+
     // Center the camera immediately to prevent visual stutter on resize
     if (!myId && camera) {
         camera.x = WORLD_SIZE/2 - canvas.width/2;
