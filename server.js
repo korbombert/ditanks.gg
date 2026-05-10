@@ -398,7 +398,7 @@ const TANK_SPECS = {
         {x:0, y:10, w:16, l:1.8, angle:0, spread: 0, dmg: 0.67, spd: 1, rel: 1, size: 1, delay: 0.5}
     ]},
     'Sniper': { barrels: [{x:0, y:0, w:18, l:2.4, angle:0, spread: 0, dmg: 1.1, spd: 2, rel: 1.66, size: 1, delay: 0}] },
-    'Machine Gun': { barrels: [{x:0, y:0, w:22, w2: 32, l:1.6, angle:0, spread: 0.5, dmg: 0.745, spd: 1, rel: 0.5, size: 1, delay: 0, recoilMult: 1.3;}] },
+    'Machine Gun': { barrels: [{x:0, y:0, w:22, w2: 32, l:1.6, angle:0, spread: 0.5, dmg: 0.745, spd: 1, rel: 0.5, size: 1, delay: 0, recoilMult: 1.3}] },
     'Flank Guard': { barrels: [
         {x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}, 
         {x:0, y:0, w:18, l:1.5, angle:Math.PI, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}
