@@ -807,6 +807,8 @@ nearby.entities.forEach(e => {
                     let distSq = (this.x - e.x)**2 + (this.y - e.y)**2;
 
                     if (!isShape && !isSameTeam && isTank) {
+                        // Ignore enemies protected by base repel zones
+                        if (isInProtectedBase(this.room, e, this.team)) return;
                         // Base detection of 300, maxes out at 1000 distance for 17,000+ score
                         let detectionDist = 300 + (Math.min(e.score, 17000) / 17000) * 700;
                         let detectionSq = detectionDist * detectionDist;
@@ -855,17 +857,12 @@ nearby.entities.forEach(e => {
                 }              
                 
                 if (this.isFleeing && !target.isShape) {
-                    this.angle = Math.atan2(this.y - predY, this.x - predX);
+                    // Face TOWARD the enemy so bullets fire at them correctly;
+                    // recoil from shooting pushes the AI away (flee via recoil)
+                    this.angle = Math.atan2(predY - this.y, predX - this.x);
                     isShooting = true; // REPLACED shoot()
-                    
-                    if (this.tankType === 'Tri-angle') {
-                        this.angle = Math.atan2(predY - this.y, predX - this.x);
-                        this.vx -= Math.cos(this.angle) * moveSpeed;
-                        this.vy -= Math.sin(this.angle) * moveSpeed;
-                    } else {
-                        this.vx += Math.cos(this.angle) * moveSpeed;
-                        this.vy += Math.sin(this.angle) * moveSpeed;
-                    }
+                    this.vx -= Math.cos(this.angle) * moveSpeed;
+                    this.vy -= Math.sin(this.angle) * moveSpeed;
                 } else {
                     this.angle = Math.atan2(predY - this.y, predX - this.x);
                     isShooting = true; // REPLACED shoot()
