@@ -1,6 +1,7 @@
 const ServerState = { "gateway": true, "game": true };
 const { game: isGame, gateway: isGateway } = ServerState;
 
+// requires
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
@@ -8,6 +9,10 @@ const WebSocket = require('ws');
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
+const AdmZip = require('adm-zip');
+const os = require('os');
+
+// routes
 const app = express();
 app.get('/auth/google', (req, res) => {
     const redirectUri = `${process.env.BASE_URL}/auth/google/callback`;
@@ -117,7 +122,8 @@ function handleUserLogin(res, providerId, username, pfp, provider) {
     }
     res.redirect(`/?token=${sessionToken}`);
 }
-
+const BACKUP_CHANNEL_ID = '1503493171701874788';
+const BACKUP_INTERVAL = 1000 * 60 * 60 * 5;
 app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
@@ -1782,17 +1788,85 @@ const commands = [
     {
         name: 'lobbies',
         description: 'View active game servers and their live leaderboards',
+    },
+    {
+        name: 'z-importbackup',
+        description: 'Restore the database from a backup zip',
+        options: [
+            {
+                name: 'file',
+                description: 'Backup zip exported by the bot',
+                type: 11,
+                required: true
+            }
+        ]
     }
 ];
+async function createDatabaseBackup() {
+    try {
+        if (!discordClient.isReady()) return;
 
+        const channel = await discordClient.channels.fetch(BACKUP_CHANNEL_ID);
+        if (!channel) return;
+
+        // Flush WAL to DB fully
+        db.pragma('wal_checkpoint(FULL)');
+
+        const backupFolder = path.join(__dirname, 'backups');
+
+        if (!fs.existsSync(backupFolder)) {
+            fs.mkdirSync(backupFolder);
+        }
+
+        const timestamp = new Date()
+            .toISOString()
+            .replace(/[:.]/g, '-');
+
+        const tempDbPath = path.join(
+            backupFolder,
+            `game-${timestamp}.db`
+        );
+
+        const zipPath = path.join(
+            backupFolder,
+            `backup-${timestamp}.zip`
+        );
+
+        // Copy live DB safely
+        fs.copyFileSync(dbPath, tempDbPath);
+
+        // Create zip
+        const zip = new AdmZip();
+        zip.addLocalFile(tempDbPath);
+        zip.writeZip(zipPath);
+
+        // Send to Discord
+        await channel.send({
+            content: `🗄️ Automatic database backup • ${timestamp}`,
+            files: [zipPath]
+        });
+
+        // Cleanup temp files
+        fs.unlinkSync(tempDbPath);
+        fs.unlinkSync(zipPath);
+
+        console.log('[Backup] Backup uploaded successfully');
+    } catch (err) {
+        console.error('[Backup] Failed:', err);
+    }
+}
 discordClient.once('clientReady', async () => {
     try {
         await discordClient.application.commands.set(commands);
         updateLeaderboard();
-        
-    } catch (error) {
+        // Run startup backup
+        createDatabaseBackup();
+
+        // Repeat every 5 hours
+        setInterval(createDatabaseBackup, BACKUP_INTERVAL);
+     } catch (error) {
         console.error('cant register commands', error);
-    }
+     }
 });
 
 discordClient.on('interactionCreate', async interaction => {
@@ -1869,6 +1943,86 @@ discordClient.on('interactionCreate', async interaction => {
 
         await interaction.reply({ embeds: [embed] });
     }
+    // --- /importbackup Command ---
+if (interaction.commandName === 'importbackup') {
+
+    // Admin only
+    if (!interaction.memberPermissions.has('Administrator')) {
+        return interaction.reply({
+            content: 'You do not have permission to run this command.',
+            ephemeral: true
+        });
+    }
+
+    const attachment = interaction.options.getAttachment('file');
+
+    if (!attachment.name.endsWith('.zip')) {
+        return interaction.reply({
+            content: 'You must upload a .zip backup file.',
+            ephemeral: true
+        });
+    }
+
+    await interaction.reply({
+        content: 'Importing backup...',
+        ephemeral: true
+    });
+
+    try {
+
+        const tempFolder = path.join(__dirname, 'temp_restore');
+
+        if (!fs.existsSync(tempFolder)) {
+            fs.mkdirSync(tempFolder);
+        }
+
+        const zipFilePath = path.join(tempFolder, attachment.name);
+
+        // Download uploaded zip
+        const response = await fetch(attachment.url);
+        const arrayBuffer = await response.arrayBuffer();
+
+        fs.writeFileSync(
+            zipFilePath,
+            Buffer.from(arrayBuffer)
+        );
+
+        // Extract zip
+        const zip = new AdmZip(zipFilePath);
+        zip.extractAllTo(tempFolder, true);
+
+        // Find DB file
+        const extractedFiles = fs.readdirSync(tempFolder);
+        const dbFile = extractedFiles.find(f => f.endsWith('.db'));
+
+        if (!dbFile) {
+            throw new Error('No .db file found inside zip');
+        }
+
+        const extractedDbPath = path.join(tempFolder, dbFile);
+
+        // Close current DB
+        db.close();
+
+        // Replace DB
+        fs.copyFileSync(extractedDbPath, dbPath);
+
+        await interaction.editReply({
+            content: 'Backup restored successfully. Please redeploy the app.'
+        });
+
+        console.log('[Backup] Database restored');
+        process.exit(0);
+
+    } catch (err) {
+
+        console.error('[Backup Restore Error]', err);
+
+        await interaction.editReply({
+            content: `Restore failed: ${err.message}`
+        });
+    }
+}
 });
 if (process.env.DISCORD_BOT_TOKEN) {
     discordClient.login(process.env.DISCORD_BOT_TOKEN).catch(err => {
