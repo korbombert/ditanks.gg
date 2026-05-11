@@ -1,19 +1,216 @@
-const ServerState = { "gateway": true, "game": true };
-const { game: isGame, gateway: isGateway } = ServerState;
-
-// requires
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const Database = require('better-sqlite3');
 const AdmZip = require('adm-zip');
 const os = require('os');
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+// ===================== SERVER CONFIG =====================
+const ServerState = { "gateway": true, "game": true };
+const { game: isGame, gateway: isGateway } = ServerState;
+const PORT = process.env.PORT || 8080;
+const PUBLIC_URL = process.env.RAILWAY_STATIC_URL || `localhost:${PORT}`;
+// ===================== DATABASE =====================
+const dbPath = process.env.RAILWAY_VOLUME_MOUNT_PATH 
+    ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'game.db') 
+    : 'game.db';
 
-// routes
+const db = new Database(dbPath);
+
+console.log(`[Database] Mounted at: ${dbPath}`);
+
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT,
+        pfp TEXT,
+        provider TEXT,
+        coins INTEGER DEFAULT 0,
+        unlocked_colors TEXT DEFAULT '["#ffffff"]',
+        selected_color TEXT DEFAULT '#ffffff',
+        session_token TEXT
+    )
+`).run();
+
+const migrations = [
+    // no migrations right now, new ones need "alter table" type query
+];
+
+migrations.forEach(query => {
+    try {
+        db.prepare(query).run();
+        console.log(`[Database] Migration successful: ${query}`);
+    } catch (err) {
+        if (!err.message.includes("duplicate column name")) {
+            console.error(`[Database] Migration failed: ${err.message}`);
+        }
+    }
+});
+
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS bot_config (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    )
+`).run();
+
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS banned_ips_v2 (
+        ip_hash TEXT PRIMARY KEY,
+        timestamp INTEGER,
+        reason TEXT
+    )
+`).run();
+
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS changelogs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        description TEXT,
+        markdown TEXT,
+        date INTEGER,
+        sort_order INTEGER
+    )
+`).run();
+// ===================== BOT CONSTANTS =====================
+const BACKUP_INTERVAL = 1000 * 60 * 60 * 12;
+const BACKUP_CHANNEL_ID = '1503493171701874788';
+const LEADERBOARD_CHANNEL_ID = '1470498877168812062';
+// ===================== GAME CONSTANTS =====================
+const GAME_SPEED = 1; 
+const VIEW_DISTANCE = 1000; 
+const WORLD_SIZE = 4000;
+const BASE_SIZE = 600;
+const MAX_LEVEL = 30;
+const TICK_RATE = 60; 
+const SERVER_LOCATION = process.env.SERVER_LOCATION;
+const LEVEL_REQUIREMENTS = [ 0, 0, 22, 100, 210, 355, 480, 620, 780, 950, 1130, 1320, 1500, 1650, 1780, 1900, 2500, 3200, 4100, 5000, 6100, 7000, 8000, 9000, 10000, 11100, 12200, 13300, 14400, 15600, 16800 ];
+// ===================== GAME DATA =====================
+let BOT_NAMES = [];
+try {
+    const namesPath = path.join(__dirname, 'names.json');
+    if (fs.existsSync(namesPath)) {
+        const rawData = JSON.parse(fs.readFileSync(namesPath, 'utf8'));
+        BOT_NAMES = Array.isArray(rawData[0]) ? rawData.flat() : rawData; 
+    }
+} catch (err) {}
+
+const TANK_SPECS = {
+    'Basic': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}] },
+    'Twin': { barrels: [
+        {x:0, y:-10, w:16, l:1.8, angle:0, spread: 0, dmg: 0.67, spd: 1, rel: 1, size: 1, delay: 0}, 
+        {x:0, y:10, w:16, l:1.8, angle:0, spread: 0, dmg: 0.67, spd: 1, rel: 1, size: 1, delay: 0.5}
+    ]},
+    'Sniper': { barrels: [{x:0, y:0, w:18, l:2.4, angle:0, spread: 0, dmg: 1.1, spd: 2, rel: 1.66, size: 1, delay: 0}] },
+    'Machine Gun': { barrels: [{x:0, y:0, w:22, w2: 32, l:1.6, angle:0, spread: 0.5, dmg: 0.745, spd: 1, rel: 0.5, size: 1, delay: 0, recoilMult: 1.3}] },
+    'Flank Guard': { barrels: [
+        {x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}, 
+        {x:0, y:0, w:18, l:1.5, angle:Math.PI, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}
+    ]},
+    'Overlord': { 
+            isDroneSpawner: true,
+            maxDrones: 8,
+            barrels: [
+                {x:0, y:0, w:30, w2:40, l:1.4, angle:0, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
+                {x:0, y:0, w:30, w2:40, l:1.4, angle:Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
+                {x:0, y:0, w:30, w2:40, l:1.4, angle:Math.PI, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
+                {x:0, y:0, w:30, w2:40, l:1.4, angle:-Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0}
+            ]
+    },
+    'Necromancer': { 
+        isDroneSpawner: true,
+        maxDrones: 32,
+        barrels: [], square: true
+    },
+    'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 8, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
+    'Octo Tank': { barrels: [
+        {x:0, y:0, w:16, l:1.8, angle:0, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
+        {x:0, y:0, w:16, l:1.8, angle:Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
+       {x:0, y:0, w:16, l:1.8, angle:Math.PI, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
+        {x:0, y:0, w:16, l:1.8, angle:-3*Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
+        {x:0, y:0, w:16, l:1.8, angle:-Math.PI/2, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
+        {x:0, y:0, w:16, l:1.8, angle:-Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5}
+    ]},
+    'Triplet': { barrels: [
+        {x:0, y:-12, w:14, l:1.6, angle:0, spread: 0, dmg: 0.48, spd: 1, rel: 0.8, size: 1, delay: 0.5}, 
+        {x:0, y:12, w:14, l:1.6, angle:0, spread: 0, dmg: 0.48, spd: 1, rel: 0.8, size: 1, delay: 0.5},
+        {x:0, y:0, w:14, l:1.8, angle:0, spread: 0, dmg: 0.5, spd: 1, rel: 0.8, size: 1, delay: 0}
+    ]},
+    'Tri-angle': { barrels: [
+        {x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 1, spd: 0.9, rel: 1, size: 1, delay: 0},
+        {x:0, y:0, w:16, l:1.6, angle:5*Math.PI/6, spread: 0, recoilMult: 3.8, dmg: 0.5, spd: 0.9, rel: 1, size: 1, delay: 0.5},
+        {x:0, y:0, w:16, l:1.6, angle:-5*Math.PI/6, spread: 0, recoilMult: 3.8, dmg: 0.5, spd: 0.9, rel: 1, size: 1, delay: 0.5}
+    ]}
+};
+
+const UPGRADE_TREE = {
+    'Basic': ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard'],
+    'Sniper': ['Overlord', 'Necromancer'],
+    'Twin': ['Triplet', 'Octo Tank'],
+    'Flank Guard': ['Tri-angle', 'Octo Tank'],
+    'Machine Gun': ['Destroyer']
+};
+
+const SHOP_ITEMS = {
+    colors: [
+        { id: '#ff0000', name: 'Red', cost: 5000 },
+        { id: '#00ff00', name: 'Green', cost: 5000 },
+        { id: '#0000ff', name: 'Blue', cost: 5000 },
+        { id: '#ff00ff', name: 'Pink', cost: 5000 },
+        { id: '#ffff00', name: 'Yellow', cost: 5000 }
+    ]
+};
+
+// ===================== EXPRESS SETUP =====================
+
 const app = express();
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
+
+// ===================== MIDDLEWARE =====================
+
+const requireAdmin = (req, res, next) => {
+    let token = req.headers.authorization?.split(' ')[1] || req.query.token;
+    if (!token && req.headers.cookie) {
+        const match = req.headers.cookie.match(/sessionToken=([^;]+)/);
+        if (match) token = match[1];
+    }
+    
+    if (!token) {
+        return res.status(401).sendFile(path.join(__dirname, 'public', '401.html'));
+    }
+    
+    const user = db.prepare("SELECT username FROM users WHERE session_token = ?").get(token);
+    if (!user || user.username !== process.env.ADMIN_USERNAME) {
+        return res.status(403).sendFile(path.join(__dirname, 'public', '403.html'));
+    }
+    next();
+};
+
+// ===================== ROUTING =====================
+
+function handleUserLogin(res, providerId, username, pfp, provider) {
+    let user = db.prepare("SELECT * FROM users WHERE id = ?").get(providerId);
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    if (!user) {
+        db.prepare(`
+            INSERT INTO users (id, username, pfp, provider, session_token, unlocked_colors) 
+            VALUES (?, ?, ?, ?, ?, ?)
+        `).run(providerId, username, pfp, provider, sessionToken, JSON.stringify(['#ffffff']));
+    } else {
+        db.prepare(`
+            UPDATE users 
+            SET username = ?, pfp = ?, session_token = ? 
+            WHERE id = ?
+        `).run(username, pfp, sessionToken, providerId);
+    }
+    res.redirect(`/?token=${sessionToken}`);
+}
+
 app.get('/auth/google', (req, res) => {
     const redirectUri = `${process.env.BASE_URL}/auth/google/callback`;
     const params = new URLSearchParams({
@@ -58,6 +255,7 @@ app.get('/auth/google/callback', async (req, res) => {
         res.redirect('/?error=auth_failed');
     }
 });
+
 app.get('/auth/discord', (req, res) => {
     const url = `https://discord.com/oauth2/authorize?client_id=1487399148566089828&response_type=code&redirect_uri=https%3A%2F%2Fditanksgg.up.railway.app%2Fauth%2Fdiscord%2Fcallback&scope=identify`;
     res.redirect(url);
@@ -82,7 +280,6 @@ app.get('/auth/discord/callback', async (req, res) => {
 
         const tokenData = await tokenRes.json();
         
-        // If the token exchange failed, log the Discord error message
         if (!tokenRes.ok) {
             console.error("Token Exchange Failed:", tokenData);
             return res.redirect('/?error=token_exchange_failed');
@@ -105,126 +302,6 @@ app.get('/auth/discord/callback', async (req, res) => {
         res.redirect('/?error=auth_failed');
     }
 });
-function handleUserLogin(res, providerId, username, pfp, provider) {
-    let user = db.prepare("SELECT * FROM users WHERE id = ?").get(providerId);
-    const sessionToken = crypto.randomBytes(32).toString('hex');
-    if (!user) {
-        db.prepare(`
-            INSERT INTO users (id, username, pfp, provider, session_token, unlocked_colors) 
-            VALUES (?, ?, ?, ?, ?, ?)
-        `).run(providerId, username, pfp, provider, sessionToken, JSON.stringify(['#ffffff']));
-    } else {
-        db.prepare(`
-            UPDATE users 
-            SET username = ?, pfp = ?, session_token = ? 
-            WHERE id = ?
-        `).run(username, pfp, sessionToken, providerId);
-    }
-    res.redirect(`/?token=${sessionToken}`);
-}
-const BACKUP_CHANNEL_ID = '1503493171701874788';
-const BACKUP_INTERVAL = 1000 * 60 * 60 * 5;
-app.use(express.static(path.join(__dirname, 'public')));
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
-// Check if Railway provided a volume path, otherwise use local 'game.db'
-const dbPath = process.env.RAILWAY_VOLUME_MOUNT_PATH 
-    ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'game.db') 
-    : 'game.db';
-
-const db = new Database(dbPath);
-
-console.log(`[Database] Mounted at: ${dbPath}`); // Helpful for debugging in Railway logs
-const crypto = require('crypto'); 
-// 1. Create the basic table if it's a brand new database
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        username TEXT,
-        pfp TEXT,
-        provider TEXT,
-        coins INTEGER DEFAULT 0,
-        unlocked_colors TEXT DEFAULT '["#ffffff"]',
-        selected_color TEXT DEFAULT '#ffffff',
-        session_token TEXT
-    )
-`).run();
-
-// 2. MIGRATIONS: Add columns to existing databases safely
-const migrations = [
-    "ALTER TABLE users ADD COLUMN high_score INTEGER DEFAULT 0",
-    "ALTER TABLE users ADD COLUMN session_token TEXT"
-];
-
-migrations.forEach(query => {
-    try {
-        db.prepare(query).run();
-        console.log(`[Database] Migration successful: ${query}`);
-    } catch (err) {
-        // We expect an error if the column already exists, so we just ignore it
-        if (!err.message.includes("duplicate column name")) {
-            console.error(`[Database] Migration failed: ${err.message}`);
-        }
-    }
-});
-
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS bot_config (
-        key TEXT PRIMARY KEY,
-        value TEXT
-    )
-`).run();
-const SHOP_ITEMS = {
-    colors: [
-        { id: '#ff0000', name: 'Red', cost: 5000 },
-        { id: '#00ff00', name: 'Green', cost: 5000 },
-        { id: '#0000ff', name: 'Blue', cost: 5000 },
-        { id: '#ff00ff', name: 'Pink', cost: 5000 },
-        { id: '#ffff00', name: 'Yellow', cost: 5000 }
-    ]
-};
-
-// --- Add this table creation block ---
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS banned_ips_v2 (
-        ip_hash TEXT PRIMARY KEY,
-        timestamp INTEGER,
-        reason TEXT
-    )
-`).run();
-// -------------------------------------
-
-try { db.prepare("ALTER TABLE banned_ips_v2 ADD COLUMN reason TEXT").run(); } catch(e) {}
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS changelogs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT,
-        description TEXT,
-        markdown TEXT,
-        date INTEGER,
-        sort_order INTEGER
-    )
-`).run();
-
-const requireAdmin = (req, res, next) => {
-    let token = req.headers.authorization?.split(' ')[1] || req.query.token;
-    if (!token && req.headers.cookie) {
-        const match = req.headers.cookie.match(/sessionToken=([^;]+)/);
-        if (match) token = match[1];
-    }
-    
-    if (!token) {
-        return res.status(401).sendFile(path.join(__dirname, 'public', '401.html'));
-    }
-    
-    const user = db.prepare("SELECT username FROM users WHERE session_token = ?").get(token);
-    if (!user || user.username !== process.env.ADMIN_USERNAME) {
-        return res.status(403).sendFile(path.join(__dirname, 'public', '403.html'));
-    }
-    next();
-};
-
-app.use(express.json());
 
 app.get('/api/me', (req, res) => {
     let token = req.headers.authorization?.split(' ')[1];
@@ -237,6 +314,7 @@ app.get('/api/me', (req, res) => {
 app.get('/app', requireAdmin, (req, res) => {
     res.sendFile(path.join(__dirname, 'admin.html'));
 });
+
 app.get('/app/build/tank', requireAdmin, (req, res) => {
     res.sendFile(path.join(__dirname, 'tankbuilder.html'));
 });
@@ -333,7 +411,6 @@ app.get('/api/admin/server_instances', requireAdmin, (req, res) => {
     res.json(instances);
 });
 
-// Added Create Server Endpoint
 app.post('/api/admin/server_instances/create', requireAdmin, (req, res) => {
     const { id, mode } = req.body;
     if (!id || !mode) return res.status(400).json({ error: "Invalid parameters" });
@@ -343,7 +420,6 @@ app.post('/api/admin/server_instances/create', requireAdmin, (req, res) => {
     res.json({ success: true });
 });
 
-// Updated Server Action Endpoint
 app.post('/api/admin/server_instances/action', requireAdmin, (req, res) => {
     const { action, serverIds } = req.body;
     if (!serverIds || !Array.isArray(serverIds)) return res.status(400).json({ error: "Invalid payload" });
@@ -378,72 +454,18 @@ app.delete('/api/admin/changelogs/:id', requireAdmin, (req, res) => {
     db.prepare("DELETE FROM changelogs WHERE id = ?").run(req.params.id);
     res.json({ success: true });
 });
+
 app.use((req, res, next) => {
     res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
 });
-const GAME_SPEED = 1; 
-const VIEW_DISTANCE = 1000; 
-const WORLD_SIZE = 4000;
-const BASE_SIZE = 600;
-const MAX_LEVEL = 30;
-const TICK_RATE = 60; 
-const SERVER_LOCATION = process.env.SERVER_LOCATION;
-const LEVEL_REQUIREMENTS = [ 0, 0, 22, 100, 210, 355, 480, 620, 780, 950, 1130, 1320, 1500, 1650, 1780, 1900, 2500, 3200, 4100, 5000, 6100, 7000, 8000, 9000, 10000, 11100, 12200, 13300, 14400, 15600, 16800 ];
-let BOT_NAMES = [];
-try {
-    const namesPath = path.join(__dirname, 'names.json');
-    if (fs.existsSync(namesPath)) {
-        const rawData = JSON.parse(fs.readFileSync(namesPath, 'utf8'));
-        BOT_NAMES = Array.isArray(rawData[0]) ? rawData.flat() : rawData; 
-    }
-} catch (err) {}
-const TANK_SPECS = {
-    'Basic': { barrels: [{x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}] },
-    'Twin': { barrels: [
-        {x:0, y:-10, w:16, l:1.8, angle:0, spread: 0, dmg: 0.67, spd: 1, rel: 1, size: 1, delay: 0}, 
-        {x:0, y:10, w:16, l:1.8, angle:0, spread: 0, dmg: 0.67, spd: 1, rel: 1, size: 1, delay: 0.5}
-    ]},
-    'Sniper': { barrels: [{x:0, y:0, w:18, l:2.4, angle:0, spread: 0, dmg: 1.1, spd: 2, rel: 1.66, size: 1, delay: 0}] },
-    'Machine Gun': { barrels: [{x:0, y:0, w:22, w2: 32, l:1.6, angle:0, spread: 0.5, dmg: 0.745, spd: 1, rel: 0.5, size: 1, delay: 0, recoilMult: 1.3}] },
-    'Flank Guard': { barrels: [
-        {x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}, 
-        {x:0, y:0, w:18, l:1.5, angle:Math.PI, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}
-    ]},
-    'Overlord': { 
-            isDroneSpawner: true,
-            maxDrones: 8,
-            barrels: [
-                {x:0, y:0, w:30, w2:40, l:1.4, angle:0, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
-                {x:0, y:0, w:30, w2:40, l:1.4, angle:Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
-                {x:0, y:0, w:30, w2:40, l:1.4, angle:Math.PI, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0},
-                {x:0, y:0, w:30, w2:40, l:1.4, angle:-Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0}
-            ]
-    },
-    'Necromancer': { 
-    isDroneSpawner: true,
-    maxDrones: 32,
-    barrels: [], square: true
-    },
-    'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 8, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
-    'Octo Tank': { barrels: [
-        {x:0, y:0, w:16, l:1.8, angle:0, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
-        {x:0, y:0, w:16, l:1.8, angle:Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
-       {x:0, y:0, w:16, l:1.8, angle:Math.PI, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
-        {x:0, y:0, w:16, l:1.8, angle:-3*Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
-        {x:0, y:0, w:16, l:1.8, angle:-Math.PI/2, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
-        {x:0, y:0, w:16, l:1.8, angle:-Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5}
-    ]},
-    'Triplet': { barrels: [
-        {x:0, y:-12, w:14, l:1.6, angle:0, spread: 0, dmg: 0.48, spd: 1, rel: 0.8, size: 1, delay: 0.5}, 
-        {x:0, y:12, w:14, l:1.6, angle:0, spread: 0, dmg: 0.48, spd: 1, rel: 0.8, size: 1, delay: 0.5},
-        {x:0, y:0, w:14, l:1.8, angle:0, spread: 0, dmg: 0.5, spd: 1, rel: 0.8, size: 1, delay: 0}
-    ]},
-    'Tri-angle': { barrels: [
-        {x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 1, spd: 0.9, rel: 1, size: 1, delay: 0},
-        {x:0, y:0, w:16, l:1.6, angle:5*Math.PI/6, spread: 0, recoilMult: 3.8, dmg: 0.5, spd: 0.9, rel: 1, size: 1, delay: 0.5},
-        {x:0, y:0, w:16, l:1.6, angle:-5*Math.PI/6, spread: 0, recoilMult: 3.8, dmg: 0.5, spd: 0.9, rel: 1, size: 1, delay: 0.5}
-    ]}
-};
+
+// ===================== HTTP & WEBSOCKET SERVER =====================
+
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
+// ===================== GAME CLASSES =====================
+
 class SpatialGrid {
     constructor(size, cellSize) {
         this.cellSize = cellSize;
@@ -545,7 +567,6 @@ class Room {
         } else {
             type = isCenter 
                 ? ['pentagon', 'pentagon', 'triangle', 'pentagon'][Math.floor(Math.random()*4)]
-                // Added a chance for pentagons to spawn in the outer areas
                 : ['square','square','square','triangle','triangle','pentagon'][Math.floor(Math.random()*5)]; 
         }
         this.entities.push(new Entity(this, x, y, type));
@@ -587,6 +608,7 @@ class Room {
         this.entities.push(bot);
     }
 }
+
 function isInProtectedBase(room, obj, viewerTeam = 0) {
     if (!obj) return false;
 
@@ -594,7 +616,6 @@ function isInProtectedBase(room, obj, viewerTeam = 0) {
     const BASE_SIZE_4 = 600;
     const BASE_WIDTH_2 = 400;
 
-    // Same team can always interact
     if (
         viewerTeam !== 0 &&
         obj.team !== 0 &&
@@ -605,23 +626,13 @@ function isInProtectedBase(room, obj, viewerTeam = 0) {
 
     if (room.mode === "2TDM") {
 
-        // Left base
         if (obj.x < BASE_WIDTH_2 + PROX) {
-
-            // Team 1 protected
             if (obj.team === 1) return true;
-
-            // Neutral shapes inside base are protected too
             if (obj.team === 0) return true;
         }
 
-        // Right base
         if (obj.x > WORLD_SIZE - BASE_WIDTH_2 - PROX) {
-
-            // Team 2 protected
             if (obj.team === 2) return true;
-
-            // Neutral shapes inside base are protected too
             if (obj.team === 0) return true;
         }
     }
@@ -644,7 +655,6 @@ function isInProtectedBase(room, obj, viewerTeam = 0) {
             obj.x > WORLD_SIZE - BASE_SIZE_4 - PROX &&
             obj.y > WORLD_SIZE - BASE_SIZE_4 - PROX;
 
-        // Team bases
         if (inTL && (obj.team === 1 || obj.team === 0)) return true;
         if (inBR && (obj.team === 2 || obj.team === 0)) return true;
         if (inTR && (obj.team === 3 || obj.team === 0)) return true;
@@ -653,6 +663,7 @@ function isInProtectedBase(room, obj, viewerTeam = 0) {
 
     return false;
 }
+
 class Entity {
     constructor(room, x, y, type, name = "", team = 0, isPlayer = false, ws = null) {
         this.room = room;
@@ -707,22 +718,21 @@ class Entity {
         this.x += this.vx; this.y += this.vy;
         this.x = Math.max(0, Math.min(WORLD_SIZE, this.x));
         this.y = Math.max(0, Math.min(WORLD_SIZE, this.y));
-if (this.tankType === 'Necromancer') {
-    let nearby = this.room.grid.getNearby(this.x, this.y, this.radius + 60);
-    nearby.entities.forEach(e => {
-        let droneCount = 22+(this.stats[6]*2)
-        if (e.type === 'square' && !e.markedForDeletion && this.activeDrones < droneCount) {
-            let dx = e.x - this.x, dy = e.y - this.y;
-            let radSum = this.radius + e.radius + 50; // Collection aura
-            if (dx*dx + dy*dy < radSum*radSum) {
-                e.markedForDeletion = true; // Destroy the square
-                this.room.drones.push(new Drone(this.room, e.x, e.y, this));
-                if (typeof this.addXP === 'function') this.addXP(e.xpVal || 60);
-            }
+        if (this.tankType === 'Necromancer') {
+            let nearby = this.room.grid.getNearby(this.x, this.y, this.radius + 60);
+            nearby.entities.forEach(e => {
+                let droneCount = 22+(this.stats[6]*2)
+                if (e.type === 'square' && !e.markedForDeletion && this.activeDrones < droneCount) {
+                    let dx = e.x - this.x, dy = e.y - this.y;
+                    let radSum = this.radius + e.radius + 50;
+                    if (dx*dx + dy*dy < radSum*radSum) {
+                        e.markedForDeletion = true;
+                        this.room.drones.push(new Drone(this.room, e.x, e.y, this));
+                        if (typeof this.addXP === 'function') this.addXP(e.xpVal || 60);
+                    }
+                }
+            });
         }
-    });
-}
-        // --- NEW: Barrel Timers Tick ---
         const specs = TANK_SPECS[this.tankType];
         if (!this.barrelTimers || this.barrelTimers.length !== (specs?.barrels?.length || 0)) {
             this.barrelTimers = new Array(specs?.barrels?.length || 0).fill(0);
@@ -730,7 +740,6 @@ if (this.tankType === 'Necromancer') {
         for(let i=0; i<this.barrelTimers.length; i++) {
             if(this.barrelTimers[i] > 0) this.barrelTimers[i]--;
         }
-        // -------------------------------
         let effectiveMaxHp = this.maxHp + (this.stats[1] * 20); 
 
         if (this.hp < effectiveMaxHp) {
@@ -744,7 +753,7 @@ if (this.tankType === 'Necromancer') {
             if (this.hp > effectiveMaxHp) this.hp = effectiveMaxHp;
         }
         let moveSpeed = (0.5 * 0.998) + (this.stats[7] * (0.04 * 0.995)); 
-let isShooting = false;
+        let isShooting = false;
         if(this.isPlayer) {
             let inputX = 0; let inputY = 0;
             if(this.inputs.left) inputX -= 1;
@@ -795,15 +804,14 @@ let isShooting = false;
 
                 nearby.drones.forEach(d => {
                     if (d.owner === this || d.markedForDeletion) return;
-                    // Ignore enemies protected by base repel zones
-if (isInProtectedBase(this.room, d, this.team)) return;
+                    if (isInProtectedBase(this.room, d, this.team)) return;
                     let isSameTeam = this.room.mode.includes("TDM") && d.team === this.team && d.team !== 0;
                     if (isSameTeam) return;
                     let distSq = (this.x - d.x)**2 + (this.y - d.y)**2;
                     if (distSq < 90000 && distSq < minDroneDistSq) { minDroneDistSq = distSq; droneTarget = d; } 
                 });
 
-nearby.entities.forEach(e => {
+                nearby.entities.forEach(e => {
                     if(e === this || e.markedForDeletion) return;
                     let isTank = ['tank', 'ai'].includes(e.type);
                     let isSameTeam = this.room.mode.includes("TDM") && e.team === this.team && e.team !== 0;
@@ -813,9 +821,7 @@ nearby.entities.forEach(e => {
                     let distSq = (this.x - e.x)**2 + (this.y - e.y)**2;
 
                     if (!isShape && !isSameTeam && isTank) {
-                        // Ignore enemies protected by base repel zones
                         if (isInProtectedBase(this.room, e, this.team)) return;
-                        // Base detection of 300, maxes out at 1000 distance for 17,000+ score
                         let detectionDist = 300 + (Math.min(e.score, 17000) / 17000) * 700;
                         let detectionSq = detectionDist * detectionDist;
                         
@@ -823,16 +829,13 @@ nearby.entities.forEach(e => {
                             minEnemyDistSq = distSq; 
                             enemyTarget = e; 
                         }
-                   } else if (isShape) {
-
-    // Overlords ignore farming shapes
-    if (this.tankType === 'Overlord') return;
-
-    if(distSq < minShapeDistSq) { 
-        minShapeDistSq = distSq; 
-        shapeTarget = e; 
-    }
-}
+                    } else if (isShape) {
+                        if (this.tankType === 'Overlord') return;
+                        if(distSq < minShapeDistSq) { 
+                            minShapeDistSq = distSq; 
+                            shapeTarget = e; 
+                        }
+                    }
                 });
 
                 this.aiTarget = droneTarget || enemyTarget || shapeTarget;
@@ -863,15 +866,13 @@ nearby.entities.forEach(e => {
                 }              
                 
                 if (this.isFleeing && !target.isShape) {
-                    // Face TOWARD the enemy so bullets fire at them correctly;
-                    // recoil from shooting pushes the AI away (flee via recoil)
                     this.angle = Math.atan2(predY - this.y, predX - this.x);
-                    isShooting = true; // REPLACED shoot()
+                    isShooting = true;
                     this.vx -= Math.cos(this.angle) * moveSpeed;
                     this.vy -= Math.sin(this.angle) * moveSpeed;
                 } else {
                     this.angle = Math.atan2(predY - this.y, predX - this.x);
-                    isShooting = true; // REPLACED shoot()
+                    isShooting = true;
 
                     if (isDrone && target.owner) {
                         let evadeAngle = Math.atan2(target.owner.y - this.y, target.owner.x - this.x);
@@ -911,11 +912,10 @@ nearby.entities.forEach(e => {
                 this.vy += Math.sin(this.angle) * (moveSpeed * 0.4);
 
                 if (Math.random() < 0.03) {
-                    isShooting = true; // REPLACED shoot()
+                    isShooting = true;
                 }
             }
             
-            // AI Upgrades remain inside the AI block
             if (this.thinkTimer === 0) {
                 if (this.level >= 15 && this.tankType === 'Basic' && this.type === 'ai') {
                     if (Math.random() > 0.20) { 
@@ -935,15 +935,13 @@ nearby.entities.forEach(e => {
                     }
                 }
             }
-        } // <--- CLOSE THE AI BLOCK HERE
+        }
 
-        // ✅ MOVED OUTSIDE: Now this runs for both players AND AI
-        // --- NEW: Firing & Delay initialization logic ---
         if (isShooting && !this.wasShooting) {
             let baseReload = Math.max(5, ((30 * 1.002) - (this.stats[6] * (3 * 0.995))));
             specs.barrels.forEach((b, i) => {
                 if (this.barrelTimers[i] <= 0) {
-                    this.barrelTimers[i] = (baseReload * (b.rel || 1)) * (b.delay || 0); // Inject the delay offset
+                    this.barrelTimers[i] = (baseReload * (b.rel || 1)) * (b.delay || 0);
                 }
             });
         }
@@ -951,7 +949,6 @@ nearby.entities.forEach(e => {
         if (isShooting) shoot(this);
         this.wasShooting = isShooting;
         
-        // AI Stat point spending (leave this where it is, it's already safely scoped)
         if(this.type === 'ai' && this.statPoints > 0){
             const bulletStats = [3,4,5,6];
             const otherStats = [0,1,2,7]; 
@@ -977,11 +974,10 @@ class Drone {
         this.team = owner.team; this.angle = 0;
         this.markedForDeletion = false;
         
-        // Custom Stats for Necromancer vs Standard Drones
         if (owner.tankType === 'Necromancer') {
             this.hp = (15 + (owner.stats[4] * 5)) * 2;
             this.dmg = 12 + (owner.stats[5] * 3); 
-            this.radius = 15; // Square size
+            this.radius = 15;
             this.isNecroSquare = true;
         } else {
             this.radius = 12;
@@ -999,7 +995,7 @@ class Drone {
         }
 
         let speed = 4 + (this.owner.stats[3] * 0.5);
-        if (this.owner.tankType === 'Necromancer') speed *= 0.93; // Slightly slower than Overlord
+        if (this.owner.tankType === 'Necromancer') speed *= 0.93;
 
         let tx = this.x, ty = this.y, moving = false;
 
@@ -1022,7 +1018,6 @@ class Drone {
                     ty = this.y + Math.sin(ang) * 500; 
                     moving = true;
                 } 
-                // AI Repel behavior: Push drones toward off-screen targets (600 to 1000 units away)
                 else if (['Overlord', 'Necromancer'].includes(this.owner.tankType) && distSq > 360000 && distSq <= 1000000) {
                     let angToTarget = Math.atan2(this.owner.aiTarget.y - this.y, this.owner.aiTarget.x - this.x);
                     tx = this.x + Math.cos(angToTarget) * 800; 
@@ -1033,7 +1028,6 @@ class Drone {
                 }
             } else {
                 let minDistSq = Infinity;
-                // Fix FoV scanning to View Distance (1000)
                 let nearby = this.room.grid.getNearby(this.x, this.y, 1000); 
                 nearby.entities.forEach(e => {
                     if(e === this.owner || e.markedForDeletion) return;
@@ -1043,7 +1037,6 @@ class Drone {
                     if(distSq < 1000000 && distSq < minDistSq) { minDistSq = distSq; target = e; }
                 });
 
-                // AI Wanders with drones in front if no targets are found
                 if (!target) {
                     tx = this.owner.x + Math.cos(this.owner.angle) * 180;
                     ty = this.owner.y + Math.sin(this.owner.angle) * 180;
@@ -1086,7 +1079,6 @@ class Drone {
                     let overlap = radSum - dist;
                     let pushAngle = Math.atan2(dy, dx);
                     
-                    // Stronger overlap push for Necromancer to prevent stacking
                     let pushForce = (this.owner && this.owner.tankType === 'Necromancer') ? overlap * 0.4 : overlap * 0.2; 
                     
                     this.x += Math.cos(pushAngle) * pushForce; 
@@ -1097,19 +1089,17 @@ class Drone {
     }
 }
 
+// ===================== ROOMS =====================
+
 const rooms = {
     "FFA-S1": new Room("FFA-S1", "FFA"),
     "FFA-S2": new Room("FFA-S2", "FFA"),
     "2TDM-S1": new Room("2TDM-S1", "2TDM"),
     "4TDM-S1": new Room("4TDM-S1", "4TDM"),
 };
-const UPGRADE_TREE = {
-    'Basic': ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard'],
-    'Sniper': ['Overlord', 'Necromancer'],
-    'Twin': ['Triplet', 'Octo Tank'],
-    'Flank Guard': ['Tri-angle', 'Octo Tank'],
-    'Machine Gun': ['Destroyer']
-};
+
+// ===================== GAME LOGIC =====================
+
 function shoot(who) {
     if(who.markedForDeletion) return;
     const specs = TANK_SPECS[who.tankType];
@@ -1149,7 +1139,7 @@ function shoot(who) {
             who.vx -= Math.cos(finalAngle) * recoilForce * 0.25;
             who.vy -= Math.sin(finalAngle) * recoilForce * 0.25;
 
-            let bulletSize = (8 + (who.stats[5]*0.5)) * (b.size || 1); // Uses new bullet size property
+            let bulletSize = (8 + (who.stats[5]*0.5)) * (b.size || 1);
 
             room.bullets.push({ 
                 id: room.nextBulletId++, 
@@ -1170,10 +1160,10 @@ function updateRoom(room) {
     const PROX = 350; 
     const REPEL_FORCE = 2.5; 
 
-   function applyRepel(obj) {
+    function applyRepel(obj) {
         let team = obj.team || 0;
-        let FAN_FORCE = 0.8; // Softer push
-        let MAX_PUSH = 15;   // Prevents hyper-speed bouncebacks
+        let FAN_FORCE = 0.8;
+        let MAX_PUSH = 15;
 
         if (room.mode === "2TDM" && team !== 0) {
             if (team !== 1 && obj.x < BASE_WIDTH_2 + PROX) { 
@@ -1341,18 +1331,18 @@ function updateRoom(room) {
                 if (d.owner) en.lastDamagedBy = d.owner.id;
                 
                 if (en.hp <= 0 && !en.xpAwarded && d.owner && typeof d.owner.addXP === 'function') {
-    en.xpAwarded = true;
-    let xpGain = ['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100);
-    d.owner.addXP(Math.min(xpGain, 24700)); 
-                    
-    let droneCount = 22+(d.owner.stats[6]*2)
-    if (en.type === 'square' && d.owner.tankType === 'Necromancer' && d.owner.activeDrones < droneCount) {
-        room.drones.push(new Drone(room, en.x, en.y, d.owner));
-        if (d.owner.activeDrones < droneCount) {
-            room.drones.push(new Drone(room, en.x, en.y, d.owner));
-        }
-    }
-}
+                    en.xpAwarded = true;
+                    let xpGain = ['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100);
+                    d.owner.addXP(Math.min(xpGain, 24700)); 
+                        
+                    let droneCount = 22+(d.owner.stats[6]*2)
+                    if (en.type === 'square' && d.owner.tankType === 'Necromancer' && d.owner.activeDrones < droneCount) {
+                        room.drones.push(new Drone(room, en.x, en.y, d.owner));
+                        if (d.owner.activeDrones < droneCount) {
+                            room.drones.push(new Drone(room, en.x, en.y, d.owner));
+                        }
+                    }
+                }
                 if (d.hp <= 0) { d.markedForDeletion = true; break; }
             }
         }
@@ -1426,7 +1416,6 @@ function updateRoom(room) {
                 if (client && client.dbId) {
                     let earnedCoins = Math.floor(e.score / 1000); 
                     
-                    // -- NEW: High Score Tracking --
                     let userRecord = db.prepare("SELECT high_score, provider FROM users WHERE id = ?").get(client.dbId);
                     let isNewHighScore = false;
                     
@@ -1442,7 +1431,6 @@ function updateRoom(room) {
                     let updatedUser = db.prepare("SELECT * FROM users WHERE id = ?").get(client.dbId);
                     client.ws.send(JSON.stringify({ type: 'profile_update', profile: updatedUser }));
                     
-                    // -- NEW: Trigger Discord Leaderboard Update --
                     if (isNewHighScore && userRecord.provider === 'discord') {
                         updateLeaderboard();
                     }
@@ -1468,10 +1456,13 @@ function updateRoom(room) {
     if(shapes < 230) room.spawnShape();
 }
 
+// ===================== GAME TICK =====================
+
 setInterval(() => { 
     Object.values(rooms).forEach(updateRoom); 
 }, 1000 / (TICK_RATE * GAME_SPEED));
-    
+
+// ===================== WEBSOCKET CONNECTION HANDLER =====================
 
 wss.on('connection', (ws, req) => {
     const rawIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
@@ -1614,14 +1605,15 @@ wss.on('connection', (ws, req) => {
     });
 });
 
+// ===================== BROADCAST INTERVAL =====================
+
 let tickCount = 0;
 
 setInterval(() => {
     tickCount++;
-    // Only package and send data every 2 ticks
     let shouldSend = (tickCount % 2 === 0);
 
-    if (!shouldSend) return; // Skip network broadcast this tick
+    if (!shouldSend) return;
 
     Object.values(rooms).forEach(room => {
         if (room.status === 'stopped') return;
@@ -1650,7 +1642,6 @@ setInterval(() => {
                         let isVisible = Math.abs(e.x - focalX) < VIEW_DISTANCE && 
                                         Math.abs(e.y - focalY) < (VIEW_DISTANCE / 1.8);
                         
-                        // Tip: Rounding numbers before sending also saves bandwidth!
                         payloadEntities.push({
                             id: e.id, 
                             x: isVisible ? Math.round(e.x) : null, 
@@ -1692,7 +1683,6 @@ setInterval(() => {
                             team: d.team 
                         };
                         
-                        // Check if the drone's owner is a Necromancer
                         if (d.owner && d.owner.tankType === 'Necromancer') {
                             droneData.square = true;
                         }
@@ -1720,13 +1710,11 @@ setInterval(() => {
     });
 }, 1000 / TICK_RATE);
 
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+// ===================== DISCORD BOT =====================
 
 const discordClient = new Client({ 
     intents: [GatewayIntentBits.Guilds] 
 });
-
-const LEADERBOARD_CHANNEL_ID = '1470498877168812062';
 
 async function updateLeaderboard() {
     if (!discordClient.isReady()) return;
@@ -1734,7 +1722,6 @@ async function updateLeaderboard() {
         const channel = await discordClient.channels.fetch(LEADERBOARD_CHANNEL_ID);
         if (!channel) return;
 
-        // Fetch top 10 Discord players by high score
         const topUsers = db.prepare(`
             SELECT id, username, high_score 
             FROM users 
@@ -1759,20 +1746,18 @@ async function updateLeaderboard() {
             embed.addFields({ name: 'Top 10 Players', value: boardText });
         }
 
-        // Check if we already have a message ID saved
         const msgRecord = "1494846178263568547" || db.prepare("SELECT value FROM bot_config WHERE key = 'leaderboard_msg_id'").get();
         
         if (msgRecord) {
             try {
                 const msg = await channel.messages.fetch(msgRecord);
                 await msg.edit({ embeds: [embed] });
-                return; // Successfully edited, exit function
+                return;
             } catch (err) {
                 console.log('could not edit old leaderboard message');
             }
         }
 
-        // Send a new message and save its ID
         const newMsg = await channel.send({ embeds: [embed] });
         db.prepare("INSERT OR REPLACE INTO bot_config (key, value) VALUES ('leaderboard_msg_id', ?)").run(newMsg.id);
 
@@ -1780,6 +1765,7 @@ async function updateLeaderboard() {
         console.error('failed to update leaderboard ', err);
     }
 }
+
 const commands = [
     {
         name: 'account',
@@ -1802,6 +1788,7 @@ const commands = [
         ]
     }
 ];
+
 async function createDatabaseBackup() {
     try {
         if (!discordClient.isReady()) return;
@@ -1809,7 +1796,6 @@ async function createDatabaseBackup() {
         const channel = await discordClient.channels.fetch(BACKUP_CHANNEL_ID);
         if (!channel) return;
 
-        // Flush WAL to DB fully
         db.pragma('wal_checkpoint(FULL)');
 
         const backupFolder = path.join(__dirname, 'backups');
@@ -1832,21 +1818,17 @@ async function createDatabaseBackup() {
             `backup-${timestamp}.zip`
         );
 
-        // Copy live DB safely
         fs.copyFileSync(dbPath, tempDbPath);
 
-        // Create zip
         const zip = new AdmZip();
         zip.addLocalFile(tempDbPath);
         zip.writeZip(zipPath);
 
-        // Send to Discord
         await channel.send({
-            content: `🗄️ Automatic database backup • ${timestamp}`,
+            content: `Backup Created!`,
             files: [zipPath]
         });
 
-        // Cleanup temp files
         fs.unlinkSync(tempDbPath);
         fs.unlinkSync(zipPath);
 
@@ -1855,14 +1837,12 @@ async function createDatabaseBackup() {
         console.error('[Backup] Failed:', err);
     }
 }
+
 discordClient.once('clientReady', async () => {
     try {
         await discordClient.application.commands.set(commands);
         updateLeaderboard();
-        // Run startup backup
         createDatabaseBackup();
-
-        // Repeat every 5 hours
         setInterval(createDatabaseBackup, BACKUP_INTERVAL);
      } catch (error) {
         console.error('cant register commands', error);
@@ -1872,7 +1852,6 @@ discordClient.once('clientReady', async () => {
 discordClient.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
-    // --- /account Command ---
     if (interaction.commandName === 'account') {
         const dbId = `discord_${interaction.user.id}`;
         const user = db.prepare("SELECT * FROM users WHERE id = ?").get(dbId);
@@ -1900,7 +1879,6 @@ discordClient.on('interactionCreate', async interaction => {
         await interaction.reply({ embeds: [embed] });
     }
 
-    // --- /lobbies Command ---
     if (interaction.commandName === 'lobbies') {
         const embed = new EmbedBuilder()
             .setColor('#5865F2')
@@ -1943,95 +1921,89 @@ discordClient.on('interactionCreate', async interaction => {
 
         await interaction.reply({ embeds: [embed] });
     }
-    // --- /importbackup Command ---
-if (interaction.commandName === 'importbackup') {
 
-    // Admin only
-    if (!interaction.memberPermissions.has('Administrator')) {
-        return interaction.reply({
-            content: 'You do not have permission to run this command.',
-            ephemeral: true
-        });
-    }
+    if (interaction.commandName === 'importbackup') {
 
-    const attachment = interaction.options.getAttachment('file');
-
-    if (!attachment.name.endsWith('.zip')) {
-        return interaction.reply({
-            content: 'You must upload a .zip backup file.',
-            ephemeral: true
-        });
-    }
-
-    await interaction.reply({
-        content: 'Importing backup...',
-        ephemeral: true
-    });
-
-    try {
-
-        const tempFolder = path.join(__dirname, 'temp_restore');
-
-        if (!fs.existsSync(tempFolder)) {
-            fs.mkdirSync(tempFolder);
+        if (!interaction.memberPermissions.has('Administrator')) {
+            return interaction.reply({
+                content: 'You do not have permission to run this command.',
+                ephemeral: true
+            });
         }
 
-        const zipFilePath = path.join(tempFolder, attachment.name);
+        const attachment = interaction.options.getAttachment('file');
 
-        // Download uploaded zip
-        const response = await fetch(attachment.url);
-        const arrayBuffer = await response.arrayBuffer();
-
-        fs.writeFileSync(
-            zipFilePath,
-            Buffer.from(arrayBuffer)
-        );
-
-        // Extract zip
-        const zip = new AdmZip(zipFilePath);
-        zip.extractAllTo(tempFolder, true);
-
-        // Find DB file
-        const extractedFiles = fs.readdirSync(tempFolder);
-        const dbFile = extractedFiles.find(f => f.endsWith('.db'));
-
-        if (!dbFile) {
-            throw new Error('No .db file found inside zip');
+        if (!attachment.name.endsWith('.zip')) {
+            return interaction.reply({
+                content: 'You must upload a .zip backup file.',
+                ephemeral: true
+            });
         }
 
-        const extractedDbPath = path.join(tempFolder, dbFile);
-
-        // Close current DB
-        db.close();
-
-        // Replace DB
-        fs.copyFileSync(extractedDbPath, dbPath);
-
-        await interaction.editReply({
-            content: 'Backup restored successfully. Please redeploy the app.'
+        await interaction.reply({
+            content: 'Importing backup...',
+            ephemeral: true
         });
 
-        console.log('[Backup] Database restored');
-        process.exit(0);
+        try {
 
-    } catch (err) {
+            const tempFolder = path.join(__dirname, 'temp_restore');
 
-        console.error('[Backup Restore Error]', err);
+            if (!fs.existsSync(tempFolder)) {
+                fs.mkdirSync(tempFolder);
+            }
 
-        await interaction.editReply({
-            content: `Restore failed: ${err.message}`
-        });
+            const zipFilePath = path.join(tempFolder, attachment.name);
+
+            const response = await fetch(attachment.url);
+            const arrayBuffer = await response.arrayBuffer();
+
+            fs.writeFileSync(
+                zipFilePath,
+                Buffer.from(arrayBuffer)
+            );
+
+            const zip = new AdmZip(zipFilePath);
+            zip.extractAllTo(tempFolder, true);
+
+            const extractedFiles = fs.readdirSync(tempFolder);
+            const dbFile = extractedFiles.find(f => f.endsWith('.db'));
+
+            if (!dbFile) {
+                throw new Error('No .db file found inside zip');
+            }
+
+            const extractedDbPath = path.join(tempFolder, dbFile);
+
+            db.close();
+
+            fs.copyFileSync(extractedDbPath, dbPath);
+
+            await interaction.editReply({
+                content: 'Backup restored successfully. Please redeploy the app.'
+            });
+
+            console.log('[Backup] Database restored');
+            process.exit(0);
+
+        } catch (err) {
+
+            console.error('[Backup Restore Error]', err);
+
+            await interaction.editReply({
+                content: `Restore failed: ${err.message}`
+            });
+        }
     }
-}
 });
+
 if (process.env.DISCORD_BOT_TOKEN) {
     discordClient.login(process.env.DISCORD_BOT_TOKEN).catch(err => {
         console.error('login failed', err);
     });
 }
-// ==========================================
-const PORT = process.env.PORT || 8080;
-const PUBLIC_URL = process.env.RAILWAY_STATIC_URL || `localhost:${PORT}`;
+
+// ===================== SERVER LISTEN =====================
 
 server.listen(PORT, '0.0.0.0', () => {
     const protocol = process.env.RAILWAY_STATIC_URL ? 'wss' : 'ws';
