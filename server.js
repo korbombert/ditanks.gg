@@ -37,7 +37,8 @@ db.prepare(`
 `).run();
 
 const migrations = [
-    // no migrations right now, new ones need "alter table" type query
+    `ALTER TABLE users ADD COLUMN high_score INTEGER DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN kills INTEGER DEFAULT 0`
 ];
 
 migrations.forEach(query => {
@@ -74,6 +75,23 @@ db.prepare(`
         markdown TEXT,
         date INTEGER,
         sort_order INTEGER
+    )
+`).run();
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS achievements (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        description TEXT,
+        icon TEXT
+    )
+`).run();
+
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS user_achievements (
+        user_id TEXT,
+        achievement_id TEXT,
+        unlocked_at INTEGER,
+        PRIMARY KEY (user_id, achievement_id)
     )
 `).run();
 // ===================== BOT CONSTANTS =====================
@@ -146,7 +164,44 @@ const TANK_SPECS = {
         {x:0, y:0, w:16, l:1.6, angle:-5*Math.PI/6, spread: 0, recoilMult: 3.8, dmg: 0.5, spd: 0.9, rel: 1, size: 1, delay: 0.5}
     ]}
 };
-
+const ACHIEVEMENTS = [
+    {
+        id: 'millionaire_hunter',
+        name: 'Millionaire Hunter',
+        description: 'Kill a player with over 1,000,000 score',
+        icon: '💰'
+    },
+    {
+        id: 'first_blood',
+        name: 'First Blood',
+        description: 'Get your first player kill',
+        icon: '🩸'
+    },
+    {
+        id: 'tank_destroyer',
+        name: 'Tank Destroyer',
+        description: 'Destroy 100 players',
+        icon: '💥'
+    },
+    {
+        id: 'unstoppable',
+        name: 'Unstoppable',
+        description: 'Reach 1,000,000 score',
+        icon: '🔥'
+    },
+    {
+        id: 'survivor',
+        name: 'Survivor',
+        description: 'Stay alive for 30 minutes',
+        icon: '🛡️'
+    }
+];
+ACHIEVEMENTS.forEach(a => {
+    db.prepare(`
+        INSERT OR IGNORE INTO achievements (id, name, description, icon)
+        VALUES (?, ?, ?, ?)
+    `).run(a.id, a.name, a.description, a.icon);
+});
 const UPGRADE_TREE = {
     'Basic': ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard'],
     'Sniper': ['Overlord', 'Necromancer'],
@@ -454,7 +509,41 @@ app.delete('/api/admin/changelogs/:id', requireAdmin, (req, res) => {
     db.prepare("DELETE FROM changelogs WHERE id = ?").run(req.params.id);
     res.json({ success: true });
 });
+app.get('/api/achievements', (req, res) => {
+    res.json(ACHIEVEMENTS);
+});
+app.get('/api/me/achievements', (req, res) => {
+    let token = req.headers.authorization?.split(' ')[1];
 
+    if (!token) {
+        return res.status(401).json({ error: 'No token' });
+    }
+
+    const user = db.prepare(`
+        SELECT id FROM users
+        WHERE session_token = ?
+    `).get(token);
+
+    if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+    }
+
+    const achievements = db.prepare(`
+        SELECT
+            a.id,
+            a.name,
+            a.description,
+            a.icon,
+            ua.unlocked_at
+        FROM user_achievements ua
+        JOIN achievements a
+        ON ua.achievement_id = a.id
+        WHERE ua.user_id = ?
+        ORDER BY ua.unlocked_at DESC
+    `).all(user.id);
+
+    res.json(achievements);
+});
 app.use((req, res, next) => {
     res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
 });
@@ -663,7 +752,33 @@ function isInProtectedBase(room, obj, viewerTeam = 0) {
 
     return false;
 }
+function unlockAchievement(userId, achievementId, ws = null) {
+    const already = db.prepare(`
+        SELECT * FROM user_achievements
+        WHERE user_id = ? AND achievement_id = ?
+    `).get(userId, achievementId);
 
+    if (already) return false;
+
+    db.prepare(`
+        INSERT INTO user_achievements
+        (user_id, achievement_id, unlocked_at)
+        VALUES (?, ?, ?)
+    `).run(userId, achievementId, Date.now());
+
+    const achievement = db.prepare(`
+        SELECT * FROM achievements WHERE id = ?
+    `).get(achievementId);
+
+    if (ws && achievement) {
+        ws.send(JSON.stringify({
+            type: 'achievement_unlocked',
+            achievement
+        }));
+    }
+
+    return true;
+}
 class Entity {
     constructor(room, x, y, type, name = "", team = 0, isPlayer = false, ws = null) {
         this.room = room;
@@ -711,6 +826,30 @@ class Entity {
         
         let prevReq = LEVEL_REQUIREMENTS[this.level];
         this.xp = this.level === MAX_LEVEL ? 0 : this.score - prevReq; 
+        if (this.isPlayer && this.ws) {
+    const client = this.room.clients.find(c => c.player === this);
+
+    if (client?.dbId) {
+
+        if (this.score >= 1000000) {
+            unlockAchievement(
+                client.dbId,
+                'unstoppable',
+                client.ws
+            );
+        }
+
+        const aliveTime = Date.now() - this.spawnTime;
+
+        if (aliveTime >= 1800000) {
+            unlockAchievement(
+                client.dbId,
+                'survivor',
+                client.ws
+            );
+        }
+    }
+}
     }
 
     update() {
@@ -1411,7 +1550,49 @@ function updateRoom(room) {
             if(e.isPlayer && e.ws) {
                 let timeAlive = Math.floor((Date.now() - e.spawnTime) / 1000);
                 e.ws.send(JSON.stringify({ type: 'death', score: e.score, level: e.level, timeAlive: timeAlive, tank: e.tankType, killerId: e.lastDamagedBy }));
-                
+                const killer = room.entities.find(p => p.id === e.lastDamagedBy);
+
+if (
+    killer &&
+    killer.isPlayer
+) {
+    const killerClient = room.clients.find(c => c.player === killer);
+
+    if (killerClient?.dbId) {
+
+        db.prepare(`
+            UPDATE users
+            SET kills = kills + 1
+            WHERE id = ?
+        `).run(killerClient.dbId);
+
+        const stats = db.prepare(`
+            SELECT kills FROM users WHERE id = ?
+        `).get(killerClient.dbId);
+
+        unlockAchievement(
+            killerClient.dbId,
+            'first_blood',
+            killerClient.ws
+        );
+
+        if (stats.kills >= 100) {
+            unlockAchievement(
+                killerClient.dbId,
+                'tank_destroyer',
+                killerClient.ws
+            );
+        }
+
+        if (e.score >= 1000000) {
+            unlockAchievement(
+                killerClient.dbId,
+                'millionaire_hunter',
+                killerClient.ws
+            );
+        }
+    }
+}
                 let client = room.clients.find(c => c.player === e);
                 if (client && client.dbId) {
                     let earnedCoins = Math.floor(e.score / 1000); 
