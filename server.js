@@ -78,16 +78,16 @@ db.prepare(`
     )
 `).run();
 db.prepare(`
-    CREATE TABLE IF NOT EXISTS achievements (
+    CREATE TABLE IF NOT EXISTS achievements_v2 (
         id TEXT PRIMARY KEY,
         name TEXT,
         description TEXT,
-        icon TEXT
+        badge TEXT
     )
 `).run();
 
 db.prepare(`
-    CREATE TABLE IF NOT EXISTS user_achievements (
+    CREATE TABLE IF NOT EXISTS user_achievements_v2 (
         user_id TEXT,
         achievement_id TEXT,
         unlocked_at INTEGER,
@@ -169,36 +169,36 @@ const ACHIEVEMENTS = [
         id: 'millionaire_hunter',
         name: 'Millionaire Hunter',
         description: 'Kill a player with over 1,000,000 score',
-        icon: '💰'
+        badge: 'millionaire'
     },
     {
         id: 'first_blood',
         name: 'First Blood',
         description: 'Get your first player kill',
-        icon: '🩸'
+        badge: 'blood'
     },
     {
         id: 'tank_destroyer',
         name: 'Tank Destroyer',
         description: 'Destroy 100 players',
-        icon: '💥'
+        badge: 'destroyer'
     },
     {
         id: 'unstoppable',
         name: 'Unstoppable',
-        description: 'Reach 1,000,000 score',
-        icon: '🔥'
+        description: 'Reach 100,000 score',
+        badge: 'fire'
     },
     {
         id: 'survivor',
         name: 'Survivor',
-        description: 'Stay alive for 30 minutes',
-        icon: '🛡️'
+        description: 'Stay alive for 10 minutes',
+        badge: 'shield'
     }
 ];
 ACHIEVEMENTS.forEach(a => {
     db.prepare(`
-        INSERT OR IGNORE INTO achievements (id, name, description, icon)
+        INSERT OR IGNORE INTO achievements_v2 (id, name, description, icon)
         VALUES (?, ?, ?, ?)
     `).run(a.id, a.name, a.description, a.icon);
 });
@@ -535,8 +535,8 @@ app.get('/api/me/achievements', (req, res) => {
             a.description,
             a.icon,
             ua.unlocked_at
-        FROM user_achievements ua
-        JOIN achievements a
+        FROM user_achievements_v2 ua
+        JOIN achievements_v2 a
         ON ua.achievement_id = a.id
         WHERE ua.user_id = ?
         ORDER BY ua.unlocked_at DESC
@@ -754,20 +754,20 @@ function isInProtectedBase(room, obj, viewerTeam = 0) {
 }
 function unlockAchievement(userId, achievementId, ws = null) {
     const already = db.prepare(`
-        SELECT * FROM user_achievements
+        SELECT * FROM user_achievements_v2
         WHERE user_id = ? AND achievement_id = ?
     `).get(userId, achievementId);
 
     if (already) return false;
 
     db.prepare(`
-        INSERT INTO user_achievements
+        INSERT INTO user_achievements_v2
         (user_id, achievement_id, unlocked_at)
         VALUES (?, ?, ?)
     `).run(userId, achievementId, Date.now());
 
     const achievement = db.prepare(`
-        SELECT * FROM achievements WHERE id = ?
+        SELECT * FROM achievements_v2 WHERE id = ?
     `).get(achievementId);
 
     if (ws && achievement) {
