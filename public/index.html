@@ -261,6 +261,112 @@ select:focus, select:hover {
         font-weight: bold;
         box-shadow: 0 3px 8px rgba(0,0,0,0.3);
     }
+    #achievement-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.achievement-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+
+    padding: 12px;
+    border-radius: 10px;
+
+    background: rgba(30,30,30,0.7);
+    border: 3px solid #444;
+
+    opacity: 0.35;
+    transition: all 0.2s;
+}
+
+.achievement-card.unlocked {
+    opacity: 1;
+    border-color: #ffd54a;
+    background: rgba(255,213,74,0.12);
+}
+
+.achievement-badge {
+    width: 54px;
+    height: 54px;
+    flex-shrink: 0;
+}
+
+.achievement-badge svg {
+    width: 100%;
+    height: 100%;
+}
+
+.achievement-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.achievement-name {
+    font-weight: bold;
+    font-size: 18px;
+    color: white;
+}
+
+.achievement-desc {
+    color: #bbb;
+    font-size: 14px;
+}
+        #achievement-feed {
+    position: fixed;
+    right: 20px;
+    top: 20px;
+
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+
+    z-index: 9999;
+    pointer-events: none;
+}
+
+.achievement-popup {
+    width: 320px;
+
+    display: flex;
+    align-items: center;
+    gap: 14px;
+
+    padding: 14px;
+
+    border-radius: 12px;
+
+    background: rgba(20,20,20,0.92);
+
+    border-left: 6px solid #ffd54a;
+
+    animation:
+        achievementIn 0.35s ease,
+        achievementOut 0.35s ease 4.65s forwards;
+}
+
+@keyframes achievementIn {
+    from {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes achievementOut {
+    to {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+}
     .stat-upgrade-row button:hover { background: #ddd; }
     </style>
 </head>
@@ -377,20 +483,27 @@ select:focus, select:hover {
                 </div>
             </div>
             <div style="display: flex; gap: 5px;">
-    <button class="auth-btn menu-blue" onclick="openShop()">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 4px;">
-            <path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/>
-        </svg>
-        Shop
-    </button>
-
     <button id="admin-panel-btn" class="auth-btn menu-blue" style="display:none; background: #9b59b6; border-bottom-color: #8e44ad;" onclick="goToAdmin()">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 4px;">
             <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/>
         </svg>
         Admin
     </button>
+    <button class="auth-btn menu-blue" onclick="openShop()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 4px;">
+            <path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/>
+        </svg>
+        Shop
+    </button>
+    <button id="achievements-btn" onclick="openAchievements()">
+    <svg width="22" height="22" viewBox="0 0 64 64">
+        <circle cx="32" cy="32" r="26" fill="#ffd54a"/>
+        <path d="M32 18 L38 30 L50 32 L38 34 L32 46 L26 34 L14 32 L26 30 Z"
+        fill="white"/>
+    </svg>
 
+    Achievements
+</button>
     <button class="auth-btn menu-blue" onclick="logout()" style="background: #f14e54; border-bottom-color: #c83d42;">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
@@ -429,7 +542,15 @@ select:focus, select:hover {
         </div>
         <div id="shop-content"></div>
     </div>
-    
+    <div id="achievements-modal" class="menu-modal">
+    <div class="menu-box">
+        <h2>Achievements</h2>
+        <button class="close-btn" onclick="closeAchievements()">✖</button>
+        <div id="achievement-list"></div>
+
+    </div>
+</div>
+    <div id="achievement-feed"></div>
     <canvas id="gameCanvas"></canvas>
 
 <script src="/client.js"></script>
