@@ -268,7 +268,19 @@ select:focus, select:hover {
     max-height: 500px;
     overflow-y: auto;
 }
+#achievements-btn {
+    /* Remove custom sizing/padding; let .auth-btn handle it */
+    display: flex;
+    align-items: center;
+}
 
+#achievements-btn svg {
+    /* Force the trophy icon to match the shop/admin icon sizes */
+    width: 18px; 
+    height: 18px;
+    transform: none; /* Prevents the translateY(10%) from global svg style */
+    flex-shrink: 0;
+}
 .achievement-card {
     display: flex;
     align-items: center;
@@ -495,13 +507,11 @@ select:focus, select:hover {
         </svg>
         Shop
     </button>
-    <button id="achievements-btn" onclick="openAchievements()">
-    <svg width="22" height="22" viewBox="0 0 64 64">
+    <button id="achievements-btn" class="auth-btn menu-blue" onclick="openAchievements()">
+    <svg width="18" height="18" viewBox="0 0 64 64" style="margin-right: 4px;">
         <circle cx="32" cy="32" r="26" fill="#ffd54a"/>
-        <path d="M32 18 L38 30 L50 32 L38 34 L32 46 L26 34 L14 32 L26 30 Z"
-        fill="white"/>
+        <path d="M32 18 L38 30 L50 32 L38 34 L32 46 L26 34 L14 32 L26 30 Z" fill="white"/>
     </svg>
-
     Achievements
 </button>
     <button class="auth-btn menu-blue" onclick="logout()" style="background: #f14e54; border-bottom-color: #c83d42;">
