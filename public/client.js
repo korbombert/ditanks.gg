@@ -244,8 +244,148 @@ const TANK_SPECS = {
         {x:0, y:0, w:16, l:1.6, angle:-5*Math.PI/6}
     ] }
 };
+const ACHIEVEMENT_BADGES = {
+    millionaire: `
+        <svg viewBox="0 0 64 64">
+            <circle cx="32" cy="32" r="26" fill="#f4c542"/>
+            <path d="M32 18 L38 30 L50 32 L38 34 L32 46 L26 34 L14 32 L26 30 Z"
+            fill="#fff3b0"/>
+        </svg>
+    `,
 
+    blood: `
+        <svg viewBox="0 0 64 64">
+            <path d="M32 10 C40 22 48 30 48 40 A16 16 0 1 1 16 40 C16 30 24 22 32 10Z"
+            fill="#ff4b4b"/>
+        </svg>
+    `,
+
+    destroyer: `
+        <svg viewBox="0 0 64 64">
+            <polygon points="32,8 56,32 32,56 8,32"
+            fill="#8f5cff"/>
+        </svg>
+    `,
+
+    fire: `
+        <svg viewBox="0 0 64 64">
+            <path d="M32 8 C42 22 52 30 52 44 A20 20 0 1 1 12 44
+            C12 28 22 20 32 8Z"
+            fill="#ff9933"/>
+        </svg>
+    `,
+
+    shield: `
+        <svg viewBox="0 0 64 64">
+            <path d="M32 8 L52 16 V30 C52 44 44 54 32 58
+            C20 54 12 44 12 30 V16 Z"
+            fill="#4bc0ff"/>
+        </svg>
+    `
+};
+let achievementsData = [];
+let unlockedAchievements = [];
 const iconCache = {};
+async function loadAchievements() {
+
+    const all = await fetch('/api/achievements');
+    achievementsData = await all.json();
+
+    if (!sessionToken) return;
+
+    const unlocked = await fetch('/api/me/achievements', {
+        headers: {
+            Authorization: `Bearer ${sessionToken}`
+        }
+    });
+
+    unlockedAchievements = await unlocked.json();
+}
+function openAchievements() {
+
+    const modal = document.getElementById('achievements-modal');
+    const list = document.getElementById('achievement-list');
+
+    const unlockedIds = unlockedAchievements.map(a => a.id);
+
+    list.innerHTML = '';
+
+    achievementsData.forEach(a => {
+
+        const unlocked = unlockedIds.includes(a.id);
+
+        list.innerHTML += `
+            <div class="achievement-card ${unlocked ? 'unlocked' : ''}">
+                
+                <div class="achievement-badge">
+                    ${ACHIEVEMENT_BADGES[a.badge]}
+                </div>
+
+                <div class="achievement-info">
+                    <div class="achievement-name">
+                        ${a.name}
+                    </div>
+
+                    <div class="achievement-desc">
+                        ${a.description}
+                    </div>
+                </div>
+
+            </div>
+        `;
+    });
+
+    modal.style.display = 'flex';
+}
+
+function closeAchievements() {
+    document.getElementById('achievements-modal').style.display = 'none';
+}
+function showAchievementPopup(achievement) {
+
+    const feed = document.getElementById('achievement-feed');
+
+    const popup = document.createElement('div');
+    popup.className = 'achievement-popup';
+
+    popup.innerHTML = `
+        <div class="achievement-badge">
+            ${ACHIEVEMENT_BADGES[achievement.badge]}
+        </div>
+
+        <div>
+            <div style="
+                color:#ffd54a;
+                font-weight:bold;
+                font-size:18px;
+            ">
+                Achievement Unlocked
+            </div>
+
+            <div style="
+                color:white;
+                font-size:16px;
+                margin-top:4px;
+            ">
+                ${achievement.name}
+            </div>
+
+            <div style="
+                color:#aaa;
+                font-size:13px;
+                margin-top:2px;
+            ">
+                ${achievement.description}
+            </div>
+        </div>
+    `;
+
+    feed.appendChild(popup);
+
+    setTimeout(() => {
+        popup.remove();
+    }, 5000);
+}
 function getCachedTankIcon(tankType, color) {
     let key = tankType + "_" + color;
     if (iconCache[key]) return iconCache[key];
@@ -578,6 +718,10 @@ function connectWS(regionStr, modeStr) {
     ws.onmessage = (e) => {
         const data = JSON.parse(e.data);
         if(data.type === 'init') { myId = data.id; myTeam = data.team; spectateId = null; }
+        else if (data.type === 'achievement_unlocked') {
+            unlockedAchievements.push(data.achievement);
+            showAchievementPopup(data.achievement);
+        }
         else if(data.type === 'pong') {
             const latency = performance.now() - data.time;
             document.getElementById('ping-display').innerText = ` ${latency.toFixed(1)} ms ${data.locationl}`;
@@ -589,6 +733,7 @@ function connectWS(regionStr, modeStr) {
         }
         else if(data.type === 'playerStats') { myStats = data; updateUI(); checkUpgrades(); }
         else if(data.type === 'spectate_update') { spectateId = data.id; }
+        
         else if(data.type === 'death') {
             myId = null;
             spectateId = data.killerId; 
@@ -661,7 +806,7 @@ function connectWS(regionStr, modeStr) {
         const reasonText = e.reason || "Connection lost to the server.";
         const reasonDiv = document.getElementById('disconnect-reason');
         reasonDiv.innerText = reasonText;
-        reasonDiv.style.display = 'flex'; // Changed to flex so the icon inside aligns properly
+        reasonDiv.style.display = 'flex'; 
     };
 }
 
