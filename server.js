@@ -39,6 +39,7 @@ db.prepare(`
 const migrations = [
     `ALTER TABLE users ADD COLUMN high_score INTEGER DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN kills INTEGER DEFAULT 0`
+    `ALTER TABLE achievements_v2 RENAME COLUMN icon TO badge`,
 ];
 
 migrations.forEach(query => {
@@ -198,9 +199,9 @@ const ACHIEVEMENTS = [
 ];
 ACHIEVEMENTS.forEach(a => {
     db.prepare(`
-        INSERT OR IGNORE INTO achievements_v2 (id, name, description, icon)
+        INSERT OR IGNORE INTO achievements_v2 (id, name, description, badge)
         VALUES (?, ?, ?, ?)
-    `).run(a.id, a.name, a.description, a.icon);
+    `).run(a.id, a.name, a.description, a.badge);
 });
 const UPGRADE_TREE = {
     'Basic': ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard'],
