@@ -640,7 +640,7 @@ class Room {
 
     spawnEntities() {
         for(let i=0; i<200; i++) this.spawnShape();
-        for(let i=0; i<20; i++) this.spawnBot(i);
+        for(let i=0; i<24; i++) this.spawnBot(i);
     }
 
     spawnShape() {
