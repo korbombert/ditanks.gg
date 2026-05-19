@@ -125,9 +125,13 @@ select:focus, select:hover {
         .btn:active { transform: translateY(2px); border-bottom-width: 2px; }
         .btn:disabled { background: #777; border-bottom-color: #555; cursor: not-allowed;}
         /* Gold/Yellow Achievement Button Style */
+/* Gold/Yellow Achievement Button Style */
 .auth-btn.menu-gold { 
-    background: #ffd54a; 
+    background: #ffd54a;
     border-bottom: 4px solid #c9a424; 
+    margin: 5px 2px;
+    width: auto;
+    white-space: nowrap; /* Prevents text from ever wrapping to a second line */
 }
 
 .auth-btn.menu-gold:active {
@@ -136,6 +140,12 @@ select:focus, select:hover {
 }
 
 /* Ensure the medal SVG matches the layout of the other icons */
+#achievements-btn {
+    display: inline-flex; /* Changed from flex to inline-flex to play nice with layout */
+    align-items: center;
+    justify-content: center;
+}
+
 #achievements-btn svg {
     margin-right: 6px;
     flex-shrink: 0;
@@ -284,19 +294,7 @@ select:focus, select:hover {
     max-height: 500px;
     overflow-y: auto;
 }
-#achievements-btn {
-    /* Remove custom sizing/padding; let .auth-btn handle it */
-    display: flex;
-    align-items: center;
-}
 
-#achievements-btn svg {
-    /* Force the trophy icon to match the shop/admin icon sizes */
-    width: 18px; 
-    height: 18px;
-    transform: none; /* Prevents the translateY(10%) from global svg style */
-    flex-shrink: 0;
-}
 .achievement-card {
     display: flex;
     align-items: center;
