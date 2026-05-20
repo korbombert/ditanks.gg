@@ -39,6 +39,7 @@ db.prepare(`
 const migrations = [
     `ALTER TABLE users ADD COLUMN high_score INTEGER DEFAULT 0`,
     `ALTER TABLE achievements_v2 RENAME COLUMN icon TO badge`,
+    `DELETE FROM banned_ips_v2`,
 ];
 
 migrations.forEach(query => {
