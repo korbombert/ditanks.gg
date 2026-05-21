@@ -980,7 +980,8 @@ class Entity {
 
                 this.aiTarget = droneTarget || enemyTarget || shapeTarget;
                 this.targetId = this.aiTarget ? (this.aiTarget.id || null) : null;
-                this.isFleeing = (this.hp / this.maxHp) < 0.25;
+                const effectiveMaxHpForFlee = this.maxHp + (this.stats[1] * 20);
+                this.isFleeing = (this.hp / effectiveMaxHpForFlee) < 0.25;
             }
             this.vx += this.evadeVx;
             this.vy += this.evadeVy;
@@ -1034,25 +1035,38 @@ class Entity {
                     }
                 }
             } else {
-                let centerX = WORLD_SIZE / 2;
-                let centerY = WORLD_SIZE / 2;
-                let distToCenterSq = (this.x - centerX)**2 + (this.y - centerY)**2;
-                
-                if (distToCenterSq > 1000000) {
-                    let centerAngle = Math.atan2(centerY - this.y, centerX - this.x);
-                    let angleDiff = centerAngle - this.angle;
+                if (this.isFleeing) {
+                    // When low HP and no target in sight, flee away from center to recover
+                    let centerX = WORLD_SIZE / 2;
+                    let centerY = WORLD_SIZE / 2;
+                    let fleeAngle = Math.atan2(this.y - centerY, this.x - centerX);
+                    let angleDiff = fleeAngle - this.angle;
                     while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
                     while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-                    this.angle += angleDiff * 0.05; 
-                } else if(this.thinkTimer === 0 && Math.random() < 0.2) {
-                    this.angle += (Math.random() - 0.5);
-                }
-                
-                this.vx += Math.cos(this.angle) * (moveSpeed * 0.4);
-                this.vy += Math.sin(this.angle) * (moveSpeed * 0.4);
+                    this.angle += angleDiff * 0.08;
+                    this.vx += Math.cos(this.angle) * moveSpeed;
+                    this.vy += Math.sin(this.angle) * moveSpeed;
+                } else {
+                    let centerX = WORLD_SIZE / 2;
+                    let centerY = WORLD_SIZE / 2;
+                    let distToCenterSq = (this.x - centerX)**2 + (this.y - centerY)**2;
+                    
+                    if (distToCenterSq > 1000000) {
+                        let centerAngle = Math.atan2(centerY - this.y, centerX - this.x);
+                        let angleDiff = centerAngle - this.angle;
+                        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                        this.angle += angleDiff * 0.05; 
+                    } else if(this.thinkTimer === 0 && Math.random() < 0.2) {
+                        this.angle += (Math.random() - 0.5);
+                    }
+                    
+                    this.vx += Math.cos(this.angle) * (moveSpeed * 0.4);
+                    this.vy += Math.sin(this.angle) * (moveSpeed * 0.4);
 
-                if (Math.random() < 0.03) {
-                    isShooting = true;
+                    if (Math.random() < 0.03) {
+                        isShooting = true;
+                    }
                 }
             }
             
@@ -1167,20 +1181,43 @@ class Drone {
                     target = this.owner.aiTarget;
                 }
             } else {
-                let minDistSq = Infinity;
-                let nearby = this.room.grid.getNearby(this.x, this.y, 1000); 
-                nearby.entities.forEach(e => {
-                    if(e === this.owner || e.markedForDeletion) return;
-                    if(this.room.mode.includes("TDM") && e.team === this.owner.team && ['ai','tank'].includes(e.type)) return;
-                    
-                    let distSq = (this.x - e.x)**2 + (this.y - e.y)**2;
-                    if(distSq < 1000000 && distSq < minDistSq) { minDistSq = distSq; target = e; }
-                });
+                // No owner target — keep drones leashed close to owner
+                const isOverlordType = ['Overlord', 'Necromancer'].includes(this.owner.tankType);
+                const leashRadius = isOverlordType ? 300 : 1000;
+                const droneDx = this.x - this.owner.x;
+                const droneDy = this.y - this.owner.y;
+                const droneDistSq = droneDx * droneDx + droneDy * droneDy;
 
-                if (!target) {
-                    tx = this.owner.x + Math.cos(this.owner.angle) * 180;
-                    ty = this.owner.y + Math.sin(this.owner.angle) * 180;
-                    moving = true;
+                if (isOverlordType) {
+                    // Overlord idle: orbit/stay close to owner, don't wander the map
+                    if (droneDistSq > leashRadius * leashRadius) {
+                        // Pull back to owner
+                        tx = this.owner.x;
+                        ty = this.owner.y;
+                        moving = true;
+                    } else {
+                        // Stay orbiting near owner
+                        tx = this.owner.x + Math.cos(this.owner.angle) * 180;
+                        ty = this.owner.y + Math.sin(this.owner.angle) * 180;
+                        moving = true;
+                    }
+                } else {
+                    let minDistSq = Infinity;
+                    // Non-overlord: only search within leash radius of OWNER, not drone
+                    let nearby = this.room.grid.getNearby(this.owner.x, this.owner.y, leashRadius); 
+                    nearby.entities.forEach(e => {
+                        if(e === this.owner || e.markedForDeletion) return;
+                        if(this.room.mode.includes("TDM") && e.team === this.owner.team && ['ai','tank'].includes(e.type)) return;
+                        
+                        let distSq = (this.owner.x - e.x)**2 + (this.owner.y - e.y)**2;
+                        if(distSq < leashRadius * leashRadius && distSq < minDistSq) { minDistSq = distSq; target = e; }
+                    });
+
+                    if (!target) {
+                        tx = this.owner.x + Math.cos(this.owner.angle) * 180;
+                        ty = this.owner.y + Math.sin(this.owner.angle) * 180;
+                        moving = true;
+                    }
                 }
             }
 
@@ -1340,7 +1377,40 @@ function updateRoom(room) {
 
     room.entities.forEach(e => { if(!['square','triangle','pentagon','hexagon'].includes(e.type)) applyRepel(e); });
     room.bullets.forEach(applyRepel);
-    room.drones.forEach(applyRepel);
+    room.drones.forEach(d => {
+        applyRepel(d);
+        // Hard boundary: physically prevent drones from staying inside enemy bases
+        let team = d.team || 0;
+        if (team !== 0) {
+            if (room.mode === "2TDM") {
+                if (team !== 1 && d.x < BASE_WIDTH_2 + PROX) {
+                    d.x = BASE_WIDTH_2 + PROX + 5;
+                    if (d.vx < 0) d.vx = Math.abs(d.vx);
+                }
+                if (team !== 2 && d.x > WORLD_SIZE - BASE_WIDTH_2 - PROX) {
+                    d.x = WORLD_SIZE - BASE_WIDTH_2 - PROX - 5;
+                    if (d.vx > 0) d.vx = -Math.abs(d.vx);
+                }
+            } else if (room.mode === "4TDM") {
+                if (team !== 1 && d.x < BASE_SIZE_4 + PROX && d.y < BASE_SIZE_4 + PROX) {
+                    if (d.x < BASE_SIZE_4 + PROX) { d.x = BASE_SIZE_4 + PROX + 5; if (d.vx < 0) d.vx = Math.abs(d.vx); }
+                    if (d.y < BASE_SIZE_4 + PROX) { d.y = BASE_SIZE_4 + PROX + 5; if (d.vy < 0) d.vy = Math.abs(d.vy); }
+                }
+                if (team !== 3 && d.x > WORLD_SIZE - BASE_SIZE_4 - PROX && d.y < BASE_SIZE_4 + PROX) {
+                    if (d.x > WORLD_SIZE - BASE_SIZE_4 - PROX) { d.x = WORLD_SIZE - BASE_SIZE_4 - PROX - 5; if (d.vx > 0) d.vx = -Math.abs(d.vx); }
+                    if (d.y < BASE_SIZE_4 + PROX) { d.y = BASE_SIZE_4 + PROX + 5; if (d.vy < 0) d.vy = Math.abs(d.vy); }
+                }
+                if (team !== 4 && d.x < BASE_SIZE_4 + PROX && d.y > WORLD_SIZE - BASE_SIZE_4 - PROX) {
+                    if (d.x < BASE_SIZE_4 + PROX) { d.x = BASE_SIZE_4 + PROX + 5; if (d.vx < 0) d.vx = Math.abs(d.vx); }
+                    if (d.y > WORLD_SIZE - BASE_SIZE_4 - PROX) { d.y = WORLD_SIZE - BASE_SIZE_4 - PROX - 5; if (d.vy > 0) d.vy = -Math.abs(d.vy); }
+                }
+                if (team !== 2 && d.x > WORLD_SIZE - BASE_SIZE_4 - PROX && d.y > WORLD_SIZE - BASE_SIZE_4 - PROX) {
+                    if (d.x > WORLD_SIZE - BASE_SIZE_4 - PROX) { d.x = WORLD_SIZE - BASE_SIZE_4 - PROX - 5; if (d.vx > 0) d.vx = -Math.abs(d.vx); }
+                    if (d.y > WORLD_SIZE - BASE_SIZE_4 - PROX) { d.y = WORLD_SIZE - BASE_SIZE_4 - PROX - 5; if (d.vy > 0) d.vy = -Math.abs(d.vy); }
+                }
+            }
+        }
+    });
 
     room.bullets.forEach(b => {
         b.x += b.vx; b.y += b.vy; b.life--;
@@ -1782,7 +1852,23 @@ wss.on('connection', (ws, req) => {
     });
 
     ws.on('close', () => {
-        if (client.player) client.player.markedForDeletion = true;
+        if (client.player) {
+            // Immediately remove the player entity from the room so it leaves no hitbox
+            // and doesn't appear in broadcasts or the room-players API
+            if (client.room) {
+                client.room.entities = client.room.entities.filter(e => e !== client.player);
+                // Also clean up any drones owned by this player
+                client.room.drones = client.room.drones.filter(d => {
+                    if (d.owner === client.player) {
+                        if (client.player.activeDrones > 0) client.player.activeDrones--;
+                        return false;
+                    }
+                    return true;
+                });
+            }
+            client.player.markedForDeletion = true;
+            client.player = null;
+        }
         if (client.room) client.room.clients = client.room.clients.filter(c => c !== client);
     });
 });
@@ -1819,6 +1905,7 @@ setInterval(() => {
 
                 for (let i = 0; i < room.entities.length; i++) {
                     let e = room.entities[i];
+                    if (e.markedForDeletion) continue;
                     if (['tank', 'ai'].includes(e.type)) {
                         processedEntities.add(e.id);
                         let isVisible = Math.abs(e.x - focalX) < VIEW_DISTANCE && 
