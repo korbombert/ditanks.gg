@@ -1897,79 +1897,15 @@ setInterval(() => {
 const discordClient = new Client({ 
     intents: [GatewayIntentBits.Guilds] 
 });
+// ======================
+// EMBED CONFIG
+// ======================
 
-async function updateLeaderboard() {
-    if (!discordClient.isReady()) return;
-    try {
-        const channel = await discordClient.channels.fetch(LEADERBOARD_CHANNEL_ID);
-        if (!channel) return;
+const EMBED_COLOR = '#5865F2';
 
-        const topUsers = db.prepare(`
-            SELECT id, username, high_score 
-            FROM users 
-            WHERE provider = 'discord' AND high_score > 0 
-            ORDER BY high_score DESC 
-            LIMIT 10
-        `).all();
-
-        const embed = new EmbedBuilder()
-            .setColor('#FFD700')
-            .setTitle('🏆 All-Time Highest Scores')
-            .setDescription('The top 10 highest scores achieved!')
-            .setTimestamp();
-
-        if (topUsers.length === 0) {
-            embed.addFields({ name: 'No scores yet!', value: 'Play the game and set a record!' });
-        } else {
-            let boardText = topUsers.map((u, i) => {
-                const rawDiscordId = u.id.replace('discord_', '');
-                return `**${i + 1}.** <@${rawDiscordId}> - ${Math.floor(u.high_score).toLocaleString()} pts`;
-            }).join('\n\n');
-            embed.addFields({ name: 'Top 10 Players', value: boardText });
-        }
-
-        const msgRecord = "1494846178263568547" || db.prepare("SELECT value FROM bot_config WHERE key = 'leaderboard_msg_id'").get();
-        
-        if (msgRecord) {
-            try {
-                const msg = await channel.messages.fetch(msgRecord);
-                await msg.edit({ embeds: [embed] });
-                return;
-            } catch (err) {
-                console.log('could not edit old leaderboard message');
-            }
-        }
-
-        const newMsg = await channel.send({ embeds: [embed] });
-        db.prepare("INSERT OR REPLACE INTO bot_config (key, value) VALUES ('leaderboard_msg_id', ?)").run(newMsg.id);
-
-    } catch (err) {
-        console.error('failed to update leaderboard ', err);
-    }
-}
-
-const commands = [
-    {
-        name: 'account',
-        description: 'View your game account details, coins, and cosmetics',
-    },
-    {
-        name: 'lobbies',
-        description: 'View active game servers and their live leaderboards',
-    },
-    {
-        name: 'z-importbackup',
-        description: 'Restore the database from a backup zip',
-        options: [
-            {
-                name: 'file',
-                description: 'Backup zip exported by the bot',
-                type: 11,
-                required: true
-            }
-        ]
-    }
-];
+// ======================
+// DATABASE BACKUP
+// ======================
 
 async function createDatabaseBackup() {
     try {
@@ -2006,8 +1942,19 @@ async function createDatabaseBackup() {
         zip.addLocalFile(tempDbPath);
         zip.writeZip(zipPath);
 
+        const embed = new EmbedBuilder()
+            .setColor(EMBED_COLOR)
+            .setTitle('Backup Created')
+            .addFields(
+                {
+                    name: 'Timestamp',
+                    value: `<t:${Math.floor(Date.now() / 1000)}:F>`
+                }
+            )
+            .setTimestamp();
+
         await channel.send({
-            content: `Backup Created!`,
+            embeds: [embed],
             files: [zipPath]
         });
 
@@ -2015,149 +1962,332 @@ async function createDatabaseBackup() {
         fs.unlinkSync(zipPath);
 
         console.log('[Backup] Backup uploaded successfully');
+
     } catch (err) {
         console.error('[Backup] Failed:', err);
     }
 }
 
+// ======================
+// CLIENT READY
+// ======================
+
 discordClient.once('clientReady', async () => {
     try {
         await discordClient.application.commands.set(commands);
+
         updateLeaderboard();
+
         createDatabaseBackup();
+
         setInterval(createDatabaseBackup, BACKUP_INTERVAL);
-     } catch (error) {
+
+    } catch (error) {
         console.error('cant register commands', error);
-     }
+    }
 });
+
+// ======================
+// INTERACTIONS
+// ======================
 
 discordClient.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
+    // ======================
+    // ACCOUNT COMMAND
+    // ======================
+
     if (interaction.commandName === 'account') {
+
         const dbId = `discord_${interaction.user.id}`;
-        const user = db.prepare("SELECT * FROM users WHERE id = ?").get(dbId);
+
+        const user = db.prepare(
+            "SELECT * FROM users WHERE id = ?"
+        ).get(dbId);
 
         if (!user) {
-            return interaction.reply({ 
-                content: "You don't have a linked game discord account yet! Please log in via Discord on the game's web interface first to create your profile.", 
-                ephemeral: true 
+
+            const embed = new EmbedBuilder()
+                .setColor(EMBED_COLOR)
+                .setDescription(
+                    "You don't have a linked game discord account yet!\n\nPlease log in via Discord on the game's web interface first to create your profile."
+                )
+                .setTimestamp();
+
+            return interaction.reply({
+                embeds: [embed],
+                ephemeral: true
             });
         }
 
-        const unlockedColors = JSON.parse(user.unlocked_colors || '["#ffffff"]');
+        const unlockedColors = JSON.parse(
+            user.unlocked_colors || '["#ffffff"]'
+        );
 
         const embed = new EmbedBuilder()
-            .setColor(user.selected_color || '#ffffff')
+            .setColor(user.selected_color || EMBED_COLOR)
             .setTitle(`🎮 ${user.username}'s Profile`)
             .setThumbnail(user.pfp)
             .addFields(
-                { name: '🪙 Coins', value: user.coins.toString(), inline: true },
-                { name: '🏆 High Score', value: Math.floor(user.high_score || 0).toLocaleString(), inline: true },
-                { name: '🎨 Unlocked Colors', value: unlockedColors.length.toString(), inline: true },
+                {
+                    name: '🪙 Coins',
+                    value: user.coins.toString(),
+                    inline: true
+                },
+                {
+                    name: '🏆 High Score',
+                    value: Math.floor(user.high_score || 0).toLocaleString(),
+                    inline: true
+                },
+                {
+                    name: '🎨 Unlocked Colors',
+                    value: unlockedColors.length.toString(),
+                    inline: true
+                }
             )
-            .setFooter({ text: `Account Provider: ${user.provider}` });
+            .setFooter({
+                text: `Account Provider: ${user.provider}`
+            })
+            .setTimestamp();
 
-        await interaction.reply({ embeds: [embed] });
+        await interaction.reply({
+            embeds: [embed]
+        });
     }
 
+    // ======================
+    // LOBBIES COMMAND
+    // ======================
+
     if (interaction.commandName === 'lobbies') {
+
         const embed = new EmbedBuilder()
-            .setColor('#5865F2')
-            .setTitle('🌐 Active Game Lobbies & Leaderboards');
+            .setColor(EMBED_COLOR)
+            .setTitle('Active Game Lobbies & Leaderboards')
+            .setTimestamp();
 
         let activeLobbies = 0;
 
         for (const roomId in rooms) {
+
             const room = rooms[roomId];
+
             if (room.status === 'stopped') continue;
 
             activeLobbies++;
+
             const topPlayers = room.entities
                 .filter(e => ['tank', 'ai'].includes(e.type))
                 .sort((a, b) => b.score - a.score)
                 .slice(0, 5);
 
             let leaderboardStr = '';
+
             if (topPlayers.length === 0) {
+
                 leaderboardStr = '*No players or bots in this lobby.*';
+
             } else {
-                leaderboardStr = topPlayers.map((p, index) => {
-                    const icon = '👤'; 
-                    return `**${index + 1}.** ${icon} ${p.name || 'Unnamed'} - ${Math.floor(p.score)} pts`;
-                }).join('\n');
+
+                leaderboardStr = topPlayers
+                    .map((p, index) => {
+                        const icon = '👤';
+
+                        return `**${index + 1}.** ${icon} ${p.name || 'Unnamed'} - ${Math.floor(p.score)} pts`;
+                    })
+                    .join('\n');
             }
 
-            const humanCount = room.clients.filter(c => c.player).length;
+            const humanCount = room.clients.filter(
+                c => c.player
+            ).length;
 
             embed.addFields({
                 name: `🟢 ${roomId} | Mode: ${room.mode} | Human Players: ${humanCount}`,
-                value: leaderboardStr + '\n\u200B', 
+                value: leaderboardStr + '\n\u200B',
                 inline: false
             });
         }
 
         if (activeLobbies === 0) {
-            embed.setDescription('No active game servers at the moment.');
+            embed.setDescription(
+                'No active game servers at the moment.'
+            );
         }
 
-        await interaction.reply({ embeds: [embed] });
+        await interaction.reply({
+            embeds: [embed]
+        });
     }
+
+    // ======================
+    // IMPORT BACKUP COMMAND
+    // ======================
 
     if (interaction.commandName === 'z-importbackup') {
-    if (!interaction.memberPermissions.has('Administrator')) {
-        return interaction.reply({ content: 'You do not have permission to run this command.', ephemeral: true });
+
+        if (!interaction.memberPermissions.has('Administrator')) {
+
+            const embed = new EmbedBuilder()
+                .setColor(EMBED_COLOR)
+                .setTitle('Permission Denied')
+                .setDescription(
+                    'You do not have permission to run this command.'
+                )
+                .setTimestamp();
+
+            return interaction.reply({
+                embeds: [embed],
+                ephemeral: true
+            });
+        }
+
+        const attachment = interaction.options.getAttachment('file');
+
+        if (!attachment) {
+
+            const embed = new EmbedBuilder()
+                .setColor(EMBED_COLOR)
+                .setTitle('Missing File')
+                .setDescription('No file was attached.')
+                .setTimestamp();
+
+            return interaction.reply({
+                embeds: [embed],
+                ephemeral: true
+            });
+        }
+
+        if (!attachment.name.endsWith('.zip')) {
+
+            const embed = new EmbedBuilder()
+                .setColor(EMBED_COLOR)
+                .setTitle('Invalid File')
+                .setDescription('You must upload a `.zip` backup file.')
+                .setTimestamp();
+
+            return interaction.reply({
+                embeds: [embed],
+                ephemeral: true
+            });
+        }
+
+        const loadingEmbed = new EmbedBuilder()
+            .setColor(EMBED_COLOR)
+            .setTitle('Importing Backup')
+            .setDescription('Please wait while the backup is restored...')
+            .setTimestamp();
+
+        await interaction.reply({
+            embeds: [loadingEmbed],
+            ephemeral: true
+        });
+
+        try {
+
+            const tempFolder = path.join(__dirname, 'temp_restore');
+
+            if (!fs.existsSync(tempFolder)) {
+                fs.mkdirSync(tempFolder);
+            }
+
+            const zipFilePath = path.join(
+                tempFolder,
+                attachment.name
+            );
+
+            const response = await fetch(attachment.url);
+
+            fs.writeFileSync(
+                zipFilePath,
+                Buffer.from(await response.arrayBuffer())
+            );
+
+            const zip = new AdmZip(zipFilePath);
+
+            zip.extractAllTo(tempFolder, true);
+
+            const dbFile = fs.readdirSync(tempFolder)
+                .find(f => f.endsWith('.db'));
+
+            if (!dbFile) {
+                throw new Error(
+                    'No .db file found inside zip'
+                );
+            }
+
+            const extractedDbPath = path.join(
+                tempFolder,
+                dbFile
+            );
+
+            const sourceDb = new Database(
+                extractedDbPath,
+                { readonly: true }
+            );
+
+            await sourceDb.backup(dbPath);
+
+            sourceDb.close();
+
+            fs.rmSync(tempFolder, {
+                recursive: true,
+                force: true
+            });
+
+            const successEmbed = new EmbedBuilder()
+                .setColor('#57F287')
+                .setTitle('Backup Restored')
+                .setDescription(
+                    'The live database has been updated successfully.'
+                )
+                .setTimestamp();
+
+            await interaction.editReply({
+                embeds: [successEmbed]
+            });
+
+            console.log(
+                '[Backup] Database restored successfully'
+            );
+
+        } catch (err) {
+
+            console.error(
+                '[Backup Restore Error]',
+                err
+            );
+
+            const errorEmbed = new EmbedBuilder()
+                .setColor('#ED4245')
+                .setTitle('Restore Failed')
+                .setDescription(
+                    `\`\`\`${err.message}\`\`\``
+                )
+                .setTimestamp();
+
+            await interaction.editReply({
+                embeds: [errorEmbed]
+            });
+        }
     }
-    const attachment = interaction.options.getAttachment('file');
-
-    if (!attachment) {
-        return interaction.reply({ content: 'No file was attached.', ephemeral: true });
-    }
-
-    if (!attachment.name.endsWith('.zip')) {
-        return interaction.reply({ content: 'You must upload a .zip backup file.', ephemeral: true });
-    }
-
-
-    await interaction.reply({ content: 'Importing backup...', ephemeral: true });
-
-    try {
-        const tempFolder = path.join(__dirname, 'temp_restore');
-        if (!fs.existsSync(tempFolder)) fs.mkdirSync(tempFolder);
-
-        const zipFilePath = path.join(tempFolder, attachment.name);
-        const response = await fetch(attachment.url);
-        fs.writeFileSync(zipFilePath, Buffer.from(await response.arrayBuffer()));
-
-        const zip = new AdmZip(zipFilePath);
-        zip.extractAllTo(tempFolder, true);
-
-        const dbFile = fs.readdirSync(tempFolder).find(f => f.endsWith('.db'));
-        if (!dbFile) throw new Error('No .db file found inside zip');
-
-        const extractedDbPath = path.join(tempFolder, dbFile);
-
-        // ✅ Use better-sqlite3's safe backup restore instead of closing the live db
-        const sourceDb = new Database(extractedDbPath, { readonly: true });
-        await sourceDb.backup(dbPath);  // Atomically overwrites the live db file
-        sourceDb.close();
-
-        // Cleanup temp files
-        fs.rmSync(tempFolder, { recursive: true, force: true });
-
-        await interaction.editReply({ content: '✅ Backup restored successfully. The live database has been updated.' });
-        console.log('[Backup] Database restored successfully');
-
-    } catch (err) {
-        console.error('[Backup Restore Error]', err);
-        await interaction.editReply({ content: `Restore failed: ${err.message}` });
-    }
-}
 });
 
+// ======================
+// LOGIN
+// ======================
+
 if (process.env.DISCORD_BOT_TOKEN) {
-    discordClient.login(process.env.DISCORD_BOT_TOKEN).catch(err => {
-        console.error('login failed', err);
+
+    discordClient.login(
+        process.env.DISCORD_BOT_TOKEN
+    ).catch(err => {
+
+        console.error(
+            'login failed',
+            err
+        );
     });
 }
 
