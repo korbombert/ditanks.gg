@@ -1906,6 +1906,28 @@ const EMBED_COLOR = '#5865F2';
 // ======================
 // DATABASE BACKUP
 // ======================
+const commands = [
+    {
+        name: 'account',
+        description: 'View your game account details, coins, and cosmetics',
+    },
+    {
+        name: 'lobbies',
+        description: 'View active game servers and their live leaderboards',
+    },
+    {
+        name: 'z-importbackup',
+        description: 'Restore the database from a backup zip',
+        options: [
+            {
+                name: 'file',
+                description: 'Backup zip exported by the bot',
+                type: 11,
+                required: true
+            }
+        ]
+    }
+];
 
 async function createDatabaseBackup() {
     try {
