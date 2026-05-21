@@ -1928,7 +1928,55 @@ const commands = [
         ]
     }
 ];
+async function updateLeaderboard() {
+    if (!discordClient.isReady()) return;
+    try {
+        const channel = await discordClient.channels.fetch(LEADERBOARD_CHANNEL_ID);
+        if (!channel) return;
 
+        const topUsers = db.prepare(`
+            SELECT id, username, high_score 
+            FROM users 
+            WHERE provider = 'discord' AND high_score > 0 
+            ORDER BY high_score DESC 
+            LIMIT 10
+        `).all();
+
+        const embed = new EmbedBuilder()
+            .setColor('#FFD700')
+            .setTitle('🏆 All-Time Highest Scores')
+            .setDescription('The top 10 highest scores achieved!')
+            .setTimestamp();
+
+        if (topUsers.length === 0) {
+            embed.addFields({ name: 'No scores yet!', value: 'Play the game and set a record!' });
+        } else {
+            let boardText = topUsers.map((u, i) => {
+                const rawDiscordId = u.id.replace('discord_', '');
+                return `**${i + 1}.** <@${rawDiscordId}> - ${Math.floor(u.high_score).toLocaleString()} pts`;
+            }).join('\n\n');
+            embed.addFields({ name: 'Top 10 Players', value: boardText });
+        }
+
+        const msgRecord = "1494846178263568547" || db.prepare("SELECT value FROM bot_config WHERE key = 'leaderboard_msg_id'").get();
+        
+        if (msgRecord) {
+            try {
+                const msg = await channel.messages.fetch(msgRecord);
+                await msg.edit({ embeds: [embed] });
+                return;
+            } catch (err) {
+                console.log('could not edit old leaderboard message');
+            }
+        }
+
+        const newMsg = await channel.send({ embeds: [embed] });
+        db.prepare("INSERT OR REPLACE INTO bot_config (key, value) VALUES ('leaderboard_msg_id', ?)").run(newMsg.id);
+
+    } catch (err) {
+        console.error('failed to update leaderboard ', err);
+    }
+}
 async function createDatabaseBackup() {
     try {
         if (!discordClient.isReady()) return;
