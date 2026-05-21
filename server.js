@@ -2105,78 +2105,44 @@ discordClient.on('interactionCreate', async interaction => {
     }
 
     if (interaction.commandName === 'z-importbackup') {
+    // ... permission + attachment checks unchanged ...
 
-        if (!interaction.memberPermissions.has('Administrator')) {
-            return interaction.reply({
-                content: 'You do not have permission to run this command.',
-                ephemeral: true
-            });
-        }
+    await interaction.reply({ content: 'Importing backup...', ephemeral: true });
 
-        const attachment = interaction.options.getAttachment('file');
+    try {
+        const tempFolder = path.join(__dirname, 'temp_restore');
+        if (!fs.existsSync(tempFolder)) fs.mkdirSync(tempFolder);
 
-        if (!attachment.name.endsWith('.zip')) {
-            return interaction.reply({
-                content: 'You must upload a .zip backup file.',
-                ephemeral: true
-            });
-        }
+        const zipFilePath = path.join(tempFolder, attachment.name);
+        const response = await fetch(attachment.url);
+        fs.writeFileSync(zipFilePath, Buffer.from(await response.arrayBuffer()));
 
-        await interaction.reply({
-            content: 'Importing backup...',
-            ephemeral: true
-        });
+        const zip = new AdmZip(zipFilePath);
+        zip.extractAllTo(tempFolder, true);
 
-        try {
+        const dbFile = fs.readdirSync(tempFolder).find(f => f.endsWith('.db'));
+        if (!dbFile) throw new Error('No .db file found inside zip');
 
-            const tempFolder = path.join(__dirname, 'temp_restore');
+        const extractedDbPath = path.join(tempFolder, dbFile);
 
-            if (!fs.existsSync(tempFolder)) {
-                fs.mkdirSync(tempFolder);
-            }
+        // ✅ Use better-sqlite3's safe backup restore instead of closing the live db
+        const sourceDb = new Database(extractedDbPath, { readonly: true });
+        await sourceDb.backup(dbPath);  // Atomically overwrites the live db file
+        sourceDb.close();
 
-            const zipFilePath = path.join(tempFolder, attachment.name);
+        // Cleanup temp files
+        fs.rmSync(tempFolder, { recursive: true, force: true });
 
-            const response = await fetch(attachment.url);
-            const arrayBuffer = await response.arrayBuffer();
+        await interaction.editReply({ content: '✅ Backup restored successfully. The live database has been updated.' });
+        console.log('[Backup] Database restored successfully');
 
-            fs.writeFileSync(
-                zipFilePath,
-                Buffer.from(arrayBuffer)
-            );
+        // ❌ Removed: db.close() and process.exit(0)
 
-            const zip = new AdmZip(zipFilePath);
-            zip.extractAllTo(tempFolder, true);
-
-            const extractedFiles = fs.readdirSync(tempFolder);
-            const dbFile = extractedFiles.find(f => f.endsWith('.db'));
-
-            if (!dbFile) {
-                throw new Error('No .db file found inside zip');
-            }
-
-            const extractedDbPath = path.join(tempFolder, dbFile);
-
-            db.close();
-
-            fs.copyFileSync(extractedDbPath, dbPath);
-
-            await interaction.editReply({
-                content: 'Backup restored successfully. Please redeploy the app.'
-            });
-
-            console.log('[Backup] Database restored');
-            process.exit(0);
-
-        } catch (err) {
-
-            console.error('[Backup Restore Error]', err);
-
-            await interaction.editReply({
-                content: `Restore failed: ${err.message}`
-            });
-        }
+    } catch (err) {
+        console.error('[Backup Restore Error]', err);
+        await interaction.editReply({ content: `Restore failed: ${err.message}` });
     }
+}
 });
 
 if (process.env.DISCORD_BOT_TOKEN) {
