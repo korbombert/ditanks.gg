@@ -2104,7 +2104,7 @@ discordClient.on('interactionCreate', async interaction => {
         await interaction.reply({ embeds: [embed] });
     }
 
-    if (interaction.commandName === 'importbackup') {
+    if (interaction.commandName === 'z-importbackup') {
 
         if (!interaction.memberPermissions.has('Administrator')) {
             return interaction.reply({
