@@ -227,7 +227,7 @@ const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// ===================== MIDDLEWARE =====================
+// ===================== MIDDLEWARE ========================
 
 const requireAdmin = (req, res, next) => {
     let token = req.headers.authorization?.split(' ')[1] || req.query.token;
