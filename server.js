@@ -2105,7 +2105,19 @@ discordClient.on('interactionCreate', async interaction => {
     }
 
     if (interaction.commandName === 'z-importbackup') {
-    // ... permission + attachment checks unchanged ...
+    if (!interaction.memberPermissions.has('Administrator')) {
+        return interaction.reply({ content: 'You do not have permission to run this command.', ephemeral: true });
+    }
+    const attachment = interaction.options.getAttachment('file');
+
+    if (!attachment) {
+        return interaction.reply({ content: 'No file was attached.', ephemeral: true });
+    }
+
+    if (!attachment.name.endsWith('.zip')) {
+        return interaction.reply({ content: 'You must upload a .zip backup file.', ephemeral: true });
+    }
+
 
     await interaction.reply({ content: 'Importing backup...', ephemeral: true });
 
@@ -2135,8 +2147,6 @@ discordClient.on('interactionCreate', async interaction => {
 
         await interaction.editReply({ content: '✅ Backup restored successfully. The live database has been updated.' });
         console.log('[Backup] Database restored successfully');
-
-        // ❌ Removed: db.close() and process.exit(0)
 
     } catch (err) {
         console.error('[Backup Restore Error]', err);
