@@ -1481,7 +1481,7 @@ if (e.square) {
         } else {
             drawEntityBody(deathCtx, e);
             
-            if (['tank', 'ai'].includes(en.type)) {
+            if (['tank', 'ai'].includes(e.type)) {
     const isWhite = !en.nameColor || ["white", "#fff", "#ffffff"].includes(en.nameColor);
     
     // 1. Calculate scaled values once for this entity
