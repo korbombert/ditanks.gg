@@ -992,6 +992,7 @@ class Entity {
                     if (!isShape && !isSameTeam && isTank) {
                         if (isInProtectedBase(this.room, e, this.team)) return;
                         let detectionDist = 300 + (Math.min(e.score, 17000) / 17000) * 700;
+                        if (this.tankType === 'Overlord') detectionDist *= 1.2;
                         let detectionSq = detectionDist * detectionDist;
                         
                         if(distSq < detectionSq && distSq < minEnemyDistSq) { 
@@ -1011,6 +1012,14 @@ class Entity {
                 });
 
                 this.aiTarget = droneTarget || enemyTarget || shapeTarget;
+                // If a drone is the primary target but an enemy tank is dangerously close
+                // and actively shooting at us, switch to the enemy instead.
+                if (droneTarget && enemyTarget) {
+                    const closeThreatDistSq = 200 * 200;
+                    if (minEnemyDistSq < closeThreatDistSq) {
+                        this.aiTarget = enemyTarget;
+                    }
+                }
                 this.targetId = this.aiTarget ? (this.aiTarget.id || null) : null;
                 const effectiveMaxHpForFlee = this.maxHp + (this.stats[1] * 20);
                 this.isFleeing = (this.hp / effectiveMaxHpForFlee) < 0.25;
@@ -1072,11 +1081,13 @@ class Entity {
                 let wanderX = WORLD_SIZE / 2;
                 let wanderY = WORLD_SIZE / 2;
                 if (this.room.mode === "2TDM" && this.team !== 0) {
-                    wanderX = this.team === 1 ? 200 : WORLD_SIZE - 200;
+                    // Wander point placed at 62% across the map toward the enemy side
+                    wanderX = this.team === 1 ? WORLD_SIZE * 0.62 : WORLD_SIZE * 0.38;
                     wanderY = WORLD_SIZE / 2;
                 } else if (this.room.mode === "4TDM" && this.team !== 0) {
-                    wanderX = (this.team === 1 || this.team === 4) ? 300 : WORLD_SIZE - 300;
-                    wanderY = (this.team === 1 || this.team === 3) ? 300 : WORLD_SIZE - 300;
+                    // Push wander well past the halfway mark into the opposing quadrant
+                    wanderX = (this.team === 1 || this.team === 4) ? WORLD_SIZE * 0.65 : WORLD_SIZE * 0.35;
+                    wanderY = (this.team === 1 || this.team === 3) ? WORLD_SIZE * 0.65 : WORLD_SIZE * 0.35;
                 }
 
                 if (this.isFleeing) {
@@ -1093,7 +1104,7 @@ class Entity {
                     let centerY = wanderY;
                     let distToCenterSq = (this.x - centerX)**2 + (this.y - centerY)**2;
                     
-                    if (distToCenterSq > 1000000) {
+                    if (distToCenterSq > 2250000) { // ~1500px radius before snapping back
                         let centerAngle = Math.atan2(centerY - this.y, centerX - this.x);
                         let angleDiff = centerAngle - this.angle;
                         while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
@@ -1103,8 +1114,8 @@ class Entity {
                         this.angle += (Math.random() - 0.5);
                     }
                     
-                    this.vx += Math.cos(this.angle) * (moveSpeed * 0.4);
-                    this.vy += Math.sin(this.angle) * (moveSpeed * 0.4);
+                    this.vx += Math.cos(this.angle) * moveSpeed;
+                    this.vy += Math.sin(this.angle) * moveSpeed;
 
                     if (Math.random() < 0.03) {
                         isShooting = true;
@@ -1121,7 +1132,7 @@ class Entity {
                 } else if (this.level >= 30) {
                     if (Math.random() > 0.10) { 
                         let opts = [];
-                        if (this.tankType === 'Sniper') opts = ['Overlord'];
+                        if (this.tankType === 'Sniper') opts = [Math.random() < 0.30 ? 'Sniper' : 'Overlord'];
                         else if (this.tankType === 'Twin') opts = ['Octo Tank', 'Triplet'];
                         else if (this.tankType === 'Flank Guard') opts = ['Tri-angle', 'Octo Tank'];
                         
