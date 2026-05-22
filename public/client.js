@@ -766,131 +766,106 @@ function readBinaryMessage(ab) {
 }
 
 // ===================== CONNECTION =====================
-
 function connectWS(regionStr, modeStr) {
     const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
     ws = new WebSocket(protocol + window.location.host);
-    ws.binaryType = 'arraybuffer';
-
     function sendPing() {
         if (ws && ws.readyState === 1) {
             ws.send(JSON.stringify({ type: 'ping', time: performance.now() }));
         }
     }
-
     ws.onopen = () => {
         ws.send(JSON.stringify({ type: 'spectate', mode: modeStr, region: regionStr }));
         document.getElementById('playBtn').innerText = "Play";
         document.getElementById('playBtn').disabled = false;
-
         if (sessionToken) {
             ws.send(JSON.stringify({ type: 'auth_login', token: sessionToken }));
         }
-
         sendPing();
-
+        if (window.inputInterval) clearInterval(window.inputInterval);
         if (window.inputInterval) clearInterval(window.inputInterval);
         window.inputInterval = setInterval(() => {
-            if (myId) {
+            if(myId) {
                 let finalAngle = 0;
-                const me = gameState.entities.find(e => e.id === myId);
-
+                let me = gameState.entities.find(e => e.id === myId);
+                
                 if (me) {
-                    const myX = renderEntities.has(myId) ? renderEntities.get(myId).renderX : me.x;
-                    const myY = renderEntities.has(myId) ? renderEntities.get(myId).renderY : me.y;
+                    let myX = renderEntities.has(myId) ? renderEntities.get(myId).renderX : me.x;
+                    let myY = renderEntities.has(myId) ? renderEntities.get(myId).renderY : me.y;
+                    
                     finalAngle = Math.atan2(mouse.ry - myY, mouse.rx - myX);
                 } else {
-                    finalAngle = Math.atan2(
-                        mouse.ry - (camera.y + canvas.height / 2),
-                        mouse.rx - (camera.x + canvas.width  / 2)
-                    );
+                    finalAngle = Math.atan2(mouse.ry - (camera.y + canvas.height/2), mouse.rx - (camera.x + canvas.width/2));
                 }
 
                 if (autoSpin) { spinAngle += 0.08; finalAngle = spinAngle; }
 
                 ws.send(JSON.stringify({
-                    type: 'input',
-                    up:       keys.w       || keys.arrowup,
-                    down:     keys.s       || keys.arrowdown,
-                    left:     keys.a       || keys.arrowleft,
-                    right:    keys.d       || keys.arrowright,
-                    shooting: mouse.pressed || autoFire,
-                    angle:    finalAngle,
-                    repel:    mouse.repel,
-                    mouseX:   mouse.rx,
-                    mouseY:   mouse.ry,
+                    type: 'input', up: keys.w || keys.arrowup, down: keys.s || keys.arrowdown,
+                    left: keys.a || keys.arrowleft, right: keys.d || keys.arrowright,
+                    shooting: mouse.pressed || autoFire, angle: finalAngle,
+                    repel: mouse.repel, mouseX: mouse.rx, mouseY: mouse.ry,
                 }));
             }
         }, 1000 / TICK_RATE);
-
         const urlParams = new URLSearchParams(window.location.search);
-        const token     = urlParams.get('token');
+        const token = urlParams.get('token');
+        
         if (token) {
-            ws.send(JSON.stringify({ type: 'auth_login', token }));
-            window.history.replaceState({}, document.title, "/");
+            ws.send(JSON.stringify({ type: 'auth_login', token: token }));
+            window.history.replaceState({}, document.title, "/"); 
         }
     };
 
     ws.onmessage = (e) => {
-        // Binary frames (state, playerStats, init, spectate)
-        if (e.data instanceof ArrayBuffer) {
-            readBinaryMessage(e.data);
-            return;
-        }
-
-        // JSON frames (pong, death, profile_update, achievement_unlocked)
         const data = JSON.parse(e.data);
-
-        if (data.type === 'pong') {
-            const latency = performance.now() - data.time;
-            document.getElementById('ping-display').innerText = ` ${latency.toFixed(1)} ms ${data.locationl}`;
-            setTimeout(sendPing, latency * 2);
-        }
+        if(data.type === 'init') { myId = data.id; myTeam = data.team; spectateId = null; }
         else if (data.type === 'achievement_unlocked') {
             unlockedAchievements.push(data.achievement);
             showAchievementPopup(data.achievement);
         }
-        else if (data.type === 'death') {
+        else if(data.type === 'pong') {
+            const latency = performance.now() - data.time;
+            document.getElementById('ping-display').innerText = ` ${latency.toFixed(1)} ms ${data.locationl}`;
+            setTimeout(sendPing, latency*2);
+        }
+        else if(data.type === 'state') { 
+            gameState = data; 
+            if (!window.drawing) { window.drawing = true; requestAnimationFrame(draw); }
+        }
+        else if(data.type === 'playerStats') { myStats = data; updateUI(); checkUpgrades(); }
+        else if(data.type === 'spectate_update') { spectateId = data.id; }
+        
+        else if(data.type === 'death') {
             myId = null;
-            spectateId = data.killerId;
+            spectateId = data.killerId; 
             document.getElementById('death-screen').style.display = 'flex';
-            document.getElementById('ds-level').innerText  = data.level + " " + data.tank;
-            document.getElementById('ds-score').innerText  = numberWithCommas(Math.floor(data.score));
-            const m = Math.floor(data.timeAlive / 60);
-            const s = data.timeAlive % 60;
+            document.getElementById('ds-level').innerText = data.level + " " + data.tank;
+            document.getElementById('ds-score').innerText = numberWithCommas(Math.floor(data.score));
+            let m = Math.floor(data.timeAlive / 60); let s = data.timeAlive % 60;
             document.getElementById('ds-time').innerText = `${m}m ${s}s`;
-
-            const dCanvas = document.getElementById('ds-tank-icon');
-            const dctx    = dCanvas.getContext('2d');
-            dctx.clearRect(0, 0, 100, 100);
-            const col = getTeamColor(myTeam);
-            dctx.fillStyle   = col;
-            dctx.strokeStyle = darkenColor(col, 30);
-            dctx.lineWidth   = 4;
-            dctx.save();
-            dctx.translate(50, 50);
-            dctx.rotate(-Math.PI / 4);
-
-            const specs = TANK_SPECS[data.tank] || TANK_SPECS['Basic'];
-            const r     = 24;
+            
+            let dCanvas = document.getElementById('ds-tank-icon');
+            let dctx = dCanvas.getContext('2d');
+            dctx.clearRect(0,0,100,100);
+            let col = getTeamColor(myTeam);
+            
+            dctx.fillStyle = col; dctx.strokeStyle = darkenColor(col, 30); dctx.lineWidth = 4;
+            dctx.save(); dctx.translate(50, 50); dctx.rotate(-Math.PI/4); 
+            
+            let specs = TANK_SPECS[data.tank] || TANK_SPECS['Basic'];
+            let r = 24; 
 
             specs.barrels.forEach(b => {
-                dctx.save();
-                dctx.rotate(b.angle);
-                dctx.fillStyle   = "#999";
-                dctx.strokeStyle = darkenColor("#999", 30);
-                if (b.w2) {
-                    dctx.beginPath();
-                    dctx.moveTo(0, -b.w / 2);
-                    dctx.lineTo(r * b.l,  -b.w2 / 2);
-                    dctx.lineTo(r * b.l,   b.w2 / 2);
-                    dctx.lineTo(0,  b.w / 2);
-                    dctx.closePath();
-                    dctx.fill();
-                    dctx.stroke();
+                dctx.save(); dctx.rotate(b.angle);
+                dctx.fillStyle = "#999"; dctx.strokeStyle = darkenColor("#999", 30);
+                if(b.w2) {
+                    dctx.beginPath(); dctx.moveTo(0, -b.w/2); dctx.lineTo(r * b.l, -b.w2/2);
+                    dctx.lineTo(r * b.l, b.w2/2); dctx.lineTo(0, b.w/2); dctx.closePath();
+                    dctx.fill(); dctx.stroke();
                 } else {
-                    dctx.fillRect(0,  -b.w / 2 + (b.y || 0), r * b.l, b.w);
-                    dctx.strokeRect(0, -b.w / 2 + (b.y || 0), r * b.l, b.w);
+                    dctx.fillRect(0, -b.w/2 + (b.y||0), r * b.l, b.w);
+                    dctx.strokeRect(0, -b.w/2 + (b.y||0), r * b.l, b.w);
                 }
                 dctx.restore();
             });
@@ -900,39 +875,40 @@ function connectWS(regionStr, modeStr) {
                 dctx.fillRect(-squareSize, -squareSize, squareSize * 2, squareSize * 2);
                 dctx.strokeRect(-squareSize, -squareSize, squareSize * 2, squareSize * 2);
             } else {
-                dctx.beginPath();
-                dctx.arc(0, 0, r, 0, Math.PI * 2);
-                dctx.fill();
-                dctx.stroke();
+                dctx.beginPath(); dctx.arc(0, 0, r, 0, Math.PI*2); dctx.fill(); dctx.stroke();
             }
             dctx.restore();
         }
-
         if (data.type === 'profile_update') {
             myProfile = data.profile;
             updateAccountUI();
         }
     };
 
-    ws.onclose = (e) => {
-        if (myId) {
+   ws.onclose = (e) => {
+        if(myId) {
             document.getElementById('death-screen').style.display = 'flex';
-            document.querySelector('.ds-title').innerText         = "Disconnected";
-            document.getElementById('ds-level').innerText         = "Connection lost.";
-            document.getElementById('ds-score').innerText         = "--";
-            document.getElementById('ds-time').innerText          = "--";
+            document.querySelector('.ds-title').innerText = "Disconnected";
+            document.getElementById('ds-level').innerText = "Connection lost.";
+            document.getElementById('ds-score').innerText = "--";
+            document.getElementById('ds-time').innerText = "--";
         }
+        
+        // Use an inline SVG refresh/reconnect icon and change the text
+        const btn = document.getElementById('playBtn');
+        btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px;"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg> Disconnected`;
+        btn.style.background = "#f14e54"; 
+        btn.style.borderBottomColor = "#c83d42"; 
+        btn.disabled = false;
+        
+        // Change the button's click behavior to attempt a reconnection
+        btn.onclick = initConnection;
 
-        const btn     = document.getElementById('playBtn');
-        btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:6px"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg> Disconnected`;
-        btn.style.background      = "#f14e54";
-        btn.style.borderBottomColor = "#c83d42";
-        btn.disabled              = false;
-        btn.onclick               = initConnection;
-
-        const reasonDiv         = document.getElementById('disconnect-reason');
-        reasonDiv.innerText     = e.reason || "Connection lost to the server.";
-        reasonDiv.style.display = 'flex';
+        // Show Reason
+        const reasonText = e.reason || "Connection lost to the server.";
+        const reasonDiv = document.getElementById('disconnect-reason');
+        reasonDiv.innerText = reasonText;
+        reasonDiv.style.display = 'flex'; 
     };
 }
 let currentUpgradesShown = "";
