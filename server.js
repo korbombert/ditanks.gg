@@ -753,6 +753,35 @@ function isInProtectedBase(room, obj, viewerTeam = 0) {
 
     return false;
 }
+// Returns true if obj is inside an ENEMY base zone that the AI (of aiTeam) cannot enter.
+// The AI's own base is excluded — bots can freely walk there.
+function isInEnemyBase(room, obj, aiTeam) {
+    if (!obj) return false;
+    const PROX = 350;
+    const BASE_SIZE_4 = 600;
+    const BASE_WIDTH_2 = 400;
+
+    if (room.mode === "2TDM") {
+        // Team 1 owns the left side, team 2 owns the right side.
+        if (aiTeam !== 1 && obj.x < BASE_WIDTH_2 + PROX) return true;
+        if (aiTeam !== 2 && obj.x > WORLD_SIZE - BASE_WIDTH_2 - PROX) return true;
+    }
+
+    if (room.mode === "4TDM") {
+        // Teams: 1=TL, 2=BR, 3=TR, 4=BL
+        let inTL = obj.x < BASE_SIZE_4 + PROX && obj.y < BASE_SIZE_4 + PROX;
+        let inBR = obj.x > WORLD_SIZE - BASE_SIZE_4 - PROX && obj.y > WORLD_SIZE - BASE_SIZE_4 - PROX;
+        let inTR = obj.x > WORLD_SIZE - BASE_SIZE_4 - PROX && obj.y < BASE_SIZE_4 + PROX;
+        let inBL = obj.x < BASE_SIZE_4 + PROX && obj.y > WORLD_SIZE - BASE_SIZE_4 - PROX;
+        if (inTL && aiTeam !== 1) return true;
+        if (inBR && aiTeam !== 2) return true;
+        if (inTR && aiTeam !== 3) return true;
+        if (inBL && aiTeam !== 4) return true;
+    }
+
+    return false;
+}
+
 function unlockAchievement(userId, achievementId, ws = null) {
     const already = db.prepare(`
         SELECT * FROM user_achievements_v2
@@ -971,6 +1000,9 @@ class Entity {
                         }
                     } else if (isShape) {
                         if (this.tankType === 'Overlord') return;
+                        // Skip shapes inside enemy bases — the AI can't enter those zones
+                        // and will get stuck. Own base is allowed since bots can walk there.
+                        if (isInEnemyBase(this.room, e, this.team)) return;
                         if(distSq < minShapeDistSq) { 
                             minShapeDistSq = distSq; 
                             shapeTarget = e; 
@@ -1035,11 +1067,21 @@ class Entity {
                     }
                 }
             } else {
+                // For TDM modes, bots should flee/wander toward their own base corner,
+                // not the world center which may sit inside enemy territory.
+                let wanderX = WORLD_SIZE / 2;
+                let wanderY = WORLD_SIZE / 2;
+                if (this.room.mode === "2TDM" && this.team !== 0) {
+                    wanderX = this.team === 1 ? 200 : WORLD_SIZE - 200;
+                    wanderY = WORLD_SIZE / 2;
+                } else if (this.room.mode === "4TDM" && this.team !== 0) {
+                    wanderX = (this.team === 1 || this.team === 4) ? 300 : WORLD_SIZE - 300;
+                    wanderY = (this.team === 1 || this.team === 3) ? 300 : WORLD_SIZE - 300;
+                }
+
                 if (this.isFleeing) {
-                    // When low HP and no target in sight, flee away from center to recover
-                    let centerX = WORLD_SIZE / 2;
-                    let centerY = WORLD_SIZE / 2;
-                    let fleeAngle = Math.atan2(this.y - centerY, this.x - centerX);
+                    // When low HP and no target in sight, flee back toward own base to recover
+                    let fleeAngle = Math.atan2(wanderY - this.y, wanderX - this.x);
                     let angleDiff = fleeAngle - this.angle;
                     while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
                     while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
@@ -1047,8 +1089,8 @@ class Entity {
                     this.vx += Math.cos(this.angle) * moveSpeed;
                     this.vy += Math.sin(this.angle) * moveSpeed;
                 } else {
-                    let centerX = WORLD_SIZE / 2;
-                    let centerY = WORLD_SIZE / 2;
+                    let centerX = wanderX;
+                    let centerY = wanderY;
                     let distToCenterSq = (this.x - centerX)**2 + (this.y - centerY)**2;
                     
                     if (distToCenterSq > 1000000) {
