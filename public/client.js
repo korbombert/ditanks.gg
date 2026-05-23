@@ -242,6 +242,34 @@ const TANK_SPECS = {
         {x:0, y:0, w:18, l:1.8, angle:0},
         {x:0, y:0, w:16, l:1.6, angle:5*Math.PI/6},
         {x:0, y:0, w:16, l:1.6, angle:-5*Math.PI/6}
+    ] },
+    'Twin Flank': { barrels: [
+        {x:0, y:-10, w:16, l:1.8, angle:0},
+        {x:0, y:10, w:16, l:1.8, angle:0},
+        {x:0, y:-10, w:16, l:1.5, angle:Math.PI},
+        {x:0, y:10, w:16, l:1.5, angle:Math.PI}
+    ] },
+    'Pentashot': { barrels: [
+        {x:0, y:0, w:18, l:1.8, angle:0},
+        {x:0, y:0, w:16, l:1.7, angle:Math.PI/10},
+        {x:0, y:0, w:16, l:1.7, angle:-Math.PI/10},
+        {x:0, y:0, w:14, l:1.6, angle:Math.PI/5},
+        {x:0, y:0, w:14, l:1.6, angle:-Math.PI/5}
+    ] },
+    'Predator': { barrels: [
+        {x:0, y:0, w:14, l:2.2, angle:0},
+        {x:0, y:0, w:16, l:2.3, angle:0},
+        {x:0, y:0, w:18, l:2.4, angle:0}
+    ] },
+    'Sprayer': { barrels: [
+        {x:0, y:0, w:22, w2:32, l:1.6, angle:0},
+        {x:0, y:0, w:10, l:1.7, angle:0}
+    ] },
+    'Railgun': { barrels: [
+        {x:0, y:-16, w:9, l:1.6, angle:0},
+        {x:0, y:16, w:9, l:1.6, angle:0},
+        {x:0, y:-8, w:7, l:1.7, angle:0},
+        {x:0, y:8, w:7, l:1.7, angle:0}
     ] }
 };
 const ACHIEVEMENT_BADGES = {
@@ -920,10 +948,11 @@ function checkUpgrades() {
     if (myStats.level >= 15 && myStats.tankType === 'Basic') {
         options = ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard']; 
     } else if (myStats.level >= 30) {
-        if (myStats.tankType === 'Sniper') options = ['Overlord', 'Necromancer'];
-        else if (myStats.tankType === 'Machine Gun') options = ['Destroyer'];
-        else if (myStats.tankType === 'Twin') options = ['Octo Tank', 'Triplet'];
-        else if (myStats.tankType === 'Flank Guard') options = ['Tri-angle', 'Octo Tank'];
+        if (myStats.tankType === 'Sniper') options = ['Overlord', 'Necromancer', 'Predator'];
+        else if (myStats.tankType === 'Machine Gun') options = ['Destroyer', 'Sprayer', 'Railgun'];
+        else if (myStats.tankType === 'Twin') options = ['Octo Tank', 'Triplet', 'Twin Flank', 'Pentashot'];
+        else if (myStats.tankType === 'Flank Guard') options = ['Tri-angle', 'Octo Tank', 'Twin Flank'];
+        else if (myStats.tankType === 'Twin Flank') options = ['Pentashot'];
     }
 
     let neededStr = options.join(",");
