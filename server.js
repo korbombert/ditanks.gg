@@ -124,7 +124,7 @@ const TANK_SPECS = {
         {x:0, y:-10, w:16, l:1.8, angle:0, spread: 0, dmg: 0.67, spd: 1, rel: 1, size: 1, delay: 0}, 
         {x:0, y:10, w:16, l:1.8, angle:0, spread: 0, dmg: 0.67, spd: 1, rel: 1, size: 1, delay: 0.5}
     ]},
-    'Sniper': { barrels: [{x:0, y:0, w:18, l:2.4, angle:0, spread: 0, dmg: 1.1, spd: 2, rel: 1.66, size: 1, delay: 0}] },
+    'Sniper': { barrels: [{x:0, y:0, w:18, l:2.4, angle:0, spread: 0, dmg: 1.18, spd: 1.4, rel: 1.66, size: 1, delay: 0}] },
     'Machine Gun': { barrels: [{x:0, y:0, w:22, w2: 32, l:1.6, angle:0, spread: 0.5, dmg: 0.745, spd: 1, rel: 0.5, size: 1, delay: 0, recoilMult: 1.3}] },
     'Flank Guard': { barrels: [
         {x:0, y:0, w:18, l:1.8, angle:0, spread: 0, dmg: 1, spd: 1, rel: 1, size: 1, delay: 0}, 
@@ -178,9 +178,9 @@ const TANK_SPECS = {
         {x:0, y:0, w:14, l:1.6, angle:-Math.PI/5, spread:0, dmg:0.58, spd:1, rel:1, size:1, delay:0.2}
     ]},
     'Predator': { barrels: [
-        {x:0, y:0, w:14, l:2.2, angle:0, spread:0, dmg:0.85, spd:2.1, rel:2.4, size:0.9, delay:0},
-        {x:0, y:0, w:16, l:2.3, angle:0, spread:0, dmg:0.85, spd:2.1, rel:2.4, size:1, delay:0.33},
-        {x:0, y:0, w:18, l:2.4, angle:0, spread:0, dmg:0.85, spd:2.1, rel:2.4, size:1.1, delay:0.67}
+        {x:0, y:0, w:18, l:1.5, angle:0, spread:0, dmg:0.85, spd:1.35, rel:2, size:0.9, delay:0},
+        {x:0, y:0, w:16, l:2, angle:0, spread:0, dmg:0.85, spd:1.35, rel:2, size:1, delay:0.2},
+        {x:0, y:0, w:14, l:2.5, angle:0, spread:0, dmg:0.85, spd:1.35, rel:2, size:1.1, delay:0.4}
     ]},
     'Sprayer': { barrels: [
         {x:0, y:0, w:22, w2:32, l:1.6, angle:0, spread:0.5, dmg:0.745, spd:1, rel:0.5, size:1, delay:0, recoilMult:1.3},
