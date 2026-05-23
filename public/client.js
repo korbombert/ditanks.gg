@@ -236,18 +236,18 @@ const TANK_SPECS = {
             {x:0, y:0, w:20, w2:30, l:1.25, angle:-Math.PI/2, spread:0, dmg:0, spd:0.8, rel:Infinity, size:1, delay:0},], square: true },
     'Triplet': { barrels: [
         {x:0, y:-12, w:12, l:1.65, angle:0}, {x:0, y:12, w:12, l:1.65, angle:0},
-        {x:0, y:0, w:12, l:1.9, angle:0}
+        {x:0, y:0, w:12, l:1.9, angle:0},
     ] },
     'Tri-angle': { barrels: [
         {x:0, y:0, w:18, l:1.8, angle:0},
         {x:0, y:0, w:16, l:1.6, angle:5*Math.PI/6},
-        {x:0, y:0, w:16, l:1.6, angle:-5*Math.PI/6}
+        {x:0, y:0, w:16, l:1.6, angle:-5*Math.PI/6},
     ] },
     'Twin Flank': { barrels: [
         {x:0, y:-10, w:16, l:1.8, angle:0},
         {x:0, y:10, w:16, l:1.8, angle:0},
         {x:0, y:-10, w:16, l:1.8, angle:Math.PI},
-        {x:0, y:10, w:16, l:1.8, angle:Math.PI}
+        {x:0, y:10, w:16, l:1.8, angle:Math.PI},
     ] },
     'Pentashot': { barrels: [
         {x:0, y:0, w:14, l:1.6, angle:Math.PI/5},
@@ -259,17 +259,17 @@ const TANK_SPECS = {
     'Predator': { barrels: [
         {x:0, y:0, w:14, l:2.2, angle:0},
         {x:0, y:0, w:16, l:2.3, angle:0},
-        {x:0, y:0, w:18, l:2.4, angle:0}
+        {x:0, y:0, w:18, l:2.4, angle:0},
     ] },
     'Sprayer': { barrels: [
-        {x:0, y:0, w:10, l:1.75, angle:0}
+        {x:0, y:0, w:10, l:1.75, angle:0},
         {x:0, y:0, w:22, w2:32, l:1.6, angle:0},
     ] },
     'Railgun': { barrels: [
         {x:0, y:-16, w:9, l:1.6, angle:0},
         {x:0, y:16, w:9, l:1.6, angle:0},
         {x:0, y:-8, w:7, l:1.7, angle:0},
-        {x:0, y:8, w:7, l:1.7, angle:0}
+        {x:0, y:8, w:7, l:1.7, angle:0},
     ] }
 };
 const ACHIEVEMENT_BADGES = {
