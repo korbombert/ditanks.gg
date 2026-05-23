@@ -167,15 +167,15 @@ const TANK_SPECS = {
     'Twin Flank': { barrels: [
         {x:0, y:-10, w:16, l:1.8, angle:0, spread:0, dmg:0.67, spd:1, rel:1, size:1, delay:0},
         {x:0, y:10, w:16, l:1.8, angle:0, spread:0, dmg:0.67, spd:1, rel:1, size:1, delay:0.5},
-        {x:0, y:-10, w:16, l:1.5, angle:Math.PI, spread:0, dmg:0.67, spd:1, rel:1, size:1, delay:0},
-        {x:0, y:10, w:16, l:1.5, angle:Math.PI, spread:0, dmg:0.67, spd:1, rel:1, size:1, delay:0.5}
+        {x:0, y:-10, w:16, l:1.8, angle:Math.PI, spread:0, dmg:0.67, spd:1, rel:1, size:1, delay:0},
+        {x:0, y:10, w:16, l:1.8, angle:Math.PI, spread:0, dmg:0.67, spd:1, rel:1, size:1, delay:0.5}
     ]},
     'Pentashot': { barrels: [
-        {x:0, y:0, w:18, l:1.8, angle:0, spread:0, dmg:0.7, spd:1, rel:1, size:1, delay:0},
-        {x:0, y:0, w:16, l:1.7, angle:Math.PI/10, spread:0, dmg:0.65, spd:1, rel:1, size:1, delay:0.1},
-        {x:0, y:0, w:16, l:1.7, angle:-Math.PI/10, spread:0, dmg:0.65, spd:1, rel:1, size:1, delay:0.1},
-        {x:0, y:0, w:14, l:1.6, angle:Math.PI/5, spread:0, dmg:0.6, spd:1, rel:1, size:1, delay:0.2},
-        {x:0, y:0, w:14, l:1.6, angle:-Math.PI/5, spread:0, dmg:0.6, spd:1, rel:1, size:1, delay:0.2}
+        {x:0, y:0, w:18, l:1.85, angle:0, spread:0, dmg:0.58, spd:1, rel:1, size:1, delay:0},
+        {x:0, y:0, w:16, l:1.725, angle:Math.PI/10, spread:0, dmg:0.58, spd:1, rel:1, size:1, delay:0.1},
+        {x:0, y:0, w:16, l:1.725, angle:-Math.PI/10, spread:0, dmg:0.58, spd:1, rel:1, size:1, delay:0.1},
+        {x:0, y:0, w:14, l:1.6, angle:Math.PI/5, spread:0, dmg:0.58, spd:1, rel:1, size:1, delay:0.2},
+        {x:0, y:0, w:14, l:1.6, angle:-Math.PI/5, spread:0, dmg:0.58, spd:1, rel:1, size:1, delay:0.2}
     ]},
     'Predator': { barrels: [
         {x:0, y:0, w:14, l:2.2, angle:0, spread:0, dmg:0.85, spd:2.1, rel:2.4, size:0.9, delay:0},
@@ -187,10 +187,10 @@ const TANK_SPECS = {
         {x:0, y:0, w:10, l:1.7, angle:0, spread:0.3, dmg:0.15, spd:1, rel:1, size:0.55, delay:0}
     ]},
     'Railgun': { barrels: [
-        {x:0, y:-16, w:9, l:1.6, angle:0, spread:0, dmg:0.38, spd:1.3, rel:0.45, size:0.55, delay:0},
-        {x:0, y:16, w:9, l:1.6, angle:0, spread:0, dmg:0.38, spd:1.3, rel:0.45, size:0.55, delay:0.25},
-        {x:0, y:-8, w:7, l:1.7, angle:0, spread:0, dmg:0.38, spd:1.3, rel:0.45, size:0.55, delay:0.5},
-        {x:0, y:8, w:7, l:1.7, angle:0, spread:0, dmg:0.38, spd:1.3, rel:0.45, size:0.55, delay:0.75}
+        {x:0, y:-16, w:9, l:1.6, angle:0, spread:0, dmg:0.27, spd:1.3, rel:0.45, size:0.55, delay:0},
+        {x:0, y:16, w:9, l:1.6, angle:0, spread:0, dmg:0.27, spd:1.3, rel:0.45, size:0.55, delay:0.25},
+        {x:0, y:-8, w:7, l:1.7, angle:0, spread:0, dmg:0.27, spd:1.3, rel:0.45, size:0.55, delay:0.5},
+        {x:0, y:8, w:7, l:1.7, angle:0, spread:0, dmg:0.27, spd:1.3, rel:0.45, size:0.55, delay:0.75}
     ]}
 };
 const ACHIEVEMENTS = [
