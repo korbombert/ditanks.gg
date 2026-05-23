@@ -257,9 +257,9 @@ const TANK_SPECS = {
         {x:0, y:0, w:18, l:1.8, angle:0},
     ] },
     'Predator': { barrels: [
-        {x:0, y:0, w:14, l:2.2, angle:0},
-        {x:0, y:0, w:16, l:2.3, angle:0},
-        {x:0, y:0, w:18, l:2.4, angle:0},
+        {x:0, y:0, w:18, l:1.8, angle:0}, // Widest and shortest (bottom layer)
+        {x:0, y:0, w:16, l:2.1, angle:0}, // Medium width and length (middle layer)
+        {x:0, y:0, w:14, l:2.4, angle:0}, // Thinnest and longest (top layer)
     ] },
     'Sprayer': { barrels: [
         {x:0, y:0, w:10, l:1.75, angle:0},
