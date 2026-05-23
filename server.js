@@ -187,10 +187,10 @@ const TANK_SPECS = {
         {x:0, y:0, w:10, l:1.7, angle:0, spread:0.3, dmg:0.15, spd:1, rel:1, size:0.55, delay:0}
     ]},
     'Railgun': { barrels: [
-        {x:0, y:-16, w:9, l:1.6, angle:0, spread:0, dmg:0.27, spd:1.3, rel:0.45, size:0.55, delay:0},
-        {x:0, y:16, w:9, l:1.6, angle:0, spread:0, dmg:0.27, spd:1.3, rel:0.45, size:0.55, delay:0.25},
-        {x:0, y:-8, w:7, l:1.7, angle:0, spread:0, dmg:0.27, spd:1.3, rel:0.45, size:0.55, delay:0.5},
-        {x:0, y:8, w:7, l:1.7, angle:0, spread:0, dmg:0.27, spd:1.3, rel:0.45, size:0.55, delay:0.75}
+        {x:0, y:-16, w:9, l:1.6, angle:0, spread:0, dmg:0.27, spd:1.3, rel:0.75, size:0.55, delay:0},
+        {x:0, y:16, w:9, l:1.6, angle:0, spread:0, dmg:0.27, spd:1.3, rel:0.75, size:0.55, delay:0.25},
+        {x:0, y:-8, w:7, l:1.7, angle:0, spread:0, dmg:0.27, spd:1.3, rel:0.75, size:0.55, delay:0.5},
+        {x:0, y:8, w:7, l:1.7, angle:0, spread:0, dmg:0.27, spd:1.3, rel:0.75, size:0.55, delay:0.75}
     ]}
 };
 const ACHIEVEMENTS = [
