@@ -140,6 +140,13 @@ const TANK_SPECS = {
                 {x:0, y:0, w:30, w2:40, l:1.4, angle:-Math.PI/2, spread:0, dmg:1.461, spd:0.8, rel:5.2, size:1, delay:0}
             ]
     },
+    'Manager': {
+            isDroneSpawner: true,
+            maxDrones: 8,
+            barrels: [
+                {x:0, y:0, w:30, w2:40, l:1.4, angle:0, spread:0, dmg:1.461, spd:0.8, rel:2.6, size:1, delay:0}
+            ]
+    },
     'Necromancer': { 
         isDroneSpawner: true,
         maxDrones: 32,
@@ -233,7 +240,7 @@ ACHIEVEMENTS.forEach(a => {
 });
 const UPGRADE_TREE = {
     'Basic': ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard'],
-    'Sniper': ['Overlord', 'Necromancer', 'Predator'],
+    'Sniper': ['Overlord', 'Necromancer', 'Predator', 'Manager'],
     'Twin': ['Triplet', 'Octo Tank', 'Twin Flank', 'Pentashot'],
     'Flank Guard': ['Tri-angle', 'Octo Tank', 'Twin Flank'],
     'Machine Gun': ['Destroyer', 'Sprayer', 'Railgun'],
@@ -863,6 +870,9 @@ class Entity {
         this.aiTarget = null; 
         this.evadeVx = 0; 
         this.evadeVy = 0;
+        // Manager invisibility
+        this.opacity = 1;
+        this.stillTicks = 0;
         if(type === 'square') { this.hp = 14; this.maxHp = 14; this.radius = 15; this.xpVal = 60; }
         if(type === 'triangle') { this.hp = 35; this.maxHp = 35; this.radius = 18; this.xpVal = 150; }
         if(type === 'pentagon') { this.hp = 140; this.maxHp = 140; this.radius = 30; this.xpVal = 600; }
@@ -1020,6 +1030,8 @@ class Entity {
 
                     if (!isShape && !isSameTeam && isTank) {
                         if (isInProtectedBase(this.room, e, this.team)) return;
+                        // Invisible Manager tanks are undetectable by AI
+                        if (e.tankType === 'Manager' && e.opacity < 0.15) return;
                         let detectionDist = 300 + (Math.min(e.score, 17000) / 17000) * 700;
                         if (this.tankType === 'Overlord') detectionDist *= 1.2;
                         let detectionSq = detectionDist * detectionDist;
@@ -1174,8 +1186,25 @@ class Entity {
             }
         }
 
+        // ── Manager invisibility ──────────────────────────────────────────────
+        if (this.tankType === 'Manager') {
+            const speedSq = this.vx * this.vx + this.vy * this.vy;
+            const STILL_THRESHOLD = 0.04; // speed² below which we count as still
+            const FADE_TICKS = 180;       // ~3 s at 60 fps to reach full invisibility
+            const APPEAR_TICKS = 20;      // ~0.33 s to snap back when moving
+            if (speedSq < STILL_THRESHOLD) {
+                this.stillTicks = Math.min(this.stillTicks + 1, FADE_TICKS);
+                this.opacity = Math.max(0, 1 - (this.stillTicks / FADE_TICKS));
+            } else {
+                this.stillTicks = 0;
+                this.opacity = Math.min(1, this.opacity + (1 / APPEAR_TICKS));
+            }
+        } else {
+            this.opacity = 1;
+            this.stillTicks = 0;
+        }
+
         if (isShooting && !this.wasShooting) {
-            let baseReload = Math.max(5, ((30 * 1.002) - (this.stats[6] * (3 * 0.995))));
             specs.barrels.forEach((b, i) => {
                 if (this.barrelTimers[i] <= 0) {
                     this.barrelTimers[i] = (baseReload * (b.rel || 1)) * (b.delay || 0);
@@ -1888,7 +1917,7 @@ wss.on('connection', (ws, req) => {
         else if (data.type === 'upgradeTank' && client.player && !client.player.markedForDeletion) {
             const player = client.player;
             if (player.level < 15 && data.tank !== 'Basic') return;
-            if (player.level < 30 && data.tank === 'Overlord') return;
+            if (player.level < 30 && (data.tank === 'Overlord' || data.tank === 'Manager')) return;
             const current = player.tankType;
             const possible = UPGRADE_TREE[current] || [];
             if (!possible.includes(data.tank)) return;
@@ -1993,14 +2022,21 @@ setInterval(() => {
                         processedEntities.add(e.id);
                         let isVisible = Math.abs(e.x - focalX) < VIEW_DISTANCE && 
                                         Math.abs(e.y - focalY) < (VIEW_DISTANCE / 1.8);
-                        
+
+                        // Invisible Manager: hide coordinates from everyone except the player themselves.
+                        // This prevents scripted clients from tracking the manager's position.
+                        const isSelf = (c.player === e);
+                        const isInvisible = !isSelf && e.tankType === 'Manager' && e.opacity < 0.15;
+
                         payloadEntities.push({
                             id: e.id, 
-                            x: isVisible ? Math.round(e.x) : null, 
-                            y: isVisible ? Math.round(e.y) : null, 
+                            x: (isVisible && !isInvisible) ? Math.round(e.x) : null, 
+                            y: (isVisible && !isInvisible) ? Math.round(e.y) : null, 
                             type: e.type, team: e.team, hp: e.hp, maxHp: e.maxHp, 
                             radius: e.radius, angle: Math.round(e.angle * 100) / 100, tankType: e.tankType, 
-                            name: e.name, score: e.score, nameColor: e.nameColor, inView: isVisible
+                            name: e.name, score: e.score, nameColor: e.nameColor,
+                            inView: isVisible && !isInvisible,
+                            opacity: (e.opacity !== undefined) ? Math.round(e.opacity * 100) / 100 : 1
                         });
                     }
                 }
