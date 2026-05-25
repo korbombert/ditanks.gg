@@ -56,8 +56,26 @@ style.innerHTML = `
     #xp-bar {
         transition: width 0.2s ease-out, background-color 0.2s;
     }
+    #upgrade-hover-zone {
+        position: fixed;
+        left: 0; top: 0; bottom: 0;
+        width: 6px;
+        background: linear-gradient(to right, rgba(160,200,255,0.18), transparent);
+        z-index: 99;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+    #upgrade-hover-zone.active {
+        opacity: 1;
+    }
 `;
 document.head.appendChild(style);
+
+// Left-edge hover-zone element (shows a subtle glow when upgrades are ignored)
+const upgradeHoverZone = document.createElement('div');
+upgradeHoverZone.id = 'upgrade-hover-zone';
+document.body.appendChild(upgradeHoverZone);
 
 const WORLD_SIZE = 4000;
 const BASE_SIZE = 600;
@@ -271,6 +289,9 @@ const TANK_SPECS = {
         {x:0, y:16, w:9, l:1.6, angle:0},
         {x:0, y:-8, w:7, l:1.7, angle:0},
         {x:0, y:8, w:7, l:1.7, angle:0},
+    ] },
+    'Manager': { barrels: [
+        {x:0, y:0, w:17, w2:33, l:1.4, angle:0}
     ] }
 };
 const ACHIEVEMENT_BADGES = {
@@ -941,54 +962,102 @@ function connectWS(regionStr, modeStr) {
     };
 }
 let currentUpgradesShown = "";
-function checkUpgrades() {
-    const upPanel = document.getElementById('upgrades-panel');
-    let options = [];
-    
-    // Removed Smasher from the evolution pool
-    if (myStats.level >= 15 && myStats.tankType === 'Basic') {
-        options = ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard']; 
-    } else if (myStats.level >= 30) {
-        if (myStats.tankType === 'Sniper') options = ['Overlord', 'Necromancer', 'Predator'];
-        else if (myStats.tankType === 'Machine Gun') options = ['Destroyer', 'Sprayer', 'Railgun'];
-        else if (myStats.tankType === 'Twin') options = ['Octo Tank', 'Triplet', 'Twin Flank', 'Pentashot'];
-        else if (myStats.tankType === 'Flank Guard') options = ['Tri-angle', 'Octo Tank', 'Twin Flank'];
-        else if (myStats.tankType === 'Twin Flank') options = ['Pentashot'];
+let upgradesIgnored = false;
+
+// Bring upgrades back when hovering the left-edge trigger zone
+window.addEventListener('mousemove', e => {
+    // Show the subtle edge glow only when there are ignored upgrades waiting
+    if (upgradesIgnored && currentUpgradesShown !== "") {
+        upgradeHoverZone.classList.add('active');
+    } else {
+        upgradeHoverZone.classList.remove('active');
     }
 
-    let neededStr = options.join(",");
-    if (currentUpgradesShown === neededStr) return;
-    currentUpgradesShown = neededStr;
-    
-    upPanel.innerHTML = '';
-    
-    // Animate Upgrade Panel Left Slide
-    if (options.length > 0) {
-        upPanel.style.transform = 'translateX(0)';
-    } else {
-        upPanel.style.transform = 'translateX(-150%)';
+    if (upgradesIgnored && e.clientX < 80 && currentUpgradesShown !== "") {
+        upgradesIgnored = false;
+        renderUpgradePanel(currentUpgradesShown.split(",").filter(Boolean));
     }
+});
+
+function renderUpgradePanel(options) {
+    const upPanel = document.getElementById('upgrades-panel');
+    upPanel.innerHTML = '';
+
+    if (options.length === 0 || upgradesIgnored) {
+        upPanel.style.transform = 'translateX(-150%)';
+        return;
+    }
+
+    upPanel.style.transform = 'translateX(0)';
 
     options.forEach(c => {
-        let btn = document.createElement('div'); 
+        let btn = document.createElement('div');
         btn.className = 'upgrade-btn square-upgrade';
-        
         let iconUrl = getCachedTankIcon(c, getTeamColor(myTeam));
-        
-        // Bigger icon size
         btn.innerHTML = `
             <img src="${iconUrl}" style="width:55px; height:55px; margin-bottom:4px;">
             <span>${c}</span>
         `;
-        
-        btn.onclick = () => { 
-            ws.send(JSON.stringify({ type: 'upgradeTank', tank: c })); 
-            currentUpgradesShown = "";
-            upPanel.style.transform = 'translateX(-150%)';
-            setTimeout(() => upPanel.innerHTML = '', 400); // Wait for anim
+        // Just send the upgrade — let checkUpgrades() handle panel state via the server response
+        btn.onclick = () => {
+            ws.send(JSON.stringify({ type: 'upgradeTank', tank: c }));
         };
         upPanel.appendChild(btn);
     });
+
+    // Ignore button
+    const ignoreBtn = document.createElement('div');
+    ignoreBtn.style.cssText = `
+        margin-top: 4px;
+        padding: 6px 10px;
+        background: rgba(80,80,80,0.75);
+        border: 2px solid #444;
+        border-radius: 6px;
+        cursor: pointer;
+        text-align: center;
+        font-family: 'Ubuntu', sans-serif;
+        font-size: 11px;
+        font-weight: bold;
+        color: #ccc;
+        text-shadow: -1px -1px 0 #000, 1px 1px 0 #000;
+        transition: background 0.15s;
+        user-select: none;
+    `;
+    ignoreBtn.innerText = '✕  Ignore';
+    ignoreBtn.onmouseenter = () => ignoreBtn.style.background = 'rgba(110,50,50,0.85)';
+    ignoreBtn.onmouseleave = () => ignoreBtn.style.background = 'rgba(80,80,80,0.75)';
+    ignoreBtn.onclick = () => {
+        upgradesIgnored = true;
+        upPanel.style.transform = 'translateX(-150%)';
+    };
+    upPanel.appendChild(ignoreBtn);
+}
+
+function checkUpgrades() {
+    let options = [];
+
+    if (myStats.level >= 15 && myStats.tankType === 'Basic') {
+        options = ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard'];
+    } else if (myStats.level >= 30) {
+        if (myStats.tankType === 'Sniper')       options = ['Overlord', 'Necromancer', 'Predator', 'Manager'];
+        else if (myStats.tankType === 'Machine Gun') options = ['Destroyer', 'Sprayer', 'Railgun'];
+        else if (myStats.tankType === 'Twin')    options = ['Octo Tank', 'Triplet', 'Twin Flank', 'Pentashot'];
+        else if (myStats.tankType === 'Flank Guard') options = ['Tri-angle', 'Octo Tank', 'Twin Flank'];
+        else if (myStats.tankType === 'Twin Flank')  options = ['Pentashot'];
+    }
+
+    const neededStr = options.join(",");
+
+    // When the available set genuinely changes (e.g. Basic→Sniper unlocks tier-3),
+    // clear the ignore flag so the new tier's panel shows automatically.
+    if (neededStr !== currentUpgradesShown && neededStr !== "") {
+        upgradesIgnored = false;
+    }
+
+    if (neededStr === currentUpgradesShown) return;
+    currentUpgradesShown = neededStr;
+
+    renderUpgradePanel(options);
 }
 
 function updateUI() {
@@ -1564,6 +1633,13 @@ if (e.square) {
         if (['tank', 'ai'].includes(en.type)) {
             const isWhite = !en.nameColor || en.nameColor === "white" || en.nameColor === "#fff" || en.nameColor === "#ffffff";
 
+            // Manager invisibility: fade name/score along with the body
+            const drawOpacity = (en.tankType === 'Manager') ? (en.opacity ?? 1) : 1;
+            // Always render yourself at full opacity so you can see your own position
+            const isSelf = (en.id === myId);
+            const effectiveOpacity = isSelf ? 1 : drawOpacity;
+            ctx.globalAlpha = effectiveOpacity;
+
             ctx.fillStyle = en.nameColor || "white";
             ctx.lineJoin = "round"; 
             ctx.strokeStyle = isWhite ? "black" : (darkenColor(en.nameColor, 50) || "black");
@@ -1583,9 +1659,13 @@ if (e.square) {
             const displayScore = formatScore(Math.floor(en.score));
             ctx.strokeText(displayScore, sx, sy - en.radius- 12);
             ctx.fillText(displayScore, sx, sy - en.radius - 12);
+
+            ctx.globalAlpha = 1;
         }
         
        if(en.hp < en.maxHp) {
+    const hpOpacity = (en.tankType === 'Manager' && en.id !== myId) ? (en.opacity ?? 1) : 1;
+    ctx.globalAlpha = hpOpacity;
     let barWidth = scaleSize(40);
     let barHeight = scaleSize(6);
     // Use scaleSize for the gap between the tank and the bar (10)
@@ -1596,11 +1676,17 @@ if (e.square) {
     
     ctx.fillStyle = '#85e37d'; 
     ctx.fillRect(sx - barWidth / 2, sy + barOffset, barWidth * (en.hp / en.maxHp), barHeight);
+    ctx.globalAlpha = 1;
 }
         
         ctx.save();
         ctx.translate(sx, sy);
+        // Manager invisibility: body fades with the same opacity as name/score
+        if (en.tankType === 'Manager' && en.id !== myId) {
+            ctx.globalAlpha = en.opacity ?? 1;
+        }
         drawEntityBody(ctx, rPos);
+        ctx.globalAlpha = 1;
         ctx.restore();
     });
     if (drawCounter % 10 === 0) {
