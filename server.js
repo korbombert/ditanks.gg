@@ -918,7 +918,7 @@ class Entity {
 
     if (client?.dbId) {
 
-        if (this.score >= 1000000) {
+        if (this.score >= 100000) {
             unlockAchievement(
                 client.dbId,
                 'unstoppable',
@@ -928,7 +928,7 @@ class Entity {
 
         const aliveTime = Date.now() - this.spawnTime;
 
-        if (aliveTime >= 1800000) {
+        if (aliveTime >= 600000) {
             unlockAchievement(
                 client.dbId,
                 'survivor',
@@ -1822,52 +1822,52 @@ function updateRoom(room) {
     let respawningBots = [];
     room.entities = room.entities.filter(e => {
         if(e.hp <= 0) {
+            // Award kill achievements whenever a tank/bot dies (not just real players)
+            if (['tank', 'ai'].includes(e.type)) {
+                const killer = room.entities.find(p => p.id === e.lastDamagedBy);
+
+                if (killer && killer.isPlayer) {
+                    const killerClient = room.clients.find(c => c.player === killer);
+
+                    if (killerClient?.dbId) {
+                        db.prepare(`
+                            UPDATE users
+                            SET kills = kills + 1
+                            WHERE id = ?
+                        `).run(killerClient.dbId);
+
+                        const stats = db.prepare(`
+                            SELECT kills FROM users WHERE id = ?
+                        `).get(killerClient.dbId);
+
+                        unlockAchievement(
+                            killerClient.dbId,
+                            'first_blood',
+                            killerClient.ws
+                        );
+
+                        if (stats.kills >= 100) {
+                            unlockAchievement(
+                                killerClient.dbId,
+                                'tank_destroyer',
+                                killerClient.ws
+                            );
+                        }
+
+                        if (e.score >= 1000000) {
+                            unlockAchievement(
+                                killerClient.dbId,
+                                'millionaire_hunter',
+                                killerClient.ws
+                            );
+                        }
+                    }
+                }
+            }
+
             if(e.isPlayer && e.ws) {
                 let timeAlive = Math.floor((Date.now() - e.spawnTime) / 1000);
                 e.ws.send(JSON.stringify({ type: 'death', score: e.score, level: e.level, timeAlive: timeAlive, tank: e.tankType, killerId: e.lastDamagedBy }));
-                const killer = room.entities.find(p => p.id === e.lastDamagedBy);
-
-if (
-    killer &&
-    killer.isPlayer
-) {
-    const killerClient = room.clients.find(c => c.player === killer);
-
-    if (killerClient?.dbId) {
-
-        db.prepare(`
-            UPDATE users
-            SET kills = kills + 1
-            WHERE id = ?
-        `).run(killerClient.dbId);
-
-        const stats = db.prepare(`
-            SELECT kills FROM users WHERE id = ?
-        `).get(killerClient.dbId);
-
-        unlockAchievement(
-            killerClient.dbId,
-            'first_blood',
-            killerClient.ws
-        );
-
-        if (stats.kills >= 100) {
-            unlockAchievement(
-                killerClient.dbId,
-                'tank_destroyer',
-                killerClient.ws
-            );
-        }
-
-        if (e.score >= 1000000) {
-            unlockAchievement(
-                killerClient.dbId,
-                'millionaire_hunter',
-                killerClient.ws
-            );
-        }
-    }
-}
                 let client = room.clients.find(c => c.player === e);
                 if (client && client.dbId) {
                     let earnedCoins = Math.floor(e.score / 1000); 
