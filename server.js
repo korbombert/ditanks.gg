@@ -38,7 +38,8 @@ db.prepare(`
 
 const migrations = [
     `ALTER TABLE users ADD COLUMN high_score INTEGER DEFAULT 0`,
-    `ALTER TABLE achievements_v2 RENAME COLUMN icon TO badge`,
+    `DROP TABLE IF EXISTS user_achievements_v2`,
+    `DROP TABLE IF EXISTS achievements_v2`,
     `DELETE FROM banned_ips_v2`,
 ];
 
@@ -222,13 +223,13 @@ const ACHIEVEMENTS = [
     {
         id: 'unstoppable',
         name: 'Unstoppable',
-        description: 'Reach 100,000 score',
+        description: 'Reach 1,000,000 score',
         badge: 'fire'
     },
     {
         id: 'survivor',
         name: 'Survivor',
-        description: 'Stay alive for 10 minutes',
+        description: 'Stay alive for 15 minutes',
         badge: 'shield'
     }
 ];
@@ -918,7 +919,7 @@ class Entity {
 
     if (client?.dbId) {
 
-        if (this.score >= 100000) {
+        if (this.score >= 1000000) {
             unlockAchievement(
                 client.dbId,
                 'unstoppable',
@@ -928,7 +929,7 @@ class Entity {
 
         const aliveTime = Date.now() - this.spawnTime;
 
-        if (aliveTime >= 600000) {
+        if (aliveTime >= 900000) {
             unlockAchievement(
                 client.dbId,
                 'survivor',
