@@ -1204,6 +1204,8 @@ class Entity {
             this.stillTicks = 0;
         }
 
+        const baseReload = Math.max(5, ((30 * 1.002) - (this.stats[6] * (3 * 0.995))));
+
         if (isShooting && !this.wasShooting) {
             specs.barrels.forEach((b, i) => {
                 if (this.barrelTimers[i] <= 0) {
