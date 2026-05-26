@@ -149,7 +149,7 @@ const TANK_SPECS = {
         maxDrones: 32,
         barrels: [], square: true
     },
-    'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 5, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
+    'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 4.5, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
     'Octo Tank': { barrels: [
         {x:0, y:0, w:16, l:1.8, angle:0, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
         {x:0, y:0, w:16, l:1.8, angle:Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
@@ -1499,7 +1499,7 @@ function shoot(who) {
     let baseDmg = 8 + (who.stats[5]*3);
     let basePen = 1 + (who.stats[4]*0.5);
     if (who.tankType === 'Destroyer') {
-        basePen *= 6;
+        basePen *= 10;
     }
     if(specs.isDroneSpawner) {
         specs.barrels.forEach((b, i) => {
