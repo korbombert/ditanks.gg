@@ -980,6 +980,7 @@ class Entity {
         }
         let moveSpeed = (0.5 * 0.998) + (this.stats[7] * (0.04 * 0.995)); 
         let isShooting = false;
+        const effectiveMaxHpForFlee = this.maxHp + (this.stats[1] * 20);
         if(this.isPlayer) {
             let inputX = 0; let inputY = 0;
             if(this.inputs.left) inputX -= 1;
@@ -1080,7 +1081,7 @@ class Entity {
                     }
                 }
                 this.targetId = this.aiTarget ? (this.aiTarget.id || null) : null;
-                const effectiveMaxHpForFlee = this.maxHp + (this.stats[1] * 20);
+                
                 this.isFleeing = (this.hp / effectiveMaxHpForFlee) < 0.25;
             }
             this.vx += this.evadeVx;
