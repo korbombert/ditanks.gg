@@ -152,7 +152,7 @@ const TANK_SPECS = {
         maxDrones: 32,
         barrels: [], square: true
     },
-    'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 8, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
+    'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 5, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
     'Octo Tank': { barrels: [
         {x:0, y:0, w:16, l:1.8, angle:0, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
         {x:0, y:0, w:16, l:1.8, angle:Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
@@ -789,10 +789,28 @@ function isInProtectedBase(room, obj, viewerTeam = 0) {
 
     return false;
 }
+function getSafeZone(room, team) {
+    if (room.mode === "2TDM") {
+        return {
+            x: team === 1 ? WORLD_SIZE * 0.22 : WORLD_SIZE * 0.78,
+            y: WORLD_SIZE / 2
+        };
+    }
+
+    if (room.mode === "4TDM") {
+        if (team === 1) return { x: WORLD_SIZE * 0.22, y: WORLD_SIZE * 0.22 };
+        if (team === 2) return { x: WORLD_SIZE * 0.78, y: WORLD_SIZE * 0.78 };
+        if (team === 3) return { x: WORLD_SIZE * 0.78, y: WORLD_SIZE * 0.22 };
+        if (team === 4) return { x: WORLD_SIZE * 0.22, y: WORLD_SIZE * 0.78 };
+    }
+
+    return { x: WORLD_SIZE / 2, y: WORLD_SIZE / 2 };
+}
 // Returns true if obj is inside an ENEMY base zone that the AI (of aiTeam) cannot enter.
 // The AI's own base is excluded — bots can freely walk there.
 function isInEnemyBase(room, obj, aiTeam) {
     if (!obj) return false;
+    
     const PROX = 350;
     const BASE_SIZE_4 = 600;
     const BASE_WIDTH_2 = 400;
@@ -1072,7 +1090,7 @@ class Entity {
                 target = null;
                 this.aiTarget = null;
             }
-
+            const isDestroyer = this.tankType === 'Destroyer';
             if(target) {
                 let isDrone = target.owner !== undefined;
                 let predX = target.x;
@@ -1087,7 +1105,55 @@ class Entity {
                     predX += (target.vx || 0) * timeToHit;
                     predY += (target.vy || 0) * timeToHit;
                 }              
-                
+                if (isDestroyer) {
+
+    let dx = target.x - this.x;
+    let dy = target.y - this.y;
+    let dist = Math.sqrt(dx * dx + dy * dy);
+
+    this.angle = Math.atan2(predY - this.y, predX - this.x);
+
+    // Low HP = disengage
+    if (this.hp < effectiveMaxHpForFlee * 0.45) {
+
+        this.vx -= Math.cos(this.angle) * moveSpeed * 1.8;
+        this.vy -= Math.sin(this.angle) * moveSpeed * 1.8;
+
+        // occasional defensive shots
+        if (dist < 300) {
+            isShooting = true;
+        }
+
+        return;
+    }
+
+    // Ambush spacing
+    const preferredDist = 320;
+
+    if (dist > preferredDist + 40) {
+        this.vx += Math.cos(this.angle) * moveSpeed * 0.9;
+        this.vy += Math.sin(this.angle) * moveSpeed * 0.9;
+    }
+
+    if (dist < preferredDist - 40) {
+        this.vx -= Math.cos(this.angle) * moveSpeed * 1.3;
+        this.vy -= Math.sin(this.angle) * moveSpeed * 1.3;
+    }
+
+    // Only fire when aim is lined up
+    let aimError = Math.abs(
+        Math.atan2(
+            Math.sin(this.angle - Math.atan2(dy, dx)),
+            Math.cos(this.angle - Math.atan2(dy, dx))
+        )
+    );
+
+    if (aimError < 0.12 && dist < 450) {
+        isShooting = true;
+    }
+
+    return;
+}
                 if (this.isFleeing && !target.isShape) {
                     this.angle = Math.atan2(predY - this.y, predX - this.x);
                     isShooting = true;
@@ -1117,6 +1183,27 @@ class Entity {
                     }
                 }
             } else {
+                const safeZone = getSafeZone(this.room, this.team);
+
+let distFromSafeSq =
+    (this.x - safeZone.x) ** 2 +
+    (this.y - safeZone.y) ** 2;
+
+const tooDeep = distFromSafeSq > 1800 * 1800;
+
+if (tooDeep) {
+    let retreatAngle = Math.atan2(
+        safeZone.y - this.y,
+        safeZone.x - this.x
+    );
+
+    this.angle = retreatAngle;
+
+    this.vx += Math.cos(retreatAngle) * moveSpeed * 1.4;
+    this.vy += Math.sin(retreatAngle) * moveSpeed * 1.4;
+
+    return;
+}
                 // For TDM modes, bots should flee/wander toward their own base corner,
                 // not the world center which may sit inside enemy territory.
                 let wanderX = WORLD_SIZE / 2;
@@ -1404,7 +1491,9 @@ function shoot(who) {
     let baseSpeed = (6 * 0.998) + (who.stats[3] * (0.4 * 0.995));
     let baseDmg = 8 + (who.stats[5]*3);
     let basePen = 1 + (who.stats[4]*0.5);
-
+    if (who.tankType === 'Destroyer') {
+        basePen *= 6;
+    }
     if(specs.isDroneSpawner) {
         specs.barrels.forEach((b, i) => {
             if (who.barrelTimers[i] <= 0 && who.activeDrones < specs.maxDrones) {
