@@ -549,38 +549,47 @@ app.delete('/api/admin/changelogs/:id', requireAdmin, (req, res) => {
 });
 app.get('/api/achievements', (req, res) => {
     res.json(ACHIEVEMENTS);
-});
-app.get('/api/me/achievements', (req, res) => {
-    let token = req.headers.authorization?.split(' ')[1];
+});app.get('/api/me/achievements', (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        let token = authHeader?.split(' ')[1];
 
-    if (!token) {
-        return res.status(401).json({ error: 'No token' });
+        if (!token) {
+            return res.status(401).json({ error: 'No token provided' });
+        }
+
+        // 1. Safe User Lookup
+        const user = db.prepare(`
+            SELECT id FROM users
+            WHERE session_token = ?
+        `).get(token);
+
+        // Check if user exists BEFORE accessing user.id to avoid TypeError crash
+        if (!user) {
+            return res.status(404).json({ error: 'Invalid or expired session token' });
+        }
+
+        // 2. Fetch Achievements (Fixing 'badge' vs 'icon' based on your frontend)
+        const achievements = db.prepare(`
+            SELECT
+                a.id,
+                a.name,
+                a.description,
+                a.badge,         -- Double check if your SQLite column is 'badge' or 'icon'
+                ua.unlocked_at
+            FROM user_achievements_v2 ua
+            JOIN achievements_v2 a ON ua.achievement_id = a.id
+            WHERE ua.user_id = ?
+            ORDER BY ua.unlocked_at DESC
+        `).all(user.id);
+
+        res.json(achievements);
+
+    } catch (dbError) {
+        // This catches SQLite errors instead of completely crashing the request pipeline
+        console.error("Database error in /api/me/achievements:", dbError);
+        res.status(500).json({ error: 'Internal Server Error', details: dbError.message });
     }
-
-    const user = db.prepare(`
-        SELECT id FROM users
-        WHERE session_token = ?
-    `).get(token);
-
-    if (!user) {
-        return res.status(404).json({ error: 'User not found' });
-    }
-
-    const achievements = db.prepare(`
-        SELECT
-            a.id,
-            a.name,
-            a.description,
-            a.icon,
-            ua.unlocked_at
-        FROM user_achievements_v2 ua
-        JOIN achievements_v2 a
-        ON ua.achievement_id = a.id
-        WHERE ua.user_id = ?
-        ORDER BY ua.unlocked_at DESC
-    `).all(user.id);
-
-    res.json(achievements);
 });
 app.use((req, res, next) => {
     res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
