@@ -37,10 +37,6 @@ db.prepare(`
 `).run();
 
 const migrations = [
-    `ALTER TABLE users ADD COLUMN high_score INTEGER DEFAULT 0`,
-    `DROP TABLE IF EXISTS user_achievements_v2`,
-    `DROP TABLE IF EXISTS achievements_v2`,
-    `DELETE FROM banned_ips_v2`,
 ];
 
 migrations.forEach(query => {
