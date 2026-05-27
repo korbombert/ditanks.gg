@@ -858,12 +858,11 @@ fetch('/api/changelogs')
             </div>
         `).join('');
     });
-
+});
     function goToAdmin() {
         const token = localStorage.getItem('sessionToken');
         window.location.href = `/app?token=${token}`;
     }
-        });
 </script>
 </body>
 </html>
