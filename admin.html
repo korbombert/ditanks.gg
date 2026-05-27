@@ -167,12 +167,12 @@
     <h1>🛡️ ADMIN DASHBOARD</h1>
 
     <div class="tabs">
-        <button class="tab-btn active" onclick="switchTab('rooms', this)">🎮 Rooms</button>
-        <button class="tab-btn" onclick="switchTab('accounts', this)">👤 Accounts</button>
-        <button class="tab-btn" onclick="switchTab('bans', this)">🚫 Bans</button>
-        <button class="tab-btn" onclick="switchTab('changelogs', this)">📋 Changelogs</button>
-        <button class="tab-btn" onclick="switchTab('server', this)">🖥️ Servers</button>
-        <button class="tab-btn" onclick="switchTab('config', this)">⚙️ Game Config</button>
+        <button class="tab-btn active" onclick="switchTab('rooms', this)">Rooms</button>
+        <button class="tab-btn" onclick="switchTab('accounts', this)">Accounts</button>
+        <button class="tab-btn" onclick="switchTab('bans', this)">Bans</button>
+        <button class="tab-btn" onclick="switchTab('changelogs', this)">Changelogs</button>
+        <button class="tab-btn" onclick="switchTab('server', this)">Servers</button>
+        <button class="tab-btn" onclick="switchTab('config', this)">Game Config</button>
     </div>
 
     <!-- ===================== ROOMS TAB ===================== -->
@@ -207,11 +207,11 @@
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
             <h2 style="margin:0; border:none; padding:0;">All Accounts</h2>
             <div style="display:flex; gap:8px;">
-                <button class="btn btn-purple btn-sm" onclick="expireAllSessions()">⏏ EXPIRE ALL SESSIONS</button>
+                <button class="btn btn-purple btn-sm" onclick="expireAllSessions()">EXPIRE ALL SESSIONS</button>
                 <button class="btn btn-blue btn-sm" onclick="loadAccounts()">↻ REFRESH</button>
             </div>
         </div>
-        <input class="search-bar" id="account-search" type="text" placeholder="🔍  Search by username or provider..." oninput="filterAccounts()">
+        <input class="search-bar" id="account-search" type="text" placeholder="Search by username or provider..." oninput="filterAccounts()">
         <div id="accounts-count" style="color:#666; font-size:13px; margin-bottom:10px;"></div>
         <table>
             <thead>
@@ -266,7 +266,7 @@
                 <label>Sort Order (higher = first)</label>
                 <input type="number" id="cl-sort" value="10">
             </div>
-            <button class="btn btn-green" onclick="postChangelog()">📢 Publish Changelog</button>
+            <button class="btn btn-green" onclick="postChangelog()">Publish Changelog</button>
         </div>
 
         <hr class="section-sep">
@@ -282,10 +282,10 @@
                 <div class="form-group" style="margin-bottom:0;">
                     <label>Severity</label>
                     <select id="dt-severity">
-                        <option value="info">ℹ️ Info</option>
-                        <option value="warning" selected>⚠️ Warning</option>
-                        <option value="critical">🔴 Critical</option>
-                        <option value="maintenance">🔧 Maintenance</option>
+                        <option value="info">Info</option>
+                        <option value="warning" selected>Warning</option>
+                        <option value="critical">Critical</option>
+                        <option value="maintenance">Maintenance</option>
                     </select>
                 </div>
             </div>
@@ -297,7 +297,7 @@
                 <label>Estimated End Time (optional)</label>
                 <input type="datetime-local" id="dt-end">
             </div>
-            <button class="btn btn-kick" onclick="postDowntime()">⚠️ Publish Alert</button>
+            <button class="btn btn-kick" onclick="postDowntime()">Publish Alert</button>
         </div>
 
         <hr class="section-sep">
@@ -344,9 +344,9 @@
         <!-- Manage servers -->
         <h2>Server Management</h2>
         <div style="margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
-            <button class="btn btn-green" onclick="massServerAction('boot')">▶ BOOT SELECTED</button>
-            <button class="btn btn-kick" onclick="massServerAction('restart')">↺ RESTART SELECTED</button>
-            <button class="btn btn-ban" onclick="massServerAction('kill')">■ KILL SELECTED</button>
+            <button class="btn btn-green" onclick="massServerAction('boot')">BOOT SELECTED</button>
+            <button class="btn btn-kick" onclick="massServerAction('restart')">RESTART SELECTED</button>
+            <button class="btn btn-ban" onclick="massServerAction('kill')">KILL SELECTED</button>
         </div>
         <table>
             <thead>
@@ -372,16 +372,16 @@
             <div class="form-group">
                 <label>Message Type</label>
                 <div class="radio-group">
-                    <label><input type="radio" name="bc-type" value="announcement" checked> 📣 Announcement</label>
-                    <label><input type="radio" name="bc-type" value="warning"> ⚠️ Warning</label>
-                    <label><input type="radio" name="bc-type" value="system"> 🔧 System</label>
+                    <label><input type="radio" name="bc-type" value="announcement" checked>Announcement</label>
+                    <label><input type="radio" name="bc-type" value="warning">Warning</label>
+                    <label><input type="radio" name="bc-type" value="system">System</label>
                 </div>
             </div>
             <div class="form-group">
                 <label>Message</label>
                 <input type="text" id="bc-message" placeholder="Message visible to all players in-game...">
             </div>
-            <button class="btn btn-blue" onclick="sendBroadcast()">📢 BROADCAST</button>
+            <button class="btn btn-blue" onclick="sendBroadcast()">BROADCAST</button>
             <span id="bc-result" style="margin-left:12px; font-size:13px; color:#4CAF50;"></span>
         </div>
 
@@ -396,29 +396,25 @@
                     <span class="toggle-slider"></span>
                 </label>
                 <div>
-                    <div class="toggle-label">🔧 Maintenance Mode</div>
+                    <div class="toggle-label">Maintenance Mode</div>
                     <div style="font-size:12px; color:#777;">Prevents new players from joining. Existing sessions are unaffected.</div>
                 </div>
             </div>
 
-            <div class="form-group" style="margin-top:16px;">
-                <label>📌 Message of the Day (MOTD)</label>
-                <input type="text" id="cfg-motd" placeholder="Shown to players on the main menu..." oninput="debounceSaveConfig()">
-            </div>
 
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
                 <div class="form-group" style="margin-bottom:0;">
-                    <label>💰 Coin Multiplier: <strong id="cfg-coinmult-val">1x</strong></label>
+                    <label>Coin Multiplier: <strong id="cfg-coinmult-val">1x</strong></label>
                     <input type="range" id="cfg-coinmult" min="0.5" max="5" step="0.5" value="1" oninput="updateRangeLabel('cfg-coinmult','cfg-coinmult-val','x'); debounceSaveConfig()">
                 </div>
                 <div class="form-group" style="margin-bottom:0;">
-                    <label>🤖 Max Bots Per Room: <strong id="cfg-bots-val">24</strong></label>
+                    <label>Max Bots Per Room: <strong id="cfg-bots-val">24</strong></label>
                     <input type="range" id="cfg-bots" min="0" max="48" step="4" value="24" oninput="updateRangeLabel('cfg-bots','cfg-bots-val',''); debounceSaveConfig()">
                 </div>
             </div>
 
             <div style="margin-top:16px; display:flex; gap:10px; align-items:center;">
-                <button class="btn btn-green" onclick="saveConfig()">💾 Save Config</button>
+                <button class="btn btn-green" onclick="saveConfig()">Save Config</button>
                 <span id="cfg-result" style="font-size:13px; color:#4CAF50;"></span>
             </div>
         </div>
@@ -429,8 +425,8 @@
         <h2 style="color:#f14e54;">⚠️ Danger Zone</h2>
         <div class="card" style="border-color:#f14e54; background:#ffe8e8;">
             <div style="display:flex; gap:12px; flex-wrap:wrap;">
-                <button class="btn btn-ban" onclick="expireAllSessions()">⏏ Expire ALL Player Sessions</button>
-                <button class="btn btn-ban" onclick="kickAllPlayers()">👢 Kick All Players</button>
+                <button class="btn btn-ban" onclick="expireAllSessions()">Expire ALL Player Sessions</button>
+                <button class="btn btn-ban" onclick="kickAllPlayers()">Kick All Players</button>
             </div>
             <p style="margin:12px 0 0; font-size:13px; color:#c83d42;">
                 These actions are immediate and cannot be undone. Expire sessions forces all accounts to re-login.
@@ -442,7 +438,7 @@
 <!-- ===================== EDIT COINS MODAL ===================== -->
 <div class="modal-overlay" id="modal-coins">
     <div class="modal-box">
-        <h3>✏️ Edit Coins</h3>
+        <h3>Edit Coins</h3>
         <div id="modal-coins-name" style="color:#555; margin-bottom:12px;"></div>
         <div class="form-group">
             <label>New Coin Balance</label>
@@ -458,7 +454,7 @@
 <!-- ===================== ACCOUNT DETAIL MODAL ===================== -->
 <div class="modal-overlay" id="modal-account">
     <div class="modal-box" style="width:500px;">
-        <h3>👤 Account Details</h3>
+        <h3>Account Details</h3>
         <div id="modal-account-content"></div>
         <div class="modal-actions">
             <button class="btn btn-gray" onclick="closeModal('modal-account')">Close</button>
@@ -856,8 +852,8 @@
                     <td>${s.mode}</td>
                     <td style="font-weight:bold;color:${statusColor};">${s.status.toUpperCase()}</td>
                     <td>
-                        <span class="info-pill">👤 ${humanPlayers}</span>
-                        ${tickInfo}${ramInfo}
+                        <span class="info-pill">👤 ${humanPlayers}
+                        ${tickInfo}${ramInfo}</span>
                     </td>
                     <td>
                         ${s.status === 'stopped'
