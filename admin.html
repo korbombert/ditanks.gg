@@ -8,414 +8,963 @@
     <style>
         * { font-family: 'Ubuntu', sans-serif; user-select: none; box-sizing: border-box; }
         body { margin: 0; background: #b1b1b1; padding: 40px 20px; color: #333; }
-        
-        .container { 
-            max-width: 1000px; margin: 0 auto; 
-            background: #eee; padding: 30px; border-radius: 10px; 
+
+        .container {
+            max-width: 1100px; margin: 0 auto;
+            background: #eee; padding: 30px; border-radius: 10px;
             border: 5px solid #555; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
 
         h1 { text-align: center; margin-top: 0; font-size: 32px; color: #333; text-shadow: 2px 2px 0px #fff; }
         h2 { border-bottom: 3px solid #ccc; padding-bottom: 10px; margin-bottom: 20px; }
+        h3 { margin-top: 0; margin-bottom: 12px; color: #555; font-size: 15px; text-transform: uppercase; letter-spacing: 1px; }
 
         /* Tabs */
-        .tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 4px solid #ccc; padding-bottom: 10px; }
+        .tabs { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 4px solid #ccc; padding-bottom: 10px; flex-wrap: wrap; }
         .tab-btn {
-            background: #bbb; color: white; padding: 10px 20px; border: none; border-radius: 5px; 
-            font-size: 16px; font-weight: bold; cursor: pointer; border-bottom: 4px solid #999;
+            background: #bbb; color: white; padding: 10px 16px; border: none; border-radius: 5px;
+            font-size: 14px; font-weight: bold; cursor: pointer; border-bottom: 4px solid #999;
         }
         .tab-btn.active { background: #00b2e1; border-bottom-color: #0085a8; transform: translateY(2px); border-bottom-width: 2px; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
 
-        /* Table Styling */
+        /* Table */
         table { width: 100%; border-collapse: separate; border-spacing: 0 8px; margin-top: 10px; }
-        th { text-align: left; padding: 10px; color: #666; font-size: 14px; text-transform: uppercase; }
+        th { text-align: left; padding: 10px; color: #666; font-size: 13px; text-transform: uppercase; }
         tr { background: #333; color: white; border-radius: 8px; }
-        td { padding: 12px; border-top: 3px solid #222; border-bottom: 6px solid #111; }
+        td { padding: 10px 12px; border-top: 3px solid #222; border-bottom: 6px solid #111; vertical-align: middle; }
         td:first-child { border-left: 3px solid #222; border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
         td:last-child { border-right: 3px solid #222; border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
 
         /* Buttons */
-        .btn { 
-            border: none; border-radius: 5px; cursor: pointer; 
+        .btn {
+            border: none; border-radius: 5px; cursor: pointer;
             font-weight: bold; transition: 0.1s; padding: 10px 20px;
-            color: white; display: inline-flex; align-items: center; justify-content: center;
+            color: white; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
         }
         .btn:active { transform: translateY(2px); border-bottom-width: 2px !important; }
-        .btn-blue { background: #00b2e1; border-bottom: 4px solid #0085a8; }
-        .btn-green { background: #4CAF50; border-bottom: 4px solid #388E3C; }
-        .btn-kick { background: #f0a824; border-bottom: 4px solid #c88414; margin-right: 5px; }
-        .btn-ban { background: #f14e54; border-bottom: 4px solid #c83d42; }
+        .btn-blue   { background: #00b2e1; border-bottom: 4px solid #0085a8; }
+        .btn-green  { background: #4CAF50; border-bottom: 4px solid #388E3C; }
+        .btn-kick   { background: #f0a824; border-bottom: 4px solid #c88414; }
+        .btn-ban    { background: #f14e54; border-bottom: 4px solid #c83d42; }
+        .btn-purple { background: #9c27b0; border-bottom: 4px solid #6a1b9a; }
+        .btn-gray   { background: #777; border-bottom: 4px solid #555; }
+        .btn-sm     { padding: 5px 10px; font-size: 12px; }
 
         /* Forms */
         .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; font-weight: bold; margin-bottom: 5px; }
-        .form-group input, .form-group textarea, .form-group select { 
-            width: 100%; padding: 10px; border-radius: 5px; border: 2px solid #ccc; font-family: inherit; font-size: 14px;
+        .form-group label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 13px; }
+        .form-group input, .form-group textarea, .form-group select {
+            width: 100%; padding: 10px; border-radius: 5px; border: 2px solid #ccc;
+            font-family: inherit; font-size: 14px; background: #fff;
         }
-        
-        .server-box { background: #333; padding: 20px; border-radius: 8px; text-align: center; border: 3px solid #222; }
+        .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+            outline: none; border-color: #00b2e1;
+        }
 
-        .room-card { 
-            background: #333; padding: 15px; border-radius: 8px; margin-bottom: 12px; 
-            display: flex; justify-content: space-between; align-items: center; 
+        .card { background: #ddd; padding: 15px; border-radius: 8px; border: 2px solid #ccc; margin-bottom: 20px; }
+
+        /* Room cards */
+        .room-card {
+            background: #333; padding: 15px; border-radius: 8px; margin-bottom: 12px;
+            display: flex; justify-content: space-between; align-items: center;
             cursor: pointer; border: 3px solid #222; border-bottom: 6px solid #111; color: white;
         }
         .room-card:hover { transform: scale(1.01); }
+
+        /* Stats bar */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+        .stat-card {
+            background: #333; padding: 16px; border-radius: 8px; text-align: center;
+            border: 3px solid #222; border-bottom: 6px solid #111; color: white;
+        }
+        .stat-card .stat-val { font-size: 26px; font-weight: bold; color: #00b2e1; }
+        .stat-card .stat-lbl { font-size: 12px; color: #aaa; margin-top: 4px; text-transform: uppercase; }
+
+        /* Badges */
+        .badge {
+            display: inline-block; padding: 2px 8px; border-radius: 4px;
+            font-size: 11px; font-weight: bold; text-transform: uppercase;
+        }
+        .badge-discord { background: #5865F2; color: white; }
+        .badge-google  { background: #EA4335; color: white; }
+        .badge-active  { background: #4CAF50; color: white; }
+        .badge-offline { background: #666; color: #ccc; }
+        .badge-downtime  { background: #f0a824; color: #111; }
+        .badge-changelog { background: #00b2e1; color: white; }
+        .badge-warning  { background: #f0a824; color: #111; }
+        .badge-critical { background: #f14e54; color: white; }
+        .badge-info     { background: #00b2e1; color: white; }
+        .badge-maintenance { background: #9c27b0; color: white; }
+
+        /* Color swatches */
+        .color-swatches { display: flex; gap: 4px; flex-wrap: wrap; }
+        .color-swatch { width: 18px; height: 18px; border-radius: 3px; border: 2px solid rgba(0,0,0,0.4); }
+
+        /* Avatar */
+        .avatar { width: 36px; height: 36px; border-radius: 50%; border: 2px solid #555; background: #555; }
+
+        /* Search */
+        .search-bar {
+            width: 100%; padding: 10px 14px; border-radius: 5px; border: 2px solid #ccc;
+            font-family: inherit; font-size: 14px; margin-bottom: 16px; background: #fff;
+        }
+        .search-bar:focus { outline: none; border-color: #00b2e1; }
+
+        /* Toggle switch */
+        .toggle-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+        .toggle-wrap { position: relative; width: 52px; height: 28px; flex-shrink: 0; }
+        .toggle-wrap input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background: #ccc; border-radius: 28px; transition: 0.3s;
+        }
+        .toggle-slider:before {
+            content: ''; position: absolute; height: 20px; width: 20px;
+            left: 4px; bottom: 4px; background: white; border-radius: 50%; transition: 0.3s;
+        }
+        input:checked + .toggle-slider { background: #4CAF50; }
+        input:checked + .toggle-slider:before { transform: translateX(24px); }
+        .toggle-label { font-weight: bold; font-size: 15px; }
+
+        /* Range input */
+        input[type="range"] { cursor: pointer; accent-color: #00b2e1; }
+
+        /* Modal overlay */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+            z-index: 1000; align-items: center; justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal-box {
+            background: #eee; border-radius: 10px; border: 4px solid #555;
+            padding: 24px; width: 420px; max-width: 95vw; box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+        .modal-box h3 { margin-top: 0; font-size: 18px; }
+        .modal-actions { display: flex; gap: 10px; margin-top: 16px; }
+
+        /* Empty state */
+        .empty-state { text-align: center; padding: 30px; color: #888; font-style: italic; }
+
+        /* Section divider */
+        .section-sep { border: none; border-top: 3px solid #ccc; margin: 24px 0; }
+
+        /* Broadcast type radio */
+        .radio-group { display: flex; gap: 12px; flex-wrap: wrap; }
+        .radio-group label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: bold; }
+        .radio-group input[type=radio] { accent-color: #00b2e1; width: 16px; height: 16px; }
+
+        /* Server row info pills */
+        .info-pill {
+            display: inline-block; background: rgba(255,255,255,0.12);
+            border-radius: 4px; padding: 2px 7px; font-size: 12px; margin: 1px;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🛡️ ADMIN DASHBOARD</h1>
-        
-        <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('rooms', this)">Rooms & Players</button>
-            <button class="tab-btn" onclick="switchTab('bans', this)">Bans</button>
-            <button class="tab-btn" onclick="switchTab('changelogs', this)">Changelogs</button>
-            <button class="tab-btn" onclick="switchTab('server', this)">Server Controls</button>
-        </div>
+<div class="container">
+    <h1>🛡️ ADMIN DASHBOARD</h1>
 
-        <div id="tab-rooms" class="tab-content active">
-            <div id="view-rooms">
-                <div id="room-list">Loading rooms...</div>
-            </div>
-            <div id="view-players" style="display:none;">
-                <button class="btn btn-blue" onclick="document.getElementById('view-players').style.display='none'; document.getElementById('view-rooms').style.display='block'; loadRooms();" style="margin-bottom: 15px;">← BACK TO ROOMS</button>
-                <h2 id="room-title" style="margin-top:0;">Room Players</h2>
-                <div style="margin-bottom: 15px; display: flex; gap: 10px;">
-                    <button class="btn btn-kick" onclick="massAction('kick')">KICK SELECTED</button>
-                    <button class="btn btn-ban" onclick="massAction('ban')">BAN SELECTED</button>
-                </div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th><input type="checkbox" id="selectAll" onclick="toggleSelectAll()"></th>
-                            <th>Network</th>
-                            <th>Name</th>
-                            <th>Score</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="player-list"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <div id="tab-bans" class="tab-content">
-            <h2>Banned IPs</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>IP Hash</th>
-                        <th>Date</th>
-                        <th>Reason</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="ban-list"></tbody>
-            </table>
-        </div>
-
-        <div id="tab-changelogs" class="tab-content">
-            <h2>Publish Changelog</h2>
-            <div style="background:#ddd; padding:15px; border-radius:8px; border:2px solid #ccc; margin-bottom: 20px;">
-                <div class="form-group">
-                    <label>Title</label>
-                    <input type="text" id="cl-title" placeholder="e.g., Update v1.0.5">
-                </div>
-                <div class="form-group">
-                    <label>Description (Short)</label>
-                    <input type="text" id="cl-desc" placeholder="Brief summary of changes...">
-                </div>
-                <div class="form-group">
-                    <label>Markdown (Full Notes)</label>
-                    <textarea id="cl-markdown" rows="5" placeholder="- Added new tank&#10;- Fixed bugs"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Sort Order (Higher = Shows first)</label>
-                    <input type="number" id="cl-sort" value="10">
-                </div>
-                <button class="btn btn-green" onclick="postChangelog()">Publish Changelog</button>
-            </div>
-
-            <h2>Existing Changelogs</h2>
-            <table>
-                <thead><tr><th>Title</th><th>Date</th><th>Sort</th><th>Actions</th></tr></thead>
-                <tbody id="changelog-list"></tbody>
-            </table>
-        </div>
-
-        <div id="tab-server" class="tab-content">
-            <h2>Create Server Instance</h2>
-            <div style="background:#ddd; padding:15px; border-radius:8px; border:2px solid #ccc; margin-bottom: 20px; display:flex; gap:10px; align-items:flex-end;">
-                <div class="form-group" style="margin-bottom:0; flex:1;">
-                    <label>Server ID (e.g. FFA-S3)</label>
-                    <input type="text" id="new-server-id" placeholder="FFA-S3">
-                </div>
-                <div class="form-group" style="margin-bottom:0; flex:1;">
-                    <label>Game Mode</label>
-                    <select id="new-server-mode" style="width: 100%; padding: 10px; border-radius: 5px; border: 2px solid #ccc; font-family: inherit; font-size: 14px;">
-                        <option value="FFA">FFA</option>
-                        <option value="2TDM">2 Teams</option>
-                        <option value="4TDM">4 Teams</option>
-                    </select>
-                </div>
-                <button class="btn btn-green" onclick="createServer()">CREATE SERVER</button>
-            </div>
-
-            <h2>Server Management</h2>
-            <div style="margin-bottom: 15px; display: flex; gap: 10px;">
-                <button class="btn btn-green" onclick="massServerAction('boot')">BOOT SELECTED</button>
-                <button class="btn btn-kick" onclick="massServerAction('restart')">RESTART SELECTED</button>
-                <button class="btn btn-ban" onclick="massServerAction('kill')">KILL SELECTED</button>
-            </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th><input type="checkbox" id="selectAllServers" onclick="toggleSelectAllServers()"></th>
-                        <th>Server ID</th>
-                        <th>Mode</th>
-                        <th>Status</th>
-                        <th>Players</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="server-list"></tbody>
-            </table>
-        </div>
-
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('rooms', this)">🎮 Rooms</button>
+        <button class="tab-btn" onclick="switchTab('accounts', this)">👤 Accounts</button>
+        <button class="tab-btn" onclick="switchTab('bans', this)">🚫 Bans</button>
+        <button class="tab-btn" onclick="switchTab('changelogs', this)">📋 Changelogs</button>
+        <button class="tab-btn" onclick="switchTab('server', this)">🖥️ Servers</button>
+        <button class="tab-btn" onclick="switchTab('config', this)">⚙️ Game Config</button>
     </div>
 
-    <script>
-        const urlParams = new URLSearchParams(window.location.search);
-        let authToken = urlParams.get('token') || localStorage.getItem('sessionToken') || '';
-        if (authToken) localStorage.setItem('sessionToken', authToken);
+    <!-- ===================== ROOMS TAB ===================== -->
+    <div id="tab-rooms" class="tab-content active">
+        <div id="view-rooms">
+            <div id="room-list">Loading rooms...</div>
+        </div>
+        <div id="view-players" style="display:none;">
+            <button class="btn btn-blue" onclick="backToRooms()" style="margin-bottom:15px;">← BACK TO ROOMS</button>
+            <h2 id="room-title" style="margin-top:0;">Room Players</h2>
+            <div style="margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
+                <button class="btn btn-kick" onclick="massAction('kick')">KICK SELECTED</button>
+                <button class="btn btn-ban" onclick="massAction('ban')">BAN SELECTED</button>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" id="selectAll" onclick="toggleSelectAll()"></th>
+                        <th>Network</th>
+                        <th>Name</th>
+                        <th>Score</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="player-list"></tbody>
+            </table>
+        </div>
+    </div>
 
-        function getHeaders() {
-            return {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
-            };
+    <!-- ===================== ACCOUNTS TAB ===================== -->
+    <div id="tab-accounts" class="tab-content">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <h2 style="margin:0; border:none; padding:0;">All Accounts</h2>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-purple btn-sm" onclick="expireAllSessions()">⏏ EXPIRE ALL SESSIONS</button>
+                <button class="btn btn-blue btn-sm" onclick="loadAccounts()">↻ REFRESH</button>
+            </div>
+        </div>
+        <input class="search-bar" id="account-search" type="text" placeholder="🔍  Search by username or provider..." oninput="filterAccounts()">
+        <div id="accounts-count" style="color:#666; font-size:13px; margin-bottom:10px;"></div>
+        <table>
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Provider</th>
+                    <th>Coins</th>
+                    <th>Colors</th>
+                    <th>Session</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="account-list"></tbody>
+        </table>
+    </div>
+
+    <!-- ===================== BANS TAB ===================== -->
+    <div id="tab-bans" class="tab-content">
+        <h2>Banned IPs</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>IP Hash</th>
+                    <th>Date</th>
+                    <th>Reason</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="ban-list"></tbody>
+        </table>
+    </div>
+
+    <!-- ===================== CHANGELOGS TAB ===================== -->
+    <div id="tab-changelogs" class="tab-content">
+
+        <!-- Publish Changelog -->
+        <h2>Publish Changelog</h2>
+        <div class="card">
+            <div class="form-group">
+                <label>Title</label>
+                <input type="text" id="cl-title" placeholder="e.g., Update v1.0.5">
+            </div>
+            <div class="form-group">
+                <label>Short Description</label>
+                <input type="text" id="cl-desc" placeholder="Brief summary...">
+            </div>
+            <div class="form-group">
+                <label>Full Markdown Notes</label>
+                <textarea id="cl-markdown" rows="4" placeholder="- Added new tank&#10;- Fixed bug"></textarea>
+            </div>
+            <div class="form-group" style="max-width:180px;">
+                <label>Sort Order (higher = first)</label>
+                <input type="number" id="cl-sort" value="10">
+            </div>
+            <button class="btn btn-green" onclick="postChangelog()">📢 Publish Changelog</button>
+        </div>
+
+        <hr class="section-sep">
+
+        <!-- Downtime Alert -->
+        <h2>⚠️ Publish Downtime Alert</h2>
+        <div class="card">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Title</label>
+                    <input type="text" id="dt-title" placeholder="e.g., Scheduled Maintenance">
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Severity</label>
+                    <select id="dt-severity">
+                        <option value="info">ℹ️ Info</option>
+                        <option value="warning" selected>⚠️ Warning</option>
+                        <option value="critical">🔴 Critical</option>
+                        <option value="maintenance">🔧 Maintenance</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group" style="margin-top:12px;">
+                <label>Message</label>
+                <textarea id="dt-message" rows="3" placeholder="Describe the downtime or issue..."></textarea>
+            </div>
+            <div class="form-group">
+                <label>Estimated End Time (optional)</label>
+                <input type="datetime-local" id="dt-end">
+            </div>
+            <button class="btn btn-kick" onclick="postDowntime()">⚠️ Publish Alert</button>
+        </div>
+
+        <hr class="section-sep">
+
+        <!-- Existing entries -->
+        <h2>All Entries</h2>
+        <table>
+            <thead><tr><th>Type</th><th>Title</th><th>Date</th><th>Sort</th><th>Actions</th></tr></thead>
+            <tbody id="changelog-list"></tbody>
+        </table>
+    </div>
+
+    <!-- ===================== SERVER TAB ===================== -->
+    <div id="tab-server" class="tab-content">
+
+        <!-- System stats -->
+        <h2>System Overview</h2>
+        <div class="stats-grid" id="sys-stats">
+            <div class="stat-card"><div class="stat-val" id="s-players">—</div><div class="stat-lbl">Online Players</div></div>
+            <div class="stat-card"><div class="stat-val" id="s-rooms">—</div><div class="stat-lbl">Active Rooms</div></div>
+            <div class="stat-card"><div class="stat-val" id="s-ram">—</div><div class="stat-lbl">RAM Used</div></div>
+            <div class="stat-card"><div class="stat-val" id="s-uptime">—</div><div class="stat-lbl">Uptime</div></div>
+            <div class="stat-card"><div class="stat-val" id="s-accounts">—</div><div class="stat-lbl">Total Accounts</div></div>
+        </div>
+
+        <!-- Create instance -->
+        <h2>Create Server Instance</h2>
+        <div class="card" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+            <div class="form-group" style="margin-bottom:0; flex:1; min-width:140px;">
+                <label>Server ID</label>
+                <input type="text" id="new-server-id" placeholder="FFA-S3">
+            </div>
+            <div class="form-group" style="margin-bottom:0; flex:1; min-width:140px;">
+                <label>Game Mode</label>
+                <select id="new-server-mode" style="width:100%;padding:10px;border-radius:5px;border:2px solid #ccc;font-family:inherit;font-size:14px;">
+                    <option value="FFA">FFA</option>
+                    <option value="2TDM">2 Teams</option>
+                    <option value="4TDM">4 Teams</option>
+                </select>
+            </div>
+            <button class="btn btn-green" onclick="createServer()">+ CREATE</button>
+        </div>
+
+        <!-- Manage servers -->
+        <h2>Server Management</h2>
+        <div style="margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
+            <button class="btn btn-green" onclick="massServerAction('boot')">▶ BOOT SELECTED</button>
+            <button class="btn btn-kick" onclick="massServerAction('restart')">↺ RESTART SELECTED</button>
+            <button class="btn btn-ban" onclick="massServerAction('kill')">■ KILL SELECTED</button>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th><input type="checkbox" id="selectAllServers" onclick="toggleSelectAllServers()"></th>
+                    <th>Server ID</th>
+                    <th>Mode</th>
+                    <th>Status</th>
+                    <th>Network</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="server-list"></tbody>
+        </table>
+    </div>
+
+    <!-- ===================== GAME CONFIG TAB ===================== -->
+    <div id="tab-config" class="tab-content">
+
+        <!-- Broadcast -->
+        <h2>📢 Broadcast to All Players</h2>
+        <div class="card">
+            <div class="form-group">
+                <label>Message Type</label>
+                <div class="radio-group">
+                    <label><input type="radio" name="bc-type" value="announcement" checked> 📣 Announcement</label>
+                    <label><input type="radio" name="bc-type" value="warning"> ⚠️ Warning</label>
+                    <label><input type="radio" name="bc-type" value="system"> 🔧 System</label>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Message</label>
+                <input type="text" id="bc-message" placeholder="Message visible to all players in-game...">
+            </div>
+            <button class="btn btn-blue" onclick="sendBroadcast()">📢 BROADCAST</button>
+            <span id="bc-result" style="margin-left:12px; font-size:13px; color:#4CAF50;"></span>
+        </div>
+
+        <hr class="section-sep">
+
+        <!-- Game settings -->
+        <h2>⚙️ Game Settings</h2>
+        <div class="card">
+            <div class="toggle-row">
+                <label class="toggle-wrap">
+                    <input type="checkbox" id="cfg-maintenance" onchange="saveConfig()">
+                    <span class="toggle-slider"></span>
+                </label>
+                <div>
+                    <div class="toggle-label">🔧 Maintenance Mode</div>
+                    <div style="font-size:12px; color:#777;">Prevents new players from joining. Existing sessions are unaffected.</div>
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-top:16px;">
+                <label>📌 Message of the Day (MOTD)</label>
+                <input type="text" id="cfg-motd" placeholder="Shown to players on the main menu..." oninput="debounceSaveConfig()">
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>💰 Coin Multiplier: <strong id="cfg-coinmult-val">1x</strong></label>
+                    <input type="range" id="cfg-coinmult" min="0.5" max="5" step="0.5" value="1" oninput="updateRangeLabel('cfg-coinmult','cfg-coinmult-val','x'); debounceSaveConfig()">
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>🤖 Max Bots Per Room: <strong id="cfg-bots-val">24</strong></label>
+                    <input type="range" id="cfg-bots" min="0" max="48" step="4" value="24" oninput="updateRangeLabel('cfg-bots','cfg-bots-val',''); debounceSaveConfig()">
+                </div>
+            </div>
+
+            <div style="margin-top:16px; display:flex; gap:10px; align-items:center;">
+                <button class="btn btn-green" onclick="saveConfig()">💾 Save Config</button>
+                <span id="cfg-result" style="font-size:13px; color:#4CAF50;"></span>
+            </div>
+        </div>
+
+        <hr class="section-sep">
+
+        <!-- Danger Zone -->
+        <h2 style="color:#f14e54;">⚠️ Danger Zone</h2>
+        <div class="card" style="border-color:#f14e54; background:#ffe8e8;">
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                <button class="btn btn-ban" onclick="expireAllSessions()">⏏ Expire ALL Player Sessions</button>
+                <button class="btn btn-ban" onclick="kickAllPlayers()">👢 Kick All Players</button>
+            </div>
+            <p style="margin:12px 0 0; font-size:13px; color:#c83d42;">
+                These actions are immediate and cannot be undone. Expire sessions forces all accounts to re-login.
+            </p>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== EDIT COINS MODAL ===================== -->
+<div class="modal-overlay" id="modal-coins">
+    <div class="modal-box">
+        <h3>✏️ Edit Coins</h3>
+        <div id="modal-coins-name" style="color:#555; margin-bottom:12px;"></div>
+        <div class="form-group">
+            <label>New Coin Balance</label>
+            <input type="number" id="modal-coins-val" min="0" placeholder="0">
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-green" onclick="confirmEditCoins()">Save</button>
+            <button class="btn btn-gray" onclick="closeModal('modal-coins')">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== ACCOUNT DETAIL MODAL ===================== -->
+<div class="modal-overlay" id="modal-account">
+    <div class="modal-box" style="width:500px;">
+        <h3>👤 Account Details</h3>
+        <div id="modal-account-content"></div>
+        <div class="modal-actions">
+            <button class="btn btn-gray" onclick="closeModal('modal-account')">Close</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ===================== AUTH =====================
+    const urlParams = new URLSearchParams(window.location.search);
+    let authToken = urlParams.get('token') || localStorage.getItem('sessionToken') || '';
+    if (authToken) localStorage.setItem('sessionToken', authToken);
+
+    function getHeaders() {
+        return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` };
+    }
+
+    async function apiCall(endpoint, method = 'GET', body = null) {
+        const options = { method, headers: getHeaders() };
+        if (body) options.body = JSON.stringify(body);
+        const res = await fetch(endpoint, options);
+        if (res.status === 401 || res.status === 403) {
+            alert("Unauthorized! Redirecting to home.");
+            window.location.href = '/';
+            throw new Error("Auth failed");
         }
+        return res.json();
+    }
 
-        function switchTab(tabId, btn) {
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-            document.getElementById('tab-' + tabId).classList.add('active');
-            btn.classList.add('active');
+    // ===================== TAB SWITCHING =====================
+    function switchTab(tabId, btn) {
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+        document.getElementById('tab-' + tabId).classList.add('active');
+        btn.classList.add('active');
 
-            if (tabId === 'rooms') loadRooms();
-            if (tabId === 'bans') loadBans();
-            if (tabId === 'changelogs') loadChangelogs();
-            if (tabId === 'server') loadServers();
-        }
+        if (tabId === 'rooms')      loadRooms();
+        if (tabId === 'accounts')   loadAccounts();
+        if (tabId === 'bans')       loadBans();
+        if (tabId === 'changelogs') loadChangelogs();
+        if (tabId === 'server')     { loadServers(); loadServerStats(); }
+        if (tabId === 'config')     loadConfig();
+    }
 
-        let currentRoomId = null;
+    // ===================== ROOMS =====================
+    let currentRoomId = null;
 
-        async function apiCall(endpoint, method = 'GET', body = null) {
-            const options = { method, headers: getHeaders() };
-            if (body) options.body = JSON.stringify(body);
-            const res = await fetch(endpoint, options);
-            if (res.status === 401 || res.status === 403) {
-                alert("Unauthorized! Redirecting to home.");
-                window.location.href = '/';
-                throw new Error("Auth failed");
-            }
-            return res.json();
-        }
+    async function loadRooms() {
+        document.getElementById('view-players').style.display = 'none';
+        document.getElementById('view-rooms').style.display = 'block';
+        const rooms = await apiCall('/api/admin/rooms');
 
-        async function loadRooms() {
-            document.getElementById('view-players').style.display = 'none';
-            document.getElementById('view-rooms').style.display = 'block';
-            const rooms = await apiCall('/api/admin/rooms');
-            
-            document.getElementById('room-list').innerHTML = rooms.map(r => `
+        document.getElementById('room-list').innerHTML = rooms.length
+            ? rooms.map(r => `
                 <div class="room-card" onclick="loadPlayers('${r.id}')">
                     <div>
-                        <strong style="font-size: 18px; color: #00b2e1;">${r.id}</strong>
-                        <span style="color: #888; margin-left: 10px; font-size: 14px;">${r.mode}</span>
+                        <strong style="font-size:18px;color:#00b2e1;">${r.id}</strong>
+                        <span style="color:#888;margin-left:10px;font-size:14px;">${r.mode}</span>
                     </div>
-                    <div style="font-weight: bold; font-size: 18px;">${r.players} 👤</div>
+                    <div style="font-weight:bold;font-size:18px;">${r.players} 👤</div>
                 </div>
-            `).join('');
-        }
+            `).join('')
+            : '<div class="empty-state">No active rooms found.</div>';
+    }
 
-        async function loadPlayers(roomId) {
-            currentRoomId = roomId;
-            document.getElementById('view-rooms').style.display = 'none';
-            document.getElementById('view-players').style.display = 'block';
-            document.getElementById('room-title').innerText = `Players in ${roomId}`;
+    function backToRooms() {
+        document.getElementById('view-players').style.display = 'none';
+        document.getElementById('view-rooms').style.display = 'block';
+        loadRooms();
+    }
 
-            const data = await apiCall(`/api/admin/rooms/${roomId}`);
-            const tbody = document.getElementById('player-list');
-            
-            tbody.innerHTML = data.players.map(p => {
-                const flagHtml = p.country !== 'xx' 
-                    ? `<img src="https://flagcdn.com/w20/${p.country}.png" alt="${p.country}" title="${p.country.toUpperCase()}" style="vertical-align: middle; border-radius: 2px; margin-right: 5px; box-shadow: 0 0 2px rgba(0,0,0,0.5);">` 
-                    : `🏳️ `;
-                return `
-                <tr>
+    async function loadPlayers(roomId) {
+        currentRoomId = roomId;
+        document.getElementById('view-rooms').style.display = 'none';
+        document.getElementById('view-players').style.display = 'block';
+        document.getElementById('room-title').innerText = `Players in ${roomId}`;
+
+        const data = await apiCall(`/api/admin/rooms/${roomId}`);
+        const tbody = document.getElementById('player-list');
+
+        tbody.innerHTML = data.players.length
+            ? data.players.map(p => {
+                const flagHtml = p.country !== 'xx'
+                    ? `<img src="https://flagcdn.com/w20/${p.country}.png" alt="${p.country}" title="${p.country.toUpperCase()}" style="vertical-align:middle;border-radius:2px;margin-right:5px;box-shadow:0 0 2px rgba(0,0,0,0.5);">`
+                    : '🏳️ ';
+                return `<tr>
                     <td style="text-align:center;"><input type="checkbox" class="player-chk" data-id="${p.id}" data-hash="${p.ipHash}"></td>
-                    <td style="color:#aaa; font-family:monospace;">${flagHtml}${p.ipHash}</td>
-                    <td style="color:${p.team === 1 ? '#00b2e1' : (p.team === 2 ? '#f14e54' : 'white')}">${p.name || "Unnamed"}</td>
-                    <td style="font-weight: bold; color: #40f252;">${p.score.toLocaleString()}</td>
+                    <td style="color:#aaa;font-family:monospace;font-size:13px;">${flagHtml}${p.ipHash}</td>
+                    <td style="color:${p.team===1?'#00b2e1':p.team===2?'#f14e54':'white'};font-weight:bold;">${p.name||'Unnamed'}</td>
+                    <td style="font-weight:bold;color:#40f252;">${p.score.toLocaleString()}</td>
                     <td>
-                        <button class="btn btn-blue" style="padding: 5px 10px; font-size: 12px; margin-right: 5px;" onclick="takeAction('rename', ${p.id}, '${p.ipHash}')">RENAME</button>
-                        <button class="btn btn-kick" style="padding: 5px 10px; font-size: 12px;" onclick="takeAction('kick', ${p.id}, '${p.ipHash}')">KICK</button>
-                        <button class="btn btn-ban" style="padding: 5px 10px; font-size: 12px;" onclick="takeAction('ban', ${p.id}, '${p.ipHash}')">BAN</button>
+                        <button class="btn btn-blue btn-sm" onclick="takeAction('rename',${p.id},'${p.ipHash}')">RENAME</button>
+                        <button class="btn btn-kick btn-sm" style="margin:0 3px;" onclick="takeAction('kick',${p.id},'${p.ipHash}')">KICK</button>
+                        <button class="btn btn-ban btn-sm" onclick="takeAction('ban',${p.id},'${p.ipHash}')">BAN</button>
                     </td>
-                </tr>
-                `;
-            }).join('');
-            
-            if (data.players.length === 0) tbody.innerHTML = `<tr><td colspan="5" style="text-align: center;">No players</td></tr>`;
+                </tr>`;
+            }).join('')
+            : '<tr><td colspan="5" class="empty-state">No players in this room.</td></tr>';
+    }
+
+    async function takeAction(action, playerId, ipHash) {
+        let reason = '', newName = '';
+        if (action === 'ban') {
+            reason = prompt(`BAN ${ipHash}? Enter reason:`);
+            if (reason === null) return;
+        }
+        if (action === 'rename') {
+            newName = prompt("Enter new name:", "Player");
+            if (newName === null) return;
+        }
+        await apiCall('/api/admin/action', 'POST', { action, roomId: currentRoomId, playerId, ipHash, reason, newName });
+        loadPlayers(currentRoomId);
+    }
+
+    function toggleSelectAll() {
+        const checked = document.getElementById('selectAll').checked;
+        document.querySelectorAll('.player-chk').forEach(c => c.checked = checked);
+    }
+
+    async function massAction(action) {
+        const selected = Array.from(document.querySelectorAll('.player-chk:checked'));
+        if (!selected.length) return alert("Select at least one player.");
+        let reason = '';
+        if (action === 'ban') {
+            reason = prompt(`Banning ${selected.length} players. Enter reason:`);
+            if (reason === null) return;
+        }
+        for (let chk of selected) {
+            await apiCall('/api/admin/action', 'POST', {
+                action, roomId: currentRoomId,
+                playerId: parseInt(chk.dataset.id), ipHash: chk.dataset.hash, reason
+            });
+        }
+        loadPlayers(currentRoomId);
+    }
+
+    // ===================== ACCOUNTS =====================
+    let allAccounts = [];
+
+    async function loadAccounts() {
+        document.getElementById('account-list').innerHTML = '<tr><td colspan="6" class="empty-state">Loading...</td></tr>';
+        allAccounts = await apiCall('/api/admin/accounts');
+        renderAccounts(allAccounts);
+    }
+
+    function renderAccounts(accounts) {
+        const count = document.getElementById('accounts-count');
+        count.textContent = `Showing ${accounts.length} account${accounts.length !== 1 ? 's' : ''}`;
+
+        const tbody = document.getElementById('account-list');
+        if (!accounts.length) {
+            tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No accounts found.</td></tr>';
+            return;
         }
 
-        async function takeAction(action, playerId, ipHash) {
-            let reason = "";
-            let newName = "";
-            if (action === 'ban') {
-                reason = prompt(`Are you sure you want to BAN ${ipHash}? Enter reason:`);
-                if (reason === null) return; 
-            }
-            if (action === 'rename') {
-                newName = prompt("Enter new name (leave blank to clear):", "Player");
-                if (newName === null) return;
-            }
-            await apiCall('/api/admin/action', 'POST', { action, roomId: currentRoomId, playerId, ipHash, reason, newName });
-            loadPlayers(currentRoomId);
-        }
+        tbody.innerHTML = accounts.map(a => {
+            const colors = (a.unlocked_colors || ['#ffffff']);
+            const swatches = colors.slice(0, 8).map(c =>
+                `<div class="color-swatch" style="background:${c};" title="${c}"></div>`
+            ).join('') + (colors.length > 8 ? `<span style="color:#aaa;font-size:11px;">+${colors.length-8}</span>` : '');
 
-        function toggleSelectAll() {
-            const checked = document.getElementById('selectAll').checked;
-            document.querySelectorAll('.player-chk').forEach(c => c.checked = checked);
-        }
+            const providerBadge = a.provider === 'discord'
+                ? `<span class="badge badge-discord">Discord</span>`
+                : `<span class="badge badge-google">Google</span>`;
 
-        async function massAction(action) {
-            const selected = Array.from(document.querySelectorAll('.player-chk:checked'));
-            if (selected.length === 0) return alert("Select at least one player.");
-            
-            let reason = "";
-            if (action === 'ban') {
-                reason = prompt(`Banning ${selected.length} players. Enter reason:`);
-                if (reason === null) return;
-            }
+            const sessionBadge = a.has_session
+                ? `<span class="badge badge-active">Active</span>`
+                : `<span class="badge badge-offline">Offline</span>`;
 
-            for (let chk of selected) {
-                await apiCall('/api/admin/action', 'POST', { 
-                    action, roomId: currentRoomId, playerId: parseInt(chk.dataset.id), ipHash: chk.dataset.hash, reason 
-                });
-            }
-            loadPlayers(currentRoomId);
-        }
+            return `<tr>
+                <td>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <img class="avatar" src="${a.pfp||''}" onerror="this.src='data:image/svg+xml,<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 40 40&quot;><rect width=&quot;40&quot; height=&quot;40&quot; fill=&quot;%23555&quot; rx=&quot;20&quot;/></svg>'">
+                        <div>
+                            <div style="font-weight:bold;">${escHtml(a.username||'Unknown')}</div>
+                            <div style="font-size:11px;color:#aaa;font-family:monospace;">${a.id}</div>
+                        </div>
+                    </div>
+                </td>
+                <td>${providerBadge}</td>
+                <td style="font-weight:bold;color:#f0c020;">🪙 ${(a.coins||0).toLocaleString()}</td>
+                <td><div class="color-swatches">${swatches}</div></td>
+                <td>${sessionBadge}</td>
+                <td>
+                    <button class="btn btn-blue btn-sm" style="margin:2px;" onclick='showAccountDetail(${JSON.stringify(a)})'>VIEW</button>
+                    <button class="btn btn-green btn-sm" style="margin:2px;" onclick="openEditCoins('${a.id}','${escHtml(a.username||'User')}',${a.coins||0})">COINS</button>
+                    <button class="btn btn-kick btn-sm" style="margin:2px;" onclick="resetAccount('${a.id}','${escHtml(a.username||'User')}')">RESET</button>
+                    <button class="btn btn-gray btn-sm" style="margin:2px;" onclick="expireSession('${a.id}','${escHtml(a.username||'User')}')">EXPIRE</button>
+                    <button class="btn btn-ban btn-sm" style="margin:2px;" onclick="deleteAccount('${a.id}','${escHtml(a.username||'User')}')">DELETE</button>
+                </td>
+            </tr>`;
+        }).join('');
+    }
 
-        async function loadBans() {
-            const bans = await apiCall('/api/admin/bans');
-            document.getElementById('ban-list').innerHTML = bans.map(b => `
-                <tr>
-                    <td style="font-family:monospace; color:#aaa;">${b.ip_hash}</td>
-                    <td>${new Date(b.timestamp).toLocaleString()}</td>
-                    <td>${b.reason || 'No reason'}</td>
-                    <td><button class="btn btn-green" style="padding: 5px 10px; font-size: 12px;" onclick="unban('${b.ip_hash}')">UNBAN</button></td>
-                </tr>
-            `).join('');
-            if(bans.length === 0) document.getElementById('ban-list').innerHTML = '<tr><td colspan="4" style="text-align:center;">No banned IPs</td></tr>';
-        }
+    function filterAccounts() {
+        const q = document.getElementById('account-search').value.toLowerCase();
+        if (!q) { renderAccounts(allAccounts); return; }
+        renderAccounts(allAccounts.filter(a =>
+            (a.username||'').toLowerCase().includes(q) ||
+            (a.provider||'').toLowerCase().includes(q) ||
+            (a.id||'').toLowerCase().includes(q)
+        ));
+    }
 
-        async function unban(ipHash) {
-            if(!confirm("Lift ban for " + ipHash + "?")) return;
-            await apiCall('/api/admin/unban', 'POST', { ipHash });
-            loadBans();
-        }
+    function showAccountDetail(a) {
+        const colors = a.unlocked_colors || ['#ffffff'];
+        const swatches = colors.map(c =>
+            `<div class="color-swatch" style="background:${c};width:22px;height:22px;" title="${c}"></div>`
+        ).join('');
 
-        async function loadChangelogs() {
-            const logs = await apiCall('/api/changelogs');
-            document.getElementById('changelog-list').innerHTML = logs.map(l => `
-                <tr>
-                    <td style="font-weight:bold;">${l.title}</td>
+        document.getElementById('modal-account-content').innerHTML = `
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
+                <img class="avatar" src="${a.pfp||''}" style="width:56px;height:56px;" onerror="this.src='data:image/svg+xml,<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 40 40&quot;><rect width=&quot;40&quot; height=&quot;40&quot; fill=&quot;%23555&quot; rx=&quot;20&quot;/></svg>'">
+                <div>
+                    <div style="font-size:20px;font-weight:bold;">${escHtml(a.username||'Unknown')}</div>
+                    <div style="color:#888;font-size:13px;">${a.id}</div>
+                </div>
+            </div>
+            <table style="background:transparent;">
+                <tr style="background:transparent;"><td style="border:none;color:#555;padding:4px 8px 4px 0;">Provider</td><td style="border:none;padding:4px 0;">${a.provider === 'discord' ? '<span class="badge badge-discord">Discord</span>' : '<span class="badge badge-google">Google</span>'}</td></tr>
+                <tr style="background:transparent;"><td style="border:none;color:#555;padding:4px 8px 4px 0;">Coins</td><td style="border:none;padding:4px 0;font-weight:bold;color:#c8860a;">🪙 ${(a.coins||0).toLocaleString()}</td></tr>
+                <tr style="background:transparent;"><td style="border:none;color:#555;padding:4px 8px 4px 0;">Session</td><td style="border:none;padding:4px 0;">${a.has_session ? '<span class="badge badge-active">Active</span>' : '<span class="badge badge-offline">No Session</span>'}</td></tr>
+                <tr style="background:transparent;"><td style="border:none;color:#555;padding:4px 8px 4px 0;">Selected Color</td><td style="border:none;padding:4px 0;"><div style="display:flex;align-items:center;gap:6px;"><div class="color-swatch" style="background:${a.selected_color||'#fff'};width:22px;height:22px;"></div>${a.selected_color||'#ffffff'}</div></td></tr>
+            </table>
+            <div style="margin-top:14px;">
+                <div style="color:#555;font-size:13px;margin-bottom:6px;font-weight:bold;">UNLOCKED COLORS (${colors.length})</div>
+                <div class="color-swatches">${swatches}</div>
+            </div>
+        `;
+        document.getElementById('modal-account').classList.add('open');
+    }
+
+    // Edit coins modal
+    let editCoinsUserId = null;
+    function openEditCoins(id, username, currentCoins) {
+        editCoinsUserId = id;
+        document.getElementById('modal-coins-name').textContent = `Account: ${username}`;
+        document.getElementById('modal-coins-val').value = currentCoins;
+        document.getElementById('modal-coins').classList.add('open');
+    }
+    async function confirmEditCoins() {
+        const newCoins = parseInt(document.getElementById('modal-coins-val').value);
+        if (isNaN(newCoins) || newCoins < 0) return alert("Enter a valid coin amount.");
+        await apiCall(`/api/admin/accounts/${editCoinsUserId}`, 'PATCH', { coins: newCoins });
+        closeModal('modal-coins');
+        loadAccounts();
+    }
+
+    async function resetAccount(id, username) {
+        if (!confirm(`Reset account for "${username}"? This will clear their coins and unlocked colors.`)) return;
+        await apiCall(`/api/admin/accounts/${id}/reset`, 'POST');
+        loadAccounts();
+    }
+
+    async function deleteAccount(id, username) {
+        if (!confirm(`PERMANENTLY DELETE account "${username}"? This cannot be undone.`)) return;
+        if (!confirm(`Are you absolutely sure you want to delete "${username}"?`)) return;
+        await apiCall(`/api/admin/accounts/${id}`, 'DELETE');
+        loadAccounts();
+    }
+
+    async function expireSession(id, username) {
+        if (!confirm(`Expire session for "${username}"? They will need to log in again.`)) return;
+        await apiCall(`/api/admin/accounts/${id}/expire`, 'POST');
+        loadAccounts();
+    }
+
+    async function expireAllSessions() {
+        if (!confirm("Expire ALL player sessions? Every user will be logged out.")) return;
+        await apiCall('/api/admin/expire-all-sessions', 'POST');
+        alert("All sessions expired.");
+        if (document.getElementById('tab-accounts').classList.contains('active')) loadAccounts();
+    }
+
+    function closeModal(id) {
+        document.getElementById(id).classList.remove('open');
+    }
+
+    // Close modal on overlay click
+    document.querySelectorAll('.modal-overlay').forEach(overlay => {
+        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('open'); });
+    });
+
+    function escHtml(str) {
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
+
+    // ===================== BANS =====================
+    async function loadBans() {
+        const bans = await apiCall('/api/admin/bans');
+        const tbody = document.getElementById('ban-list');
+        tbody.innerHTML = bans.length
+            ? bans.map(b => `<tr>
+                <td style="font-family:monospace;color:#aaa;">${b.ip_hash}</td>
+                <td>${new Date(b.timestamp).toLocaleString()}</td>
+                <td>${b.reason||'No reason'}</td>
+                <td><button class="btn btn-green btn-sm" onclick="unban('${b.ip_hash}')">UNBAN</button></td>
+            </tr>`).join('')
+            : '<tr><td colspan="4" class="empty-state">No banned IPs.</td></tr>';
+    }
+
+    async function unban(ipHash) {
+        if (!confirm("Lift ban for " + ipHash + "?")) return;
+        await apiCall('/api/admin/unban', 'POST', { ipHash });
+        loadBans();
+    }
+
+    // ===================== CHANGELOGS =====================
+    async function loadChangelogs() {
+        const logs = await apiCall('/api/changelogs');
+        const tbody = document.getElementById('changelog-list');
+        tbody.innerHTML = logs.length
+            ? logs.map(l => {
+                const typeBadge = l.type === 'downtime'
+                    ? `<span class="badge badge-${l.markdown?.split('\n')[0]?.replace('severity:','')||'warning'}">${l.markdown?.split('\n')[0]?.replace('severity:','').toUpperCase()||'DOWNTIME'}</span>`
+                    : `<span class="badge badge-changelog">CHANGELOG</span>`;
+                return `<tr>
+                    <td>${typeBadge}</td>
+                    <td style="font-weight:bold;">${escHtml(l.title)}</td>
                     <td>${new Date(l.date).toLocaleDateString()}</td>
                     <td>${l.sort_order}</td>
-                    <td><button class="btn btn-ban" style="padding: 5px 10px; font-size: 12px;" onclick="deleteChangelog(${l.id})">DELETE</button></td>
-                </tr>
-            `).join('');
-        }
+                    <td><button class="btn btn-ban btn-sm" onclick="deleteChangelog(${l.id})">DELETE</button></td>
+                </tr>`;
+            }).join('')
+            : '<tr><td colspan="5" class="empty-state">No entries yet.</td></tr>';
+    }
 
-        async function loadServers() {
-            const servers = await apiCall('/api/admin/server_instances');
-            document.getElementById('server-list').innerHTML = servers.map(s => `
-                <tr>
+    async function postChangelog() {
+        const body = {
+            title: document.getElementById('cl-title').value,
+            description: document.getElementById('cl-desc').value,
+            markdown: document.getElementById('cl-markdown').value,
+            sort_order: parseInt(document.getElementById('cl-sort').value) || 0
+        };
+        if (!body.title) return alert("Title is required!");
+        await apiCall('/api/admin/changelogs', 'POST', body);
+        ['cl-title','cl-desc','cl-markdown'].forEach(id => document.getElementById(id).value = '');
+        document.getElementById('cl-sort').value = 10;
+        loadChangelogs();
+    }
+
+    async function postDowntime() {
+        const body = {
+            title: document.getElementById('dt-title').value,
+            message: document.getElementById('dt-message').value,
+            severity: document.getElementById('dt-severity').value,
+            estimated_end: document.getElementById('dt-end').value
+        };
+        if (!body.title || !body.message) return alert("Title and message are required!");
+        await apiCall('/api/admin/downtime', 'POST', body);
+        alert("Downtime alert published!");
+        ['dt-title','dt-message','dt-end'].forEach(id => document.getElementById(id).value = '');
+        loadChangelogs();
+    }
+
+    async function deleteChangelog(id) {
+        if (!confirm("Delete this entry?")) return;
+        await apiCall('/api/admin/changelogs/' + id, 'DELETE');
+        loadChangelogs();
+    }
+
+    // ===================== SERVERS =====================
+    async function loadServerStats() {
+        try {
+            const stats = await apiCall('/api/admin/stats');
+            document.getElementById('s-players').textContent = stats.totalPlayers;
+            document.getElementById('s-rooms').textContent = stats.totalRooms;
+            document.getElementById('s-ram').textContent = stats.memory.usedMB + ' MB';
+            document.getElementById('s-uptime').textContent = formatUptime(stats.uptime);
+            document.getElementById('s-accounts').textContent = stats.totalAccounts.toLocaleString();
+        } catch(e) {}
+    }
+
+    function formatUptime(secs) {
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    }
+
+    async function loadServers() {
+        const servers = await apiCall('/api/admin/server_instances');
+        const tbody = document.getElementById('server-list');
+        tbody.innerHTML = servers.length
+            ? servers.map(s => {
+                const humanPlayers = s.players;
+                const statusColor = s.status === 'running' ? '#4CAF50' : '#f14e54';
+                const tickInfo = s.avgTickMs != null
+                    ? `<span class="info-pill">⚡ ${s.avgTickMs}ms</span>` : '';
+                const ramInfo = s.roomRamMB != null
+                    ? `<span class="info-pill">📊 ~${s.roomRamMB}MB</span>` : '';
+
+                return `<tr>
                     <td style="text-align:center;"><input type="checkbox" class="server-chk" value="${s.id}"></td>
-                    <td style="font-weight:bold; color:#00b2e1;">${s.id}</td>
+                    <td style="font-weight:bold;color:#00b2e1;">${s.id}</td>
                     <td>${s.mode}</td>
-                    <td style="font-weight:bold; color:${s.status === 'running' ? '#4CAF50' : '#f14e54'};">${s.status.toUpperCase()}</td>
-                    <td style="font-weight: bold;">${s.players} 👤</td>
+                    <td style="font-weight:bold;color:${statusColor};">${s.status.toUpperCase()}</td>
                     <td>
-                        ${s.status === 'stopped' 
-                            ? `<button class="btn btn-green" style="padding: 5px 10px; font-size: 12px;" onclick="singleServerAction('${s.id}', 'boot')">BOOT</button>
-                               <button class="btn btn-ban" style="padding: 5px 10px; font-size: 12px; margin-left: 5px;" onclick="singleServerAction('${s.id}', 'delete')">DELETE</button>`
-                            : `<button class="btn btn-kick" style="padding: 5px 10px; font-size: 12px;" onclick="singleServerAction('${s.id}', 'restart')">RESTART</button>
-                               <button class="btn btn-ban" style="padding: 5px 10px; font-size: 12px; margin-left: 5px;" onclick="singleServerAction('${s.id}', 'kill')">KILL</button>`
+                        <span class="info-pill">👤 ${humanPlayers}</span>
+                        ${tickInfo}${ramInfo}
+                    </td>
+                    <td>
+                        ${s.status === 'stopped'
+                            ? `<button class="btn btn-green btn-sm" onclick="singleServerAction('${s.id}','boot')">BOOT</button>
+                               <button class="btn btn-ban btn-sm" style="margin-left:4px;" onclick="singleServerAction('${s.id}','delete')">DELETE</button>`
+                            : `<button class="btn btn-kick btn-sm" onclick="singleServerAction('${s.id}','restart')">RESTART</button>
+                               <button class="btn btn-ban btn-sm" style="margin-left:4px;" onclick="singleServerAction('${s.id}','kill')">KILL</button>`
                         }
                     </td>
-                </tr>
-            `).join('');
-        }
+                </tr>`;
+            }).join('')
+            : '<tr><td colspan="6" class="empty-state">No server instances.</td></tr>';
+    }
 
-        async function createServer() {
-            const id = document.getElementById('new-server-id').value.trim();
-            const mode = document.getElementById('new-server-mode').value;
-            if (!id) return alert("Please enter a Server ID.");
-            try {
-                const result = await apiCall('/api/admin/server_instances/create', 'POST', { id, mode });
-                if (result.error) throw new Error(result.error);
-                document.getElementById('new-server-id').value = '';
-                loadServers();
-            } catch (err) {
-                alert(err.message || "Failed to create server");
-            }
-        }
-
-        function toggleSelectAllServers() {
-            const checked = document.getElementById('selectAllServers').checked;
-            document.querySelectorAll('.server-chk').forEach(c => c.checked = checked);
-        }
-
-        async function massServerAction(action) {
-            const selected = Array.from(document.querySelectorAll('.server-chk:checked')).map(c => c.value);
-            if (selected.length === 0) return alert("Select at least one server.");
-            if (!confirm(`Are you sure you want to ${action.toUpperCase()} ${selected.length} servers?`)) return;
-            
-            await apiCall('/api/admin/server_instances/action', 'POST', { action, serverIds: selected });
+    async function createServer() {
+        const id = document.getElementById('new-server-id').value.trim();
+        const mode = document.getElementById('new-server-mode').value;
+        if (!id) return alert("Please enter a Server ID.");
+        try {
+            const result = await apiCall('/api/admin/server_instances/create', 'POST', { id, mode });
+            if (result.error) throw new Error(result.error);
+            document.getElementById('new-server-id').value = '';
             loadServers();
+        } catch(err) {
+            alert(err.message || "Failed to create server");
         }
+    }
 
-        async function singleServerAction(id, action) {
-            if (!confirm(`Are you sure you want to ${action.toUpperCase()} server ${id}?`)) return;
-            await apiCall('/api/admin/server_instances/action', 'POST', { action, serverIds: [id] });
-            loadServers();
-        }
+    function toggleSelectAllServers() {
+        const checked = document.getElementById('selectAllServers').checked;
+        document.querySelectorAll('.server-chk').forEach(c => c.checked = checked);
+    }
 
-        async function postChangelog() {
-            const body = {
-                title: document.getElementById('cl-title').value,
-                description: document.getElementById('cl-desc').value,
-                markdown: document.getElementById('cl-markdown').value,
-                sort_order: parseInt(document.getElementById('cl-sort').value) || 0
-            };
-            if(!body.title) return alert("Title is required!");
-            await apiCall('/api/admin/changelogs', 'POST', body);
-            alert("Published!");
-            loadChangelogs();
-        }
+    async function massServerAction(action) {
+        const selected = Array.from(document.querySelectorAll('.server-chk:checked')).map(c => c.value);
+        if (!selected.length) return alert("Select at least one server.");
+        if (!confirm(`${action.toUpperCase()} ${selected.length} server(s)?`)) return;
+        await apiCall('/api/admin/server_instances/action', 'POST', { action, serverIds: selected });
+        loadServers();
+    }
 
-        async function deleteChangelog(id) {
-            if(!confirm("Delete this changelog?")) return;
-            await apiCall('/api/admin/changelogs/' + id, 'DELETE');
-            loadChangelogs();
-        }
+    async function singleServerAction(id, action) {
+        if (!confirm(`${action.toUpperCase()} server ${id}?`)) return;
+        await apiCall('/api/admin/server_instances/action', 'POST', { action, serverIds: [id] });
+        loadServers();
+    }
 
-        loadRooms();
-    </script>
+    // ===================== GAME CONFIG =====================
+    let configSaveTimer = null;
+
+    async function loadConfig() {
+        try {
+            const cfg = await apiCall('/api/admin/game-config');
+            document.getElementById('cfg-maintenance').checked = cfg.maintenance_mode === '1';
+            document.getElementById('cfg-motd').value = cfg.motd || '';
+            const mult = parseFloat(cfg.coin_multiplier) || 1;
+            document.getElementById('cfg-coinmult').value = mult;
+            document.getElementById('cfg-coinmult-val').textContent = mult + 'x';
+            const bots = parseInt(cfg.max_bots) || 24;
+            document.getElementById('cfg-bots').value = bots;
+            document.getElementById('cfg-bots-val').textContent = bots;
+        } catch(e) {}
+    }
+
+    async function saveConfig() {
+        const cfg = {
+            maintenance_mode: document.getElementById('cfg-maintenance').checked ? '1' : '0',
+            motd: document.getElementById('cfg-motd').value,
+            coin_multiplier: document.getElementById('cfg-coinmult').value,
+            max_bots: document.getElementById('cfg-bots').value
+        };
+        await apiCall('/api/admin/game-config', 'POST', cfg);
+        const el = document.getElementById('cfg-result');
+        el.textContent = '✓ Saved!';
+        setTimeout(() => el.textContent = '', 2000);
+    }
+
+    function debounceSaveConfig() {
+        clearTimeout(configSaveTimer);
+        configSaveTimer = setTimeout(saveConfig, 800);
+    }
+
+    function updateRangeLabel(inputId, labelId, suffix) {
+        document.getElementById(labelId).textContent = document.getElementById(inputId).value + suffix;
+    }
+
+    // ===================== BROADCAST =====================
+    async function sendBroadcast() {
+        const message = document.getElementById('bc-message').value.trim();
+        if (!message) return alert("Message cannot be empty.");
+        const type = document.querySelector('input[name="bc-type"]:checked')?.value || 'announcement';
+        const result = await apiCall('/api/admin/broadcast', 'POST', { message, type });
+        const el = document.getElementById('bc-result');
+        el.textContent = `✓ Sent to ${result.sent || 0} player(s)`;
+        document.getElementById('bc-message').value = '';
+        setTimeout(() => el.textContent = '', 3000);
+    }
+
+    // ===================== KICK ALL =====================
+    async function kickAllPlayers() {
+        if (!confirm("Kick ALL players from all rooms? They can rejoin.")) return;
+        await apiCall('/api/admin/kick-all', 'POST');
+        alert("All players kicked.");
+    }
+
+    // ===================== INIT =====================
+    loadRooms();
+</script>
 </body>
 </html>
