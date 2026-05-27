@@ -37,6 +37,8 @@ db.prepare(`
 `).run();
 
 const migrations = [
+    `ALTER TABLE changelogs ADD COLUMN type TEXT DEFAULT 'changelog'`,
+    `ALTER TABLE changelogs ADD COLUMN estimated_end INTEGER`
 ];
 
 migrations.forEach(query => {
@@ -587,6 +589,139 @@ app.get('/api/achievements', (req, res) => {
         res.status(500).json({ error: 'Internal Server Error', details: dbError.message });
     }
 });
+// ===================== ADMIN: STATS =====================
+
+app.get('/api/admin/stats', requireAdmin, (req, res) => {
+    const totalPlayers = Object.values(rooms).reduce((sum, r) => sum + r.clients.filter(c => c.player).length, 0);
+    const totalRooms = Object.values(rooms).filter(r => r.status === 'running').length;
+    const memUsage = process.memoryUsage();
+    const usedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+    const totalAccounts = db.prepare("SELECT COUNT(*) as count FROM users").get().count;
+    res.json({
+        totalPlayers,
+        totalRooms,
+        memory: { usedMB },
+        uptime: Math.floor(process.uptime()),
+        totalAccounts
+    });
+});
+
+// ===================== ADMIN: ACCOUNTS =====================
+
+app.get('/api/admin/accounts', requireAdmin, (req, res) => {
+    const accounts = db.prepare("SELECT id, username, pfp, provider, coins, unlocked_colors, selected_color, session_token FROM users ORDER BY username").all();
+    const result = accounts.map(a => {
+        let colors = ['#ffffff'];
+        try { colors = JSON.parse(a.unlocked_colors); } catch(e) {}
+        return {
+            id: a.id,
+            username: a.username,
+            pfp: a.pfp,
+            provider: a.provider,
+            coins: a.coins,
+            unlocked_colors: colors,
+            selected_color: a.selected_color,
+            has_session: !!a.session_token
+        };
+    });
+    res.json(result);
+});
+
+app.patch('/api/admin/accounts/:id', requireAdmin, (req, res) => {
+    const coins = parseInt(req.body.coins);
+    if (isNaN(coins) || coins < 0) return res.status(400).json({ error: "Invalid coins value" });
+    db.prepare("UPDATE users SET coins = ? WHERE id = ?").run(coins, req.params.id);
+    res.json({ success: true });
+});
+
+app.post('/api/admin/accounts/:id/reset', requireAdmin, (req, res) => {
+    db.prepare("UPDATE users SET coins = 0, unlocked_colors = ?, selected_color = '#ffffff' WHERE id = ?")
+        .run(JSON.stringify(['#ffffff']), req.params.id);
+    res.json({ success: true });
+});
+
+app.delete('/api/admin/accounts/:id', requireAdmin, (req, res) => {
+    db.prepare("DELETE FROM users WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+});
+
+app.post('/api/admin/accounts/:id/expire', requireAdmin, (req, res) => {
+    db.prepare("UPDATE users SET session_token = NULL WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+});
+
+app.post('/api/admin/expire-all-sessions', requireAdmin, (req, res) => {
+    db.prepare("UPDATE users SET session_token = NULL").run();
+    res.json({ success: true });
+});
+
+// ===================== ADMIN: GAME CONFIG =====================
+
+app.get('/api/admin/game-config', requireAdmin, (req, res) => {
+    const keys = ['maintenance_mode', 'motd', 'coin_multiplier', 'max_bots'];
+    const config = {};
+    keys.forEach(k => {
+        const row = db.prepare("SELECT value FROM bot_config WHERE key = ?").get(k);
+        config[k] = row ? row.value : null;
+    });
+    res.json(config);
+});
+
+app.post('/api/admin/game-config', requireAdmin, (req, res) => {
+    const { maintenance_mode, motd, coin_multiplier, max_bots } = req.body;
+    const entries = { maintenance_mode, motd, coin_multiplier, max_bots };
+    const upsert = db.prepare("INSERT OR REPLACE INTO bot_config (key, value) VALUES (?, ?)");
+    for (const [k, v] of Object.entries(entries)) {
+        if (v !== undefined) upsert.run(k, String(v));
+    }
+    res.json({ success: true });
+});
+
+// ===================== ADMIN: BROADCAST =====================
+
+app.post('/api/admin/broadcast', requireAdmin, (req, res) => {
+    const { message, type } = req.body;
+    if (!message) return res.status(400).json({ error: "Message is required" });
+    let sent = 0;
+    for (const room of Object.values(rooms)) {
+        if (room.status !== 'running') continue;
+        for (const client of room.clients) {
+            if (client.ws && client.ws.readyState === WebSocket.OPEN) {
+                client.ws.send(JSON.stringify({ type: 'broadcast', msgType: type || 'announcement', message }));
+                sent++;
+            }
+        }
+    }
+    res.json({ sent });
+});
+
+// ===================== ADMIN: KICK ALL =====================
+
+app.post('/api/admin/kick-all', requireAdmin, (req, res) => {
+    for (const room of Object.values(rooms)) {
+        for (const client of [...room.clients]) {
+            try { client.ws.close(4000, "Kicked by admin"); } catch(e) {}
+            if (client.player) client.player.markedForDeletion = true;
+        }
+    }
+    res.json({ success: true });
+});
+
+// ===================== ADMIN: DOWNTIME =====================
+
+app.post('/api/admin/downtime', requireAdmin, (req, res) => {
+    const { title, message, severity, estimated_end } = req.body;
+    if (!title || !message) return res.status(400).json({ error: "Title and message are required" });
+    // First line of markdown encodes severity so the changelog renderer can extract it
+    const markdown = `severity:${severity || 'warning'}\n${message}`;
+    const endTime = estimated_end ? new Date(estimated_end).getTime() : null;
+    db.prepare(`
+        INSERT INTO changelogs (title, description, markdown, date, sort_order, type, estimated_end)
+        VALUES (?, ?, ?, ?, ?, 'downtime', ?)
+    `).run(title, message, markdown, Date.now(), 999, endTime);
+    res.json({ success: true });
+});
+
 app.use((req, res, next) => {
     res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
 });
@@ -946,14 +1081,7 @@ class Entity {
     }
 
     update() {
-        // Shape-specific friction: heavy shapes coast longer, light ones stop quickly
-        let friction;
-        if      (this.type === 'square')   friction = 0.82;
-        else if (this.type === 'triangle') friction = 0.84;
-        else if (this.type === 'pentagon') friction = 0.90;
-        else if (this.type === 'hexagon')  friction = 0.93;
-        else                               friction = 0.85; // tanks / AI
-        this.vx *= friction; this.vy *= friction;
+        this.vx *= 0.85; this.vy *= 0.85;
         this.x += this.vx; this.y += this.vy;
         this.x = Math.max(0, Math.min(WORLD_SIZE, this.x));
         this.y = Math.max(0, Math.min(WORLD_SIZE, this.y));
@@ -1471,14 +1599,10 @@ class Drone {
                     let overlap = radSum - dist;
                     let pushAngle = Math.atan2(dy, dx);
                     
-                    // Stronger push for necro squares (they cluster densely)
-                    let pushForce = (this.owner && this.owner.tankType === 'Necromancer') ? overlap * 0.55 : overlap * 0.35;
+                    let pushForce = (this.owner && this.owner.tankType === 'Necromancer') ? overlap * 0.4 : overlap * 0.2; 
                     
-                    this.x += Math.cos(pushAngle) * pushForce;
+                    this.x += Math.cos(pushAngle) * pushForce; 
                     this.y += Math.sin(pushAngle) * pushForce;
-                    // Slight velocity divergence so drones fan out more naturally
-                    this.vx += Math.cos(pushAngle) * pushForce * 0.08;
-                    this.vy += Math.sin(pushAngle) * pushForce * 0.08;
                 }
             }
         });
@@ -1549,40 +1673,6 @@ function shoot(who) {
             who.barrelTimers[i] = Math.max(5, baseReload * (b.rel || 1));
         }
     });
-}
-
-// ===================== PHYSICS HELPERS =====================
-
-/**
- * Returns the effective physics mass for an entity.
- * Heavier entities resist knockback and deliver stronger collisions.
- * Shapes use fixed archetype masses; tanks scale with their radius.
- */
-function getEntityMass(e) {
-    if (e.type === 'square')   return 14;
-    if (e.type === 'triangle') return 32;
-    if (e.type === 'pentagon') return 130;
-    if (e.type === 'hexagon')  return 420;
-    // tanks / AI: radius-squared model, floored so tiny tanks still have presence
-    return Math.max(35, (e.radius || 20) * (e.radius || 20) * 0.11);
-}
-
-/**
- * Restitution coefficient (bounciness).
- * 0 = perfectly inelastic (clay), 1 = perfectly elastic (pool ball).
- * Lighter shapes bounce more; heavy shapes and tanks absorb energy.
- */
-function getEntityRestitution(e) {
-    if (e.type === 'square')   return 0.82;
-    if (e.type === 'triangle') return 0.68;
-    if (e.type === 'pentagon') return 0.48;
-    if (e.type === 'hexagon')  return 0.28;
-    return 0.42; // tanks / AI
-}
-
-/** Drones are lightweight projectiles — low mass for punchy interactions. */
-function getDroneMass(d) {
-    return d.isNecroSquare ? 20 : 10;
 }
 
 function updateRoom(room) {
@@ -1704,34 +1794,9 @@ function updateRoom(room) {
             let sameOwner = d1.owner === d2.owner;
             let sameTeam = room.mode.includes("TDM") && d1.team === d2.team && d1.team !== 0;
             if (!sameOwner && !sameTeam) {
-                let dx = d2.x - d1.x, dy = d2.y - d1.y;
-                let rad = d1.radius + d2.radius;
-                let distSq = dx*dx + dy*dy;
-                if(distSq < rad*rad) {
-                    let dist = Math.sqrt(distSq) || 0.01;
-                    let overlap = rad - dist;
-                    let nx = dx / dist, ny = dy / dist;
-
-                    // Physical separation — push both drones apart equally
-                    let halfCorr = overlap * 0.5;
-                    d1.x -= nx * halfCorr;
-                    d1.y -= ny * halfCorr;
-                    d2.x += nx * halfCorr;
-                    d2.y += ny * halfCorr;
-
-                    // Velocity impulse (elastic-ish collision, equal masses)
-                    let rvx = (d2.vx||0) - (d1.vx||0);
-                    let rvy = (d2.vy||0) - (d1.vy||0);
-                    let relVelN = rvx*nx + rvy*ny;
-                    if (relVelN < 0) {
-                        let rest = 0.55; // drones bounce off each other
-                        let j = -(1 + rest) * relVelN / 2; // equal mass: invSum = 2
-                        d1.vx -= j * nx; d1.vy -= j * ny;
-                        d2.vx += j * nx; d2.vy += j * ny;
-                    }
-
-                    // Mutual damage
-                    let d1Dmg = d1.dmg, d2Dmg = d2.dmg;
+                let dx = d1.x - d2.x, dy = d1.y - d2.y, rad = d1.radius + d2.radius;
+                if (dx*dx + dy*dy < rad*rad) {
+                    let d1Dmg = d1.dmg; let d2Dmg = d2.dmg;
                     d1.hp -= d2Dmg; d2.hp -= d1Dmg;
                     if (d1.hp <= 0) d1.markedForDeletion = true;
                     if (d2.hp <= 0) d2.markedForDeletion = true;
@@ -1766,32 +1831,32 @@ function updateRoom(room) {
                 let distSq = dx*dx + dy*dy;
                 
                 if (distSq < rad*rad) {
-                    // --- Mass-based knockback impulse ---
-                    // Heavier shapes (pentagons, hexagons) resist bullets much more than squares.
-                    let bSpeed = Math.sqrt(b.vx*b.vx + b.vy*b.vy) || 1;
-                    let bNx = b.vx / bSpeed, bNy = b.vy / bSpeed;
-                    let enMass = getEntityMass(en);
-                    // Impulse grows with bullet damage and size; falls off with target mass.
-                    let rawImpulse = (b.dmg * 0.8 + b.r * 0.5) / enMass * 28;
-                    let knockback = Math.min(rawImpulse, 13); // cap prevents extreme launches
-                    en.vx += bNx * knockback;
-                    en.vy += bNy * knockback;
+                    let dist = Math.sqrt(distSq);
+                    let overlapRatio = Math.max(0, Math.min(1, (rad - dist) / rad)); 
+                    let depthMultiplier = 1 + (overlapRatio * 3);
 
-                    // Bullet loses a little speed on impact (feels like real penetration)
-                    b.vx *= 0.90;
-                    b.vy *= 0.90;
+                    let bMass = b.r * b.r;
+                    let eMass = en.radius * en.radius;
+                    let massRatio = bMass / eMass;
+                    let nudgeFactor = 0.45 * depthMultiplier;
+                    
+                    en.vx += b.vx * massRatio * nudgeFactor;
+                    en.vy += b.vy * massRatio * nudgeFactor;
 
-                    let damageRate = 0.5;
+                    b.vx *= (1 - 0.2 * overlapRatio);
+                    b.vy *= (1 - 0.2 * overlapRatio);
+
+                    let damageRate = 0.5 * depthMultiplier;
                     let appliedDmg = b.dmg * damageRate;
-
-                    en.hp -= appliedDmg;
-                    b.pen -= damageRate;
-
+                    
+                    en.hp -= appliedDmg; 
+                    b.pen -= damageRate; 
+                    
                     en.lastDamageTime = Date.now();
                     if (b.owner) en.lastDamagedBy = b.owner.id;
-
+                    
                     if (b.pen <= 0) b.life = 0;
-
+                    
                     if (en.hp <= 0 && !en.xpAwarded && b.owner && typeof b.owner.addXP === 'function') {
                         en.xpAwarded = true;
                         let xpGain = ['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100);
@@ -1805,67 +1870,27 @@ function updateRoom(room) {
 
     room.drones.forEach(d => {
         if (d.markedForDeletion) return;
-        let nearby = room.grid.getNearby(d.x, d.y, d.radius + 55);
+        let nearby = room.grid.getNearby(d.x, d.y, d.radius + 50);
         for(let i=0; i<nearby.entities.length; i++) {
             let en = nearby.entities[i];
             if (d.markedForDeletion || en.markedForDeletion || d.owner === en) continue;
             if (room.mode.includes("TDM") && en.team === d.team && !['square','triangle','pentagon','hexagon'].includes(en.type)) continue;
-
-            let dx = d.x - en.x, dy = d.y - en.y; // points from entity toward drone
-            let rad = d.radius + en.radius;
-            let distSq = dx*dx + dy*dy;
-
-            if(distSq < rad*rad) {
-                let dist = Math.sqrt(distSq) || 0.01;
-                let overlap = rad - dist;
-                // nx/ny: unit normal from entity toward drone
-                let nx = dx / dist, ny = dy / dist;
-
-                // --- Physics: separate drone & entity by their relative masses ---
-                let dMass  = getDroneMass(d);
-                let enMass = getEntityMass(en);
-                let invD  = 1 / dMass;
-                let invE  = 1 / enMass;
-                let invSum = invD + invE;
-
-                // Positional correction
-                let corrAmt = Math.max(overlap - 0.3, 0) / invSum * 0.45;
-                d.x  += nx * corrAmt * invD;   // drone pushed away from entity
-                d.y  += ny * corrAmt * invD;
-                en.x -= nx * corrAmt * invE;   // entity pushed away from drone
-                en.y -= ny * corrAmt * invE;
-
-                // Velocity impulse (drone pushes entity, entity pushes back on drone)
-                let rvx = (d.vx||0) - (en.vx||0);
-                let rvy = (d.vy||0) - (en.vy||0);
-                let relVelN = rvx * nx + rvy * ny; // positive = separating
-
-                if (relVelN < 0) { // only resolve if approaching
-                    // Drones are semi-sticky against heavy targets
-                    let isHeavy = ['pentagon','hexagon'].includes(en.type);
-                    let rest = isHeavy ? 0.2 : 0.45;
-                    let j = -(1 + rest) * relVelN / invSum;
-
-                    // Apply impulse: drone bounces back, entity gets pushed
-                    d.vx  += j * invD * nx;
-                    d.vy  += j * invD * ny;
-                    en.vx -= j * invE * nx;
-                    en.vy -= j * invE * ny;
-                }
-
-                // --- Damage (same rates as before) ---
-                let damageRate = 0.45;
+            
+            let dx = d.x - en.x, dy = d.y - en.y, rad = d.radius + en.radius;
+            if (dx*dx + dy*dy < rad*rad) {
+                let damageRate = 0.45; 
+                
                 en.hp -= d.dmg * damageRate;
-                d.hp  -= (['ai','tank'].includes(en.type) ? 20 : 5) * damageRate;
+                d.hp -= (['ai','tank'].includes(en.type) ? 20 : 5) * damageRate; 
                 en.lastDamageTime = Date.now();
                 if (d.owner) en.lastDamagedBy = d.owner.id;
-
+                
                 if (en.hp <= 0 && !en.xpAwarded && d.owner && typeof d.owner.addXP === 'function') {
                     en.xpAwarded = true;
                     let xpGain = ['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100);
-                    d.owner.addXP(Math.min(xpGain, 24700));
-
-                    let droneCount = 22+(d.owner.stats[6]*2);
+                    d.owner.addXP(Math.min(xpGain, 24700)); 
+                        
+                    let droneCount = 22+(d.owner.stats[6]*2)
                     if (en.type === 'square' && d.owner.tankType === 'Necromancer' && d.owner.activeDrones < droneCount) {
                         room.drones.push(new Drone(room, en.x, en.y, d.owner));
                         if (d.owner.activeDrones < droneCount) {
@@ -1884,68 +1909,41 @@ function updateRoom(room) {
             en.angle += (en.type==='square'?0.01:(en.type==='triangle'?0.02:0.005));
         }
 
-        // Expanded search radius so large entities (hexagons r=45) are never missed
-        let nearby = room.grid.getNearby(en.x, en.y, en.radius + 55);
+        let nearby = room.grid.getNearby(en.x, en.y, en.radius * 2);
         nearby.entities.forEach(other => {
             if(en.id >= other.id || other.markedForDeletion) return;
             let isSameTeam = room.mode.includes("TDM") && en.team === other.team && en.team !== 0;
-            let dx = other.x - en.x, dy = other.y - en.y;
-            let rad = en.radius + other.radius;
-            let distSq = dx*dx + dy*dy;
-
-            if(distSq < rad*rad) {
-                let dist = Math.sqrt(distSq) || 0.01;
+            let dx = other.x - en.x, dy = other.y - en.y, rad = en.radius + other.radius;
+            
+            if(dx*dx + dy*dy < rad*rad) {
+                let dist = Math.sqrt(dx*dx + dy*dy) || 1;
                 let overlap = rad - dist;
-                // Collision normal: points from en toward other
-                let nx = dx / dist, ny = dy / dist;
-
-                // --- Shape-specific masses ---
-                let m1 = getEntityMass(en);
-                let m2 = getEntityMass(other);
-                let inv1 = 1 / m1, inv2 = 1 / m2;
-                let invSum = inv1 + inv2;
-
-                // --- Positional correction (prevents objects sinking into each other) ---
-                // Apply a fraction of the overlap as a direct position nudge.
-                const CORRECTION_PERCENT = 0.5;
-                const SLOP = 0.4; // tiny allowed overlap to avoid jitter
-                let corrAmt = Math.max(overlap - SLOP, 0) / invSum * CORRECTION_PERCENT;
-                en.x    -= nx * corrAmt * inv1;
-                en.y    -= ny * corrAmt * inv1;
-                other.x += nx * corrAmt * inv2;
-                other.y += ny * corrAmt * inv2;
-
-                // --- Velocity impulse (momentum + restitution) ---
-                // Relative velocity of other w.r.t. en, along collision normal
-                let rvx = (other.vx || 0) - (en.vx || 0);
-                let rvy = (other.vy || 0) - (en.vy || 0);
-                let relVelN = rvx * nx + rvy * ny;
-
-                // Only resolve if they are approaching (negative relVelN means separating)
-                if (relVelN < 0) {
-                    // Use the lower restitution of the two objects (softer contact)
-                    let rest = Math.min(getEntityRestitution(en), getEntityRestitution(other));
-                    let j = -(1 + rest) * relVelN / invSum;
-                    en.vx    -= j * inv1 * nx;
-                    en.vy    -= j * inv1 * ny;
-                    other.vx += j * inv2 * nx;
-                    other.vy += j * inv2 * ny;
-                }
-
-                // --- Damage on contact (unchanged) ---
+                let springFactor = 0.05; 
+                let force = overlap * springFactor;
+                let m1 = en.radius * en.radius;
+                let m2 = other.radius * other.radius;
+                let totalM = m1 + m2;
+                
+                let pushX = (dx / dist) * force;
+                let pushY = (dy / dist) * force;
+                en.vx -= pushX * (m2 / totalM);
+                en.vy -= pushY * (m2 / totalM);
+                other.vx += pushX * (m1 / totalM);
+                other.vy += pushY * (m1 / totalM);
+                
                 if (!isSameTeam) {
-                    let damageRate = 2;
+                    let damageRate = 2; 
                     let dmgE = (1 + (other.stats ? other.stats[2]*2 : 0)) * damageRate;
                     let dmgO = (1 + (en.stats ? en.stats[2]*2 : 0)) * damageRate;
-
-                    en.hp    -= dmgE;
+                    
+                    en.hp -= dmgE; 
                     other.hp -= dmgO;
-
-                    en.lastDamageTime    = Date.now();
-                    other.lastDamageTime = Date.now();
-                    en.lastDamagedBy    = other.id;
+                    
+                    en.lastDamageTime = Date.now();
+                    other.lastDamageTime = Date.now(); 
+                    en.lastDamagedBy = other.id; 
                     other.lastDamagedBy = en.id;
-
+                    
                     if(en.hp <= 0 && !en.xpAwarded && typeof other.addXP === 'function') { en.xpAwarded = true; other.addXP(['tank','ai'].includes(en.type) ? Math.max(en.xpVal||100, en.score) : (en.xpVal || 100)); }
                     if(other.hp <= 0 && !other.xpAwarded && typeof en.addXP === 'function') { other.xpAwarded = true; en.addXP(['tank','ai'].includes(other.type) ? Math.max(other.xpVal||100, other.score) : (other.xpVal || 100)); }
                 }
