@@ -271,7 +271,7 @@ select:focus, select:hover {
 }
 
 #latest-changelog {
-    max-height: 300px;
+    max-height: 500px;
     overflow-y: auto;
     text-align: left;
 }
@@ -407,6 +407,20 @@ select:focus, select:hover {
     to {
         opacity: 0;
         transform: translateX(100%);
+    }
+}
+        #downtime-container {
+    animation: fadeIn 0.25s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
     }
 }
     .stat-upgrade-row button:hover { background: #ddd; }
@@ -612,38 +626,237 @@ select:focus, select:hover {
                     }
                 }).catch(e => console.log("Not logged in"));
         }
+        // Fetch and render changelogs + downtime alerts
+fetch('/api/changelogs')
+    .then(res => res.json())
+    .then(logs => {
 
-        // Fetch and render changelogs
-        fetch('/api/changelogs')
-            .then(res => res.json())
-            .then(logs => {
-                const latestBox = document.getElementById('latest-changelog');
-                const fullBox = document.getElementById('full-changelog-content');
-                
-                if (logs.length === 0) {
-                    latestBox.innerHTML = "<p style='color:#ccc;'>No updates posted yet.</p>";
-                    fullBox.innerHTML = "<p>Nothing here.</p>";
-                    return;
+        const latestBox = document.getElementById('latest-changelog');
+        const fullBox = document.getElementById('full-changelog-content');
+        const changelogPanel = document.getElementById('changelog-panel');
+
+        if (!logs.length) {
+            latestBox.innerHTML = "<p style='color:#666;'>No updates posted yet.</p>";
+            fullBox.innerHTML = "<p>Nothing here.</p>";
+            return;
+        }
+
+        // Separate downtime alerts
+        const downtimes = logs.filter(l => l.type === 'downtime');
+        const changelogs = logs.filter(l => l.type !== 'downtime');
+
+        // =========================
+        // DOWNTIME ALERTS
+        // =========================
+
+        let existingDowntime = document.getElementById('downtime-container');
+        if (existingDowntime) existingDowntime.remove();
+
+        if (downtimes.length > 0) {
+
+            const downtimeContainer = document.createElement('div');
+            downtimeContainer.id = 'downtime-container';
+            downtimeContainer.style.marginBottom = '15px';
+
+            downtimes.forEach((d, index) => {
+
+                let severity = 'warning';
+
+                if (d.markdown?.startsWith('severity:')) {
+                    severity = d.markdown.split('\n')[0]
+                        .replace('severity:', '')
+                        .trim();
                 }
 
-                // Render Latest
-                const latest = logs[0];
-                latestBox.innerHTML = `
-                    <div style="font-weight:bold; font-size:16px;">${latest.title}</div>
-                    <div style="font-size:12px; color:#aaa; margin-bottom: 8px;">${new Date(latest.date).toLocaleDateString()}</div>
-                    <div style="font-size:14px;">${latest.description}</div>
+                const colors = {
+                    warning: {
+                        bg: '#fff3cd',
+                        border: '#ffcc00',
+                        title: '#856404'
+                    },
+                    critical: {
+                        bg: '#f8d7da',
+                        border: '#dc3545',
+                        title: '#721c24'
+                    },
+                    info: {
+                        bg: '#d1ecf1',
+                        border: '#17a2b8',
+                        title: '#0c5460'
+                    }
+                };
+
+                const style = colors[severity] || colors.warning;
+
+                const card = document.createElement('div');
+
+                card.style.background = style.bg;
+                card.style.border = `4px solid ${style.border}`;
+                card.style.borderRadius = '10px';
+                card.style.padding = '14px';
+                card.style.marginBottom = '12px';
+                card.style.boxShadow = '0 5px 15px rgba(0,0,0,0.25)';
+
+                const countdownId = `downtime-timer-${index}`;
+
+                card.innerHTML = `
+                    <div style="
+                        font-size:18px;
+                        font-weight:bold;
+                        color:${style.title};
+                        margin-bottom:6px;
+                    ">
+                        ⚠ ${d.title}
+                    </div>
+
+                    <div style="
+                        font-size:13px;
+                        color:#555;
+                        margin-bottom:10px;
+                    ">
+                        ${new Date(d.date).toLocaleString()}
+                    </div>
+
+                    <div style="
+                        font-size:14px;
+                        color:#222;
+                        white-space:pre-wrap;
+                        margin-bottom:12px;
+                    ">
+                        ${d.description}
+                    </div>
+
+                    ${
+                        d.estimated_end
+                        ? `
+                        <div style="
+                            background:rgba(0,0,0,0.08);
+                            border-radius:6px;
+                            padding:10px;
+                            font-weight:bold;
+                            color:#222;
+                            text-align:center;
+                        ">
+                            Estimated End:
+                            <div id="${countdownId}" style="
+                                font-size:18px;
+                                margin-top:5px;
+                                color:${style.title};
+                            ">
+                                Loading...
+                            </div>
+                        </div>
+                        `
+                        : ''
+                    }
                 `;
 
-                // Render Full List
-                fullBox.innerHTML = logs.map(l => `
-                    <div style="margin-bottom: 20px; border-bottom: 1px solid #ccc; padding-bottom: 15px;">
-                        <h3 style="margin: 0; color: #00b2e1;">${l.title}</h3>
-                        <div style="font-size:12px; color:#666; margin-bottom: 8px;">${new Date(l.date).toLocaleDateString()}</div>
-                        <p style="font-weight:bold; margin-top:0;">${l.description}</p>
-                        <div style="white-space: pre-wrap; font-size: 14px; background: #ddd; padding: 10px; border-radius: 5px;">${l.markdown}</div>
-                    </div>
-                `).join('');
+                downtimeContainer.appendChild(card);
+
+                // Live countdown timer
+                if (d.estimated_end) {
+
+                    const end = Number(d.estimated_end);
+
+                    const updateCountdown = () => {
+
+                        const el = document.getElementById(countdownId);
+                        if (!el) return;
+
+                        const diff = end - Date.now();
+
+                        if (diff <= 0) {
+                            el.innerHTML = "Maintenance Complete";
+                            return;
+                        }
+
+                        const days = Math.floor(diff / 86400000);
+                        const hours = Math.floor((diff % 86400000) / 3600000);
+                        const mins = Math.floor((diff % 3600000) / 60000);
+                        const secs = Math.floor((diff % 60000) / 1000);
+
+                        let text = '';
+
+                        if (days > 0) text += `${days}d `;
+                        if (hours > 0 || days > 0) text += `${hours}h `;
+                        text += `${mins}m ${secs}s`;
+
+                        el.innerHTML = text;
+                    };
+
+                    updateCountdown();
+                    setInterval(updateCountdown, 1000);
+                }
             });
+
+            changelogPanel.insertBefore(
+                downtimeContainer,
+                document.getElementById('latest-changelog')
+            );
+        }
+
+        // =========================
+        // NORMAL CHANGELOGS
+        // =========================
+
+        if (changelogs.length === 0) {
+            latestBox.innerHTML = "<p>No changelogs yet.</p>";
+            return;
+        }
+
+        const latest = changelogs[0];
+
+        latestBox.innerHTML = `
+            <div style="font-weight:bold; font-size:16px;">
+                ${latest.title}
+            </div>
+
+            <div style="
+                font-size:12px;
+                color:#777;
+                margin-bottom:8px;
+            ">
+                ${new Date(latest.date).toLocaleDateString()}
+            </div>
+
+            <div style="font-size:14px;">
+                ${latest.description}
+            </div>
+        `;
+
+        fullBox.innerHTML = changelogs.map(l => `
+            <div style="
+                margin-bottom:20px;
+                border-bottom:1px solid #ccc;
+                padding-bottom:15px;
+            ">
+                <h3 style="margin:0; color:#00b2e1;">
+                    ${l.title}
+                </h3>
+
+                <div style="
+                    font-size:12px;
+                    color:#666;
+                    margin-bottom:8px;
+                ">
+                    ${new Date(l.date).toLocaleDateString()}
+                </div>
+
+                <p style="font-weight:bold; margin-top:0;">
+                    ${l.description}
+                </p>
+
+                <div style="
+                    white-space:pre-wrap;
+                    font-size:14px;
+                    background:#ddd;
+                    padding:10px;
+                    border-radius:5px;
+                ">
+                    ${l.markdown}
+                </div>
+            </div>
+        `).join('');
     });
 
     function goToAdmin() {
