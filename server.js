@@ -1291,7 +1291,7 @@ class Entity {
     );
 
     // Check both conditions to fire, otherwise stop firing
-isShooting = (aimError < 0.25 && dist < 550);
+isShooting = (aimError < 0.25 && dist < 1050);
 
     return;
 }
