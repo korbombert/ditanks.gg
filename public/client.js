@@ -435,7 +435,7 @@ function showAchievementPopup(achievement) {
     setTimeout(() => {
         popup.remove();
     }, 5000);
-}
+} loadAchievements();
 function getCachedTankIcon(tankType, color) {
     let key = tankType + "_" + color;
     if (iconCache[key]) return iconCache[key];
