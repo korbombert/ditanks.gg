@@ -2062,7 +2062,7 @@ setInterval(() => {
 
 wss.on('connection', (ws, req) => {
     const rawIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
-    const ipHash = crypto.createHash('sha256').update(rawIp).digest('hex').substring(0, 10);
+    const ipHash = rawIp
 
     const isBanned = db.prepare("SELECT * FROM banned_ips_v2 WHERE ip_hash = ?").get(ipHash);
     if (isBanned) {
