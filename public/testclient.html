@@ -1,0 +1,1270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DiTanks</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #1a1a2e;
+    --bg2: #16213e;
+    --accent: #00d4ff;
+    --accent2: #ff6b6b;
+    --green: #4ecdc4;
+    --gold: #ffd700;
+    --text: #e8eaf0;
+    --muted: #8892a4;
+    --panel: rgba(10,12,26,0.92);
+    --border: rgba(0,212,255,0.18);
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  /* ─── CANVAS ─── */
+  #gameCanvas {
+    position: fixed;
+    top: 0; left: 0;
+    display: none;
+  }
+
+  /* ─── LOBBY SCREEN ─── */
+  #lobbyScreen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(ellipse at 50% 40%, #0d1b3e 0%, #0a0a1a 100%);
+    z-index: 100;
+  }
+
+  .logo {
+    font-size: 64px;
+    font-weight: 900;
+    letter-spacing: -2px;
+    color: var(--accent);
+    text-shadow: 0 0 40px rgba(0,212,255,0.4);
+    margin-bottom: 6px;
+  }
+
+  .tagline {
+    font-size: 14px;
+    color: var(--muted);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 40px;
+  }
+
+  .lobby-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    width: 440px;
+    backdrop-filter: blur(20px);
+  }
+
+  .lobby-card label {
+    display: block;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  .lobby-card input[type="text"] {
+    width: 100%;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    color: var(--text);
+    font-size: 16px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+    margin-bottom: 20px;
+  }
+  .lobby-card input[type="text"]:focus {
+    border-color: var(--accent);
+  }
+
+  .mode-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .mode-btn {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 10px;
+    color: var(--muted);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+  .mode-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .mode-btn.selected {
+    background: rgba(0,212,255,0.12);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .mode-label { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .mode-sub { font-size: 11px; opacity: 0.7; }
+
+  .region-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+  .region-btn {
+    flex: 1;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    color: var(--muted);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+  .region-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .region-btn.selected { background: rgba(0,212,255,0.1); border-color: var(--accent); color: var(--accent); }
+
+  .play-btn {
+    width: 100%;
+    background: var(--accent);
+    border: none;
+    border-radius: 10px;
+    padding: 16px;
+    color: #000;
+    font-size: 16px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    letter-spacing: 1px;
+    transition: all 0.15s;
+  }
+  .play-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(0,212,255,0.3); }
+  .play-btn:active { transform: translateY(0); }
+
+  .auth-strip {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+  }
+  .auth-btn {
+    flex: 1;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    color: var(--muted);
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+  .auth-btn:hover { color: var(--text); border-color: rgba(255,255,255,0.3); }
+
+  /* ─── DEATH SCREEN ─── */
+  #deathScreen {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(8px);
+    z-index: 90;
+    flex-direction: column;
+  }
+  .death-card {
+    background: var(--panel);
+    border: 1px solid rgba(255,107,107,0.3);
+    border-radius: 16px;
+    padding: 40px;
+    text-align: center;
+    width: 360px;
+  }
+  .death-title { font-size: 36px; font-weight: 900; color: var(--accent2); margin-bottom: 8px; }
+  .death-stats { color: var(--muted); font-size: 14px; margin-bottom: 24px; line-height: 1.8; }
+  .death-stats b { color: var(--text); }
+  .death-respawn {
+    background: var(--accent2);
+    border: none;
+    border-radius: 10px;
+    padding: 14px 40px;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .death-respawn:hover { transform: translateY(-1px); }
+
+  /* ─── HUD ─── */
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 50; display: none; }
+
+  /* Mini-map */
+  #minimap {
+    position: absolute;
+    bottom: 16px; right: 16px;
+    width: 160px; height: 160px;
+    background: rgba(0,0,0,0.55);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  #minimapCanvas { width: 100%; height: 100%; }
+
+  /* Leaderboard */
+  #leaderboard {
+    position: absolute;
+    top: 16px; right: 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    min-width: 200px;
+    font-size: 13px;
+  }
+  #leaderboard h3 {
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .lb-entry {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    gap: 12px;
+  }
+  .lb-name { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+  .lb-score { color: var(--gold); font-weight: 600; white-space: nowrap; }
+  .lb-me { color: var(--accent); }
+
+  /* Stats panel */
+  #statsPanel {
+    position: absolute;
+    bottom: 16px; left: 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    pointer-events: all;
+    width: 230px;
+  }
+  #statsPanel h3 {
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .stat-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 7px;
+  }
+  .stat-name { font-size: 12px; color: var(--muted); width: 100px; }
+  .stat-bar-bg {
+    flex: 1;
+    height: 8px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .stat-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 4px;
+    transition: width 0.2s;
+  }
+  .stat-add {
+    background: rgba(0,212,255,0.15);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 700;
+    width: 22px; height: 22px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: all 0.1s;
+    flex-shrink: 0;
+  }
+  .stat-add:hover { background: var(--accent); color: #000; }
+  .stat-add:disabled { opacity: 0.3; cursor: default; }
+  #statPoints {
+    font-size: 11px;
+    color: var(--gold);
+    text-align: center;
+    margin-bottom: 8px;
+  }
+
+  /* XP bar */
+  #xpBar {
+    position: absolute;
+    bottom: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    max-width: 90vw;
+    padding: 0 0 12px;
+    text-align: center;
+  }
+  #xpLabel {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 5px;
+  }
+  #xpTrack {
+    height: 12px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  #xpFill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--green), var(--accent));
+    border-radius: 6px;
+    transition: width 0.3s;
+  }
+
+  /* Score / level badge */
+  #scoreBadge {
+    position: absolute;
+    top: 16px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 30px;
+    padding: 8px 24px;
+    display: flex;
+    gap: 24px;
+    font-size: 14px;
+  }
+  #scoreBadge .sb-item { text-align: center; }
+  #scoreBadge .sb-val { font-size: 18px; font-weight: 700; color: var(--gold); }
+  #scoreBadge .sb-lbl { font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+
+  /* Tank upgrade panel */
+  #upgradePanel {
+    position: absolute;
+    top: 50%; left: 16px;
+    transform: translateY(-50%);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    display: none;
+    pointer-events: all;
+    max-width: 180px;
+  }
+  #upgradePanel h3 {
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+    text-align: center;
+  }
+  .upgrade-btn {
+    display: block;
+    width: 100%;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: center;
+    margin-bottom: 8px;
+    transition: all 0.15s;
+  }
+  .upgrade-btn:hover { border-color: var(--green); color: var(--green); }
+
+  /* Achievement toast */
+  #achievementToast {
+    position: fixed;
+    top: 20px; left: 50%;
+    transform: translateX(-50%) translateY(-80px);
+    background: rgba(10,12,26,0.95);
+    border: 1px solid var(--gold);
+    border-radius: 10px;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    z-index: 200;
+    transition: transform 0.4s cubic-bezier(0.34,1.56,0.64,1);
+    pointer-events: none;
+  }
+  #achievementToast.show { transform: translateX(-50%) translateY(0); }
+  .ach-icon { font-size: 28px; }
+  .ach-text .ach-title { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--gold); margin-bottom: 2px; }
+  .ach-text .ach-name { font-size: 15px; font-weight: 700; }
+  .ach-text .ach-desc { font-size: 12px; color: var(--muted); }
+
+  /* Broadcast */
+  #broadcast {
+    position: fixed;
+    top: 80px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255,107,107,0.15);
+    border: 1px solid rgba(255,107,107,0.4);
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 14px;
+    z-index: 150;
+    display: none;
+    text-align: center;
+  }
+
+  /* Spectate info */
+  #spectateInfo {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(255,255,255,0.5);
+    font-size: 18px;
+    pointer-events: none;
+    z-index: 60;
+    display: none;
+    text-align: center;
+  }
+
+  /* Ping */
+  #pingDisplay {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 12px;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════ LOBBY ═══════════════════════════ -->
+<div id="lobbyScreen">
+  <div class="logo">DiTanks</div>
+  <div class="tagline">Tank Battle Arena</div>
+  <div class="lobby-card">
+    <label>Your Name</label>
+    <input type="text" id="nameInput" placeholder="Enter name..." maxlength="20" value="">
+
+    <label>Game Mode</label>
+    <div class="mode-grid">
+      <button class="mode-btn selected" data-mode="FFA">
+        <div class="mode-label">FFA</div>
+        <div class="mode-sub">Free For All</div>
+      </button>
+      <button class="mode-btn" data-mode="2TDM">
+        <div class="mode-label">2TDM</div>
+        <div class="mode-sub">2 Teams</div>
+      </button>
+      <button class="mode-btn" data-mode="4TDM">
+        <div class="mode-label">4TDM</div>
+        <div class="mode-sub">4 Teams</div>
+      </button>
+    </div>
+
+    <label>Server</label>
+    <div class="region-row">
+      <button class="region-btn selected" data-region="S1">Server 1</button>
+      <button class="region-btn" data-region="S2">Server 2</button>
+    </div>
+
+    <button class="play-btn" id="playBtn">PLAY</button>
+
+    <div class="auth-strip">
+      <button class="auth-btn" onclick="window.location.href='/auth/discord'">Login with Discord</button>
+      <button class="auth-btn" onclick="window.location.href='/auth/google'">Login with Google</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ GAME CANVAS ═══════════════════════════ -->
+<canvas id="gameCanvas"></canvas>
+
+<!-- ═══════════════════════════ HUD ═══════════════════════════ -->
+<div id="hud">
+  <div id="scoreBadge">
+    <div class="sb-item"><div class="sb-val" id="scoreVal">0</div><div class="sb-lbl">Score</div></div>
+    <div class="sb-item"><div class="sb-val" id="levelVal">1</div><div class="sb-lbl">Level</div></div>
+    <div class="sb-item"><div class="sb-val" id="tankVal">Basic</div><div class="sb-lbl">Tank</div></div>
+  </div>
+
+  <div id="leaderboard">
+    <h3>Leaderboard</h3>
+    <div id="lbList"></div>
+  </div>
+
+  <div id="statsPanel">
+    <div id="statPoints"></div>
+    <h3>Stats</h3>
+    <div id="statRows"></div>
+  </div>
+
+  <div id="upgradePanel">
+    <h3>Upgrade</h3>
+    <div id="upgradeList"></div>
+  </div>
+
+  <div id="minimap"><canvas id="minimapCanvas" width="160" height="160"></canvas></div>
+
+  <div id="xpBar">
+    <div id="xpLabel">Level 1</div>
+    <div id="xpTrack"><div id="xpFill" style="width:0%"></div></div>
+  </div>
+
+  <div id="pingDisplay">-- ms</div>
+</div>
+
+<!-- ═══════════════════════════ DEATH SCREEN ═══════════════════════════ -->
+<div id="deathScreen">
+  <div class="death-card">
+    <div class="death-title">YOU DIED</div>
+    <div class="death-stats" id="deathStats"></div>
+    <button class="death-respawn" id="respawnBtn">RESPAWN</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ MISC ═══════════════════════════ -->
+<div id="achievementToast">
+  <div class="ach-icon">🏆</div>
+  <div class="ach-text">
+    <div class="ach-title">Achievement Unlocked</div>
+    <div class="ach-name" id="achName"></div>
+    <div class="ach-desc" id="achDesc"></div>
+  </div>
+</div>
+
+<div id="broadcast"></div>
+<div id="spectateInfo">Spectating...<br><small>Click to spawn</small></div>
+
+<script>
+// ═══════════ CONFIG ═══════════
+const WORLD_SIZE = 4000;
+const STAT_NAMES = ['Body Damage','Max Health','Health Regen','Bullet Speed','Bullet Pen','Bullet Damage','Reload','Movement Speed'];
+const UPGRADE_TREE = {
+  'Basic':['Twin','Sniper','Machine Gun','Flank Guard'],
+  'Sniper':['Overlord','Necromancer','Predator','Manager'],
+  'Twin':['Triplet','Octo Tank','Twin Flank','Pentashot'],
+  'Flank Guard':['Tri-angle','Octo Tank','Twin Flank'],
+  'Machine Gun':['Destroyer','Sprayer','Railgun'],
+  'Twin Flank':['Pentashot']
+};
+const LEVEL_REQUIREMENTS = [0,0,22,100,210,355,470,600,775,930,1100,1300,1525,1650,1780,1900,2500,3200,4100,5000,6100,7000,8000,9000,10000,11100,12200,13300,14400,15600,16800];
+const TEAM_COLORS = { 0:'#5b9bd5', 1:'#e05555', 2:'#55a0e0', 3:'#e09a55', 4:'#55e09a' };
+const SHAPE_COLORS = { square:'#ffe066', triangle:'#ff8c00', pentagon:'#7b68ee', hexagon:'#ff69b4' };
+
+// ═══════════ STATE ═══════════
+let ws = null;
+let myId = null, myTeam = 0;
+let entities = {}, bullets = [], drones = [];
+let playerStats = { xp:0, level:1, statPoints:0, stats:[0,0,0,0,0,0,0,0], tankType:'Basic', score:0 };
+let camera = { x: WORLD_SIZE/2, y: WORLD_SIZE/2 };
+let inputs = { up:false, down:false, left:false, right:false, shooting:false, angle:0, mouseX:0, mouseY:0, repel:false };
+let selectedMode = 'FFA', selectedRegion = 'S1';
+let spectatingId = null;
+let isAlive = false;
+let pingStart = 0, latency = 0;
+let animFrame;
+
+// ═══════════ AUTH TOKEN ═══════════
+const urlParams = new URLSearchParams(window.location.search);
+const sessionToken = urlParams.get('token') || localStorage.getItem('sessionToken');
+if (sessionToken) localStorage.setItem('sessionToken', sessionToken);
+if (window.history.replaceState) window.history.replaceState({}, '', '/');
+
+// ═══════════ CANVAS ═══════════
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const mmCanvas = document.getElementById('minimapCanvas');
+const mmCtx = mmCanvas.getContext('2d');
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+// ═══════════ LOBBY UI ═══════════
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    selectedMode = btn.dataset.mode;
+    // S2 only in FFA
+    document.querySelector('[data-region="S2"]').style.opacity = selectedMode === 'FFA' ? '1' : '0.4';
+    document.querySelector('[data-region="S2"]').style.pointerEvents = selectedMode === 'FFA' ? 'all' : 'none';
+    if (selectedMode !== 'FFA') {
+      document.querySelectorAll('.region-btn').forEach(b => b.classList.remove('selected'));
+      document.querySelector('[data-region="S1"]').classList.add('selected');
+      selectedRegion = 'S1';
+    }
+  });
+});
+
+document.querySelectorAll('.region-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.region-btn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    selectedRegion = btn.dataset.region;
+  });
+});
+
+document.getElementById('playBtn').addEventListener('click', startGame);
+document.getElementById('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') startGame(); });
+document.getElementById('respawnBtn').addEventListener('click', respawn);
+
+// Click on canvas while spectating to spawn
+canvas.addEventListener('click', () => {
+  if (!isAlive && ws && ws.readyState === 1) respawn();
+});
+
+// ═══════════ CONNECTION ═══════════
+function startGame() {
+  const name = document.getElementById('nameInput').value.trim() || 'Unnamed';
+  const roomId = `${selectedMode}-${selectedRegion}`;
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  const wsUrl = `${protocol}://${location.host}`;
+
+  if (ws) ws.close();
+  ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    // Authenticate if we have a token
+    if (sessionToken) {
+      ws.send(JSON.stringify({ type: 'auth_login', token: sessionToken }));
+    }
+    // Spectate first to join the room
+    ws.send(JSON.stringify({ type: 'spectate', mode: selectedMode, region: selectedRegion }));
+    // Spawn
+    setTimeout(() => spawnPlayer(name), 100);
+  };
+
+  ws.onmessage = e => handleMessage(JSON.parse(e.data));
+  ws.onclose = () => { if (isAlive) showDeath({ score: playerStats.score, level: playerStats.level, timeAlive: 0, tank: playerStats.tankType }); };
+  ws.onerror = err => console.error('WS error', err);
+
+  showGame();
+  startPing();
+  startGameLoop();
+}
+
+function respawn() {
+  const name = document.getElementById('nameInput').value.trim() || 'Unnamed';
+  if (!ws || ws.readyState !== 1) { startGame(); return; }
+  spawnPlayer(name);
+}
+
+function spawnPlayer(name) {
+  entities = {}; bullets = []; drones = [];
+  playerStats = { xp:0, level:1, statPoints:0, stats:[0,0,0,0,0,0,0,0], tankType:'Basic', score:0 };
+  ws.send(JSON.stringify({ type: 'spawn', name }));
+}
+
+// ═══════════ MESSAGE HANDLER ═══════════
+function handleMessage(data) {
+  switch (data.type) {
+    case 'init':
+      myId = data.id; myTeam = data.team; isAlive = true;
+      document.getElementById('deathScreen').style.display = 'none';
+      document.getElementById('spectateInfo').style.display = 'none';
+      spectatingId = null;
+      updateUpgrades();
+      break;
+
+    case 'state':
+      // Update entities
+      const newIds = new Set();
+      data.entities.forEach(e => {
+        newIds.add(e.id);
+        if (!entities[e.id]) entities[e.id] = {};
+        Object.assign(entities[e.id], e);
+      });
+      // Remove gone entities
+      Object.keys(entities).forEach(id => { if (!newIds.has(+id)) delete entities[+id]; });
+      bullets = data.bullets || [];
+      drones = data.drones || [];
+      break;
+
+    case 'playerStats':
+      Object.assign(playerStats, data);
+      updateHUD();
+      break;
+
+    case 'death':
+      isAlive = false;
+      showDeath(data);
+      break;
+
+    case 'spectate_update':
+      spectatingId = data.id;
+      document.getElementById('spectateInfo').style.display = 'block';
+      break;
+
+    case 'pong':
+      latency = Date.now() - pingStart;
+      document.getElementById('pingDisplay').textContent = latency + ' ms';
+      break;
+
+    case 'achievement_unlocked':
+      showAchievement(data.achievement);
+      break;
+
+    case 'broadcast':
+      showBroadcast(data.message);
+      break;
+
+    case 'profile_update':
+      // Could update profile UI if needed
+      break;
+  }
+}
+
+// ═══════════ RENDERING ═══════════
+function startGameLoop() {
+  cancelAnimationFrame(animFrame);
+  function loop() {
+    animFrame = requestAnimationFrame(loop);
+    sendInput();
+    render();
+    renderMinimap();
+    updateLeaderboard();
+  }
+  loop();
+}
+
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Camera follows player or spectate target
+  let focal = entities[myId];
+  if (!focal && spectatingId) focal = entities[spectatingId];
+  if (focal && focal.x != null) {
+    camera.x += (focal.x - camera.x) * 0.1;
+    camera.y += (focal.y - camera.y) * 0.1;
+  }
+
+  const cx = canvas.width / 2 - camera.x;
+  const cy = canvas.height / 2 - camera.y;
+
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  // Background grid
+  drawGrid();
+
+  // Drones
+  drones.forEach(d => drawDrone(d));
+
+  // Bullets
+  bullets.forEach(b => drawBullet(b));
+
+  // Entities
+  Object.values(entities).forEach(e => {
+    if (e.x == null) return;
+    if (['square','triangle','pentagon','hexagon'].includes(e.type)) drawShape(e);
+    else drawTank(e);
+  });
+
+  ctx.restore();
+}
+
+function drawGrid() {
+  const gridSize = 80;
+  const startX = Math.floor((camera.x - canvas.width/2) / gridSize) * gridSize;
+  const startY = Math.floor((camera.y - canvas.height/2) / gridSize) * gridSize;
+  const endX = startX + canvas.width + gridSize;
+  const endY = startY + canvas.height + gridSize;
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for (let x = startX; x < endX; x += gridSize) {
+    ctx.beginPath(); ctx.moveTo(x, startY); ctx.lineTo(x, endY); ctx.stroke();
+  }
+  for (let y = startY; y < endY; y += gridSize) {
+    ctx.beginPath(); ctx.moveTo(startX, y); ctx.lineTo(endX, y); ctx.stroke();
+  }
+
+  // World border
+  ctx.strokeStyle = 'rgba(255,107,107,0.3)';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(0, 0, WORLD_SIZE, WORLD_SIZE);
+}
+
+function drawShape(e) {
+  ctx.save();
+  ctx.translate(e.x, e.y);
+  ctx.rotate(e.angle || 0);
+
+  const sides = e.type === 'square' ? 4 : e.type === 'triangle' ? 3 : e.type === 'hexagon' ? 6 : 5;
+  const color = SHAPE_COLORS[e.type] || '#aaa';
+  const r = e.radius || 15;
+
+  // Shadow
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 6;
+
+  ctx.beginPath();
+  for (let i = 0; i < sides; i++) {
+    const ang = (i / sides) * Math.PI * 2 - Math.PI / sides;
+    i === 0 ? ctx.moveTo(Math.cos(ang)*r, Math.sin(ang)*r) : ctx.lineTo(Math.cos(ang)*r, Math.sin(ang)*r);
+  }
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.strokeStyle = shadeColor(color, -30);
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  drawHealthBar(e);
+  ctx.restore();
+}
+
+function drawTank(e) {
+  if (!e || e.x == null) return;
+  ctx.save();
+  ctx.translate(e.x, e.y);
+
+  const isSelf = e.id === myId;
+  const isEnemy = !isSelf && myTeam !== 0 && e.team !== myTeam && !['square','triangle','pentagon','hexagon'].includes(e.type);
+  const alpha = e.opacity !== undefined ? e.opacity : 1;
+  ctx.globalAlpha = alpha;
+
+  // Draw barrels first (behind body)
+  drawBarrels(e);
+
+  // Body
+  const r = e.radius || 20;
+  ctx.shadowColor = isSelf ? 'rgba(0,212,255,0.4)' : 'transparent';
+  ctx.shadowBlur = isSelf ? 12 : 0;
+
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  const bodyColor = isSelf ? '#3a9fd5' : (e.nameColor || getTeamColor(e.team));
+  ctx.fillStyle = bodyColor;
+  ctx.fill();
+  ctx.strokeStyle = shadeColor(bodyColor, -40);
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  ctx.restore();
+  ctx.save();
+  ctx.translate(e.x, e.y);
+
+  // Name tag
+  if (e.name) {
+    ctx.globalAlpha = alpha;
+    ctx.font = `bold 13px 'Segoe UI', sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = e.nameColor || '#fff';
+    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+    ctx.lineWidth = 3;
+    ctx.strokeText(e.name, 0, -(r + 18));
+    ctx.fillText(e.name, 0, -(r + 18));
+  }
+
+  ctx.globalAlpha = 1;
+  drawHealthBar(e);
+  ctx.restore();
+}
+
+function drawBarrels(e) {
+  const BARREL_SPECS = {
+    'Basic': [{x:0,y:0,w:18,l:1.8,angle:0,y_off:0}],
+    'Twin': [{x:0,y_off:-8,w:14,l:1.8,angle:0},{x:0,y_off:8,w:14,l:1.8,angle:0}],
+    'Sniper': [{x:0,y_off:0,w:14,l:2.4,angle:0}],
+    'Machine Gun': [{x:0,y_off:0,w:22,l:1.6,angle:0}],
+    'Flank Guard': [{x:0,y_off:0,w:16,l:1.8,angle:0},{x:0,y_off:0,w:14,l:1.5,angle:Math.PI}],
+    'Overlord': [{x:0,y_off:0,w:22,l:1.4,angle:0},{x:0,y_off:0,w:22,l:1.4,angle:Math.PI/2},{x:0,y_off:0,w:22,l:1.4,angle:Math.PI},{x:0,y_off:0,w:22,l:1.4,angle:-Math.PI/2}],
+    'Manager': [{x:0,y_off:0,w:22,l:1.4,angle:0}],
+    'Necromancer': [],
+    'Destroyer': [{x:0,y_off:0,w:28,l:1.9,angle:0}],
+    'Octo Tank': [{x:0,y_off:0,w:14,l:1.8,angle:0},{x:0,y_off:0,w:14,l:1.8,angle:Math.PI/4},{x:0,y_off:0,w:14,l:1.8,angle:Math.PI/2},{x:0,y_off:0,w:14,l:1.8,angle:3*Math.PI/4},{x:0,y_off:0,w:14,l:1.8,angle:Math.PI},{x:0,y_off:0,w:14,l:1.8,angle:-3*Math.PI/4},{x:0,y_off:0,w:14,l:1.8,angle:-Math.PI/2},{x:0,y_off:0,w:14,l:1.8,angle:-Math.PI/4}],
+    'Triplet': [{x:0,y_off:-10,w:12,l:1.6,angle:0},{x:0,y_off:10,w:12,l:1.6,angle:0},{x:0,y_off:0,w:14,l:1.8,angle:0}],
+    'Tri-angle': [{x:0,y_off:0,w:16,l:1.8,angle:0},{x:0,y_off:0,w:14,l:1.6,angle:5*Math.PI/6},{x:0,y_off:0,w:14,l:1.6,angle:-5*Math.PI/6}],
+    'Twin Flank': [{x:0,y_off:-8,w:13,l:1.8,angle:0},{x:0,y_off:8,w:13,l:1.8,angle:0},{x:0,y_off:-8,w:13,l:1.8,angle:Math.PI},{x:0,y_off:8,w:13,l:1.8,angle:Math.PI}],
+    'Pentashot': [{x:0,y_off:0,w:16,l:1.85,angle:0},{x:0,y_off:0,w:14,l:1.7,angle:Math.PI/10},{x:0,y_off:0,w:14,l:1.7,angle:-Math.PI/10},{x:0,y_off:0,w:12,l:1.6,angle:Math.PI/5},{x:0,y_off:0,w:12,l:1.6,angle:-Math.PI/5}],
+    'Predator': [{x:0,y_off:0,w:20,l:1.5,angle:0},{x:0,y_off:0,w:14,l:2.0,angle:0},{x:0,y_off:0,w:9,l:2.5,angle:0}],
+    'Sprayer': [{x:0,y_off:0,w:20,l:1.6,angle:0},{x:0,y_off:0,w:9,l:1.7,angle:0}],
+    'Railgun': [{x:0,y_off:-14,w:8,l:1.6,angle:0},{x:0,y_off:14,w:8,l:1.6,angle:0},{x:0,y_off:-6,w:6,l:1.7,angle:0},{x:0,y_off:6,w:6,l:1.7,angle:0}]
+  };
+
+  const tankAngle = e.angle || 0;
+  const r = e.radius || 20;
+  const barrels = BARREL_SPECS[e.tankType] || BARREL_SPECS['Basic'];
+
+  ctx.save();
+  ctx.rotate(tankAngle);
+
+  barrels.forEach(b => {
+    ctx.save();
+    ctx.rotate(b.angle || 0);
+    const len = r * (b.l || 1.8);
+    const halfW = (b.w || 16) / 2;
+    const yOff = b.y_off || 0;
+    ctx.translate(0, yOff);
+    ctx.fillStyle = '#5a7a8a';
+    ctx.strokeStyle = '#3a5a6a';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(0, -halfW, len, halfW * 2, 3);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  });
+
+  ctx.restore();
+}
+
+function drawBullet(b) {
+  if (!b) return;
+  ctx.beginPath();
+  ctx.arc(b.x, b.y, b.r || 8, 0, Math.PI * 2);
+  const color = getTeamColor(b.team);
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 4;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+function drawDrone(d) {
+  if (!d) return;
+  ctx.save();
+  ctx.translate(d.x, d.y);
+  ctx.rotate(d.angle || 0);
+
+  const r = d.radius || 12;
+  const color = getTeamColor(d.team);
+
+  if (d.square) {
+    // Necromancer square drone
+    ctx.beginPath();
+    ctx.rect(-r, -r, r*2, r*2);
+    ctx.fillStyle = SHAPE_COLORS.square;
+    ctx.fill();
+    ctx.strokeStyle = '#cc9900';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 6;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = shadeColor(color, -30);
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawHealthBar(e) {
+  if (!e.hp || !e.maxHp) return;
+  const hp = Math.max(0, e.hp);
+  const maxHp = e.maxHp;
+  const pct = Math.min(1, hp / maxHp);
+  if (pct >= 1) return;
+  const r = e.radius || 15;
+  const bw = Math.max(r * 2, 40);
+  const bh = 6;
+  const bx = -bw / 2;
+  const by = r + 8;
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 3); ctx.fill();
+  ctx.fillStyle = pct > 0.5 ? '#4ecdc4' : pct > 0.25 ? '#ffd700' : '#ff6b6b';
+  ctx.beginPath(); ctx.roundRect(bx, by, bw * pct, bh, 3); ctx.fill();
+}
+
+// ═══════════ MINIMAP ═══════════
+function renderMinimap() {
+  const mw = 160, mh = 160;
+  mmCtx.clearRect(0, 0, mw, mh);
+  mmCtx.fillStyle = 'rgba(10,12,26,0.8)';
+  mmCtx.fillRect(0, 0, mw, mh);
+
+  function toMM(wx, wy) {
+    return { x: (wx / WORLD_SIZE) * mw, y: (wy / WORLD_SIZE) * mh };
+  }
+
+  // Shapes
+  Object.values(entities).forEach(e => {
+    if (!['square','triangle','pentagon','hexagon'].includes(e.type)) return;
+    if (e.x == null) return;
+    const p = toMM(e.x, e.y);
+    mmCtx.fillStyle = SHAPE_COLORS[e.type] || '#aaa';
+    mmCtx.fillRect(p.x - 1, p.y - 1, 2, 2);
+  });
+
+  // Tanks/bots
+  Object.values(entities).forEach(e => {
+    if (!['tank','ai'].includes(e.type) || e.x == null) return;
+    const p = toMM(e.x, e.y);
+    mmCtx.beginPath();
+    mmCtx.arc(p.x, p.y, e.id === myId ? 4 : 2.5, 0, Math.PI * 2);
+    mmCtx.fillStyle = e.id === myId ? '#00d4ff' : (e.nameColor || getTeamColor(e.team));
+    mmCtx.fill();
+  });
+
+  // Viewport indicator
+  const vpW = (canvas.width / WORLD_SIZE) * mw;
+  const vpH = (canvas.height / WORLD_SIZE) * mh;
+  const vpX = (camera.x / WORLD_SIZE) * mw - vpW / 2;
+  const vpY = (camera.y / WORLD_SIZE) * mh - vpH / 2;
+  mmCtx.strokeStyle = 'rgba(255,255,255,0.3)';
+  mmCtx.lineWidth = 1;
+  mmCtx.strokeRect(vpX, vpY, vpW, vpH);
+}
+
+// ═══════════ HUD UPDATE ═══════════
+function updateHUD() {
+  document.getElementById('scoreVal').textContent = Math.floor(playerStats.score).toLocaleString();
+  document.getElementById('levelVal').textContent = playerStats.level;
+  document.getElementById('tankVal').textContent = playerStats.tankType;
+
+  // XP bar
+  const level = playerStats.level;
+  const maxLevel = 30;
+  if (level >= maxLevel) {
+    document.getElementById('xpLabel').textContent = 'MAX LEVEL';
+    document.getElementById('xpFill').style.width = '100%';
+  } else {
+    const curReq = LEVEL_REQUIREMENTS[level] || 0;
+    const nextReq = LEVEL_REQUIREMENTS[level + 1] || 1;
+    const xpInLevel = playerStats.score - curReq;
+    const xpNeeded = nextReq - curReq;
+    const pct = Math.min(100, Math.max(0, (xpInLevel / xpNeeded) * 100));
+    document.getElementById('xpLabel').textContent = `Level ${level}  ·  ${Math.floor(xpInLevel)} / ${xpNeeded} XP`;
+    document.getElementById('xpFill').style.width = pct + '%';
+  }
+
+  // Stats panel
+  const pts = playerStats.statPoints || 0;
+  document.getElementById('statPoints').textContent = pts > 0 ? `${pts} points available` : '';
+  const rowsEl = document.getElementById('statRows');
+  rowsEl.innerHTML = '';
+  STAT_NAMES.forEach((name, i) => {
+    const val = playerStats.stats[i] || 0;
+    const pct = (val / 7) * 100;
+    const row = document.createElement('div');
+    row.className = 'stat-row';
+    row.innerHTML = `
+      <span class="stat-name">${name}</span>
+      <div class="stat-bar-bg"><div class="stat-bar-fill" style="width:${pct}%"></div></div>
+      <button class="stat-add" data-i="${i}" ${(pts <= 0 || val >= 7) ? 'disabled' : ''}>+</button>
+    `;
+    rowsEl.appendChild(row);
+  });
+  rowsEl.querySelectorAll('.stat-add').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const i = +btn.dataset.i;
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'upgradeStat', statIndex: i }));
+    });
+  });
+
+  // Show upgrade panel if eligible
+  const upgrades = UPGRADE_TREE[playerStats.tankType];
+  const upgradePanel = document.getElementById('upgradePanel');
+  if (upgrades && upgrades.length && (playerStats.level >= 15 || playerStats.tankType !== 'Basic')) {
+    upgradePanel.style.display = 'block';
+    updateUpgrades();
+  } else {
+    upgradePanel.style.display = 'none';
+  }
+}
+
+function updateUpgrades() {
+  const tank = playerStats.tankType;
+  const upgrades = UPGRADE_TREE[tank] || [];
+  const upgradeList = document.getElementById('upgradeList');
+  upgradeList.innerHTML = '';
+  upgrades.forEach(u => {
+    if (playerStats.level < 15) return;
+    if ((u === 'Overlord' || u === 'Manager') && playerStats.level < 30) return;
+    const btn = document.createElement('button');
+    btn.className = 'upgrade-btn';
+    btn.textContent = u;
+    btn.addEventListener('click', () => {
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'upgradeTank', tank: u }));
+    });
+    upgradeList.appendChild(btn);
+  });
+  document.getElementById('upgradePanel').style.display = upgradeList.children.length > 0 ? 'block' : 'none';
+}
+
+function updateLeaderboard() {
+  const tanks = Object.values(entities).filter(e => ['tank','ai'].includes(e.type));
+  tanks.sort((a, b) => b.score - a.score);
+  const top = tanks.slice(0, 10);
+  const lbList = document.getElementById('lbList');
+  lbList.innerHTML = '';
+  top.forEach((e, i) => {
+    const div = document.createElement('div');
+    div.className = 'lb-entry' + (e.id === myId ? ' lb-me' : '');
+    div.innerHTML = `<span class="lb-name">${i+1}. ${e.name || 'Unnamed'}</span><span class="lb-score">${Math.floor(e.score).toLocaleString()}</span>`;
+    lbList.appendChild(div);
+  });
+}
+
+// ═══════════ INPUT ═══════════
+window.addEventListener('keydown', e => {
+  if (!isAlive) return;
+  if (e.key === 'w' || e.key === 'ArrowUp') inputs.up = true;
+  if (e.key === 's' || e.key === 'ArrowDown') inputs.down = true;
+  if (e.key === 'a' || e.key === 'ArrowLeft') inputs.left = true;
+  if (e.key === 'd' || e.key === 'ArrowRight') inputs.right = true;
+  if (e.key === 'e') inputs.repel = true;
+  // Stat shortcuts 1-8
+  const num = parseInt(e.key);
+  if (num >= 1 && num <= 8 && playerStats.statPoints > 0) {
+    const i = num - 1;
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'upgradeStat', statIndex: i }));
+  }
+});
+
+window.addEventListener('keyup', e => {
+  if (e.key === 'w' || e.key === 'ArrowUp') inputs.up = false;
+  if (e.key === 's' || e.key === 'ArrowDown') inputs.down = false;
+  if (e.key === 'a' || e.key === 'ArrowLeft') inputs.left = false;
+  if (e.key === 'd' || e.key === 'ArrowRight') inputs.right = false;
+  if (e.key === 'e') inputs.repel = false;
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (!isAlive) return;
+  const me = entities[myId];
+  if (!me || me.x == null) return;
+  const mx = e.clientX - canvas.width/2 + camera.x;
+  const my = e.clientY - canvas.height/2 + camera.y;
+  inputs.angle = Math.atan2(my - me.y, mx - me.x);
+  inputs.mouseX = mx; inputs.mouseY = my;
+});
+
+canvas.addEventListener('mousedown', e => { if (isAlive) inputs.shooting = true; });
+canvas.addEventListener('mouseup', e => { inputs.shooting = false; });
+
+function sendInput() {
+  if (!ws || ws.readyState !== 1 || !isAlive) return;
+  ws.send(JSON.stringify({ type: 'input', ...inputs }));
+}
+
+// ═══════════ PING ═══════════
+function startPing() {
+  setInterval(() => {
+    if (ws && ws.readyState === 1) {
+      pingStart = Date.now();
+      ws.send(JSON.stringify({ type: 'ping', time: pingStart }));
+    }
+  }, 2000);
+}
+
+// ═══════════ SHOW/HIDE ═══════════
+function showGame() {
+  document.getElementById('lobbyScreen').style.display = 'none';
+  document.getElementById('gameCanvas').style.display = 'block';
+  document.getElementById('hud').style.display = 'block';
+  canvas.focus();
+}
+
+function showDeath(data) {
+  const mins = Math.floor((data.timeAlive || 0) / 60);
+  const secs = (data.timeAlive || 0) % 60;
+  document.getElementById('deathStats').innerHTML = `
+    Score: <b>${Math.floor(data.score || 0).toLocaleString()}</b><br>
+    Level: <b>${data.level || 1}</b><br>
+    Tank: <b>${data.tank || 'Basic'}</b><br>
+    Survived: <b>${mins}m ${secs}s</b>
+  `;
+  document.getElementById('deathScreen').style.display = 'flex';
+}
+
+function showAchievement(ach) {
+  document.getElementById('achName').textContent = ach.name || '';
+  document.getElementById('achDesc').textContent = ach.description || '';
+  const toast = document.getElementById('achievementToast');
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 4000);
+}
+
+function showBroadcast(msg) {
+  const el = document.getElementById('broadcast');
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 6000);
+}
+
+// ═══════════ HELPERS ═══════════
+function getTeamColor(team) {
+  if (!team || team === 0) return '#5b9bd5';
+  return TEAM_COLORS[team] || `hsl(${(team * 47) % 360},70%,60%)`;
+}
+
+function shadeColor(hex, pct) {
+  const num = parseInt(hex.replace('#',''), 16);
+  const r = Math.max(0, Math.min(255, (num >> 16) + pct));
+  const g = Math.max(0, Math.min(255, ((num >> 8) & 0xFF) + pct));
+  const b = Math.max(0, Math.min(255, (num & 0xFF) + pct));
+  return `rgb(${r},${g},${b})`;
+}
+
+// ═══════════ CONTEXT MENU BLOCK ═══════════
+window.addEventListener('contextmenu', e => e.preventDefault());
+
+// ═══════════ INIT ═══════════
+// Check if we already have a name saved
+const savedName = localStorage.getItem('playerName');
+if (savedName) document.getElementById('nameInput').value = savedName;
+document.getElementById('nameInput').addEventListener('change', e => {
+  localStorage.setItem('playerName', e.target.value);
+});
+</script>
+</body>
+</html>
