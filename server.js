@@ -96,7 +96,7 @@ db.prepare(`
 `).run();
 // ===================== BOT CONSTANTS =====================
 const BACKUP_INTERVAL = 1000 * 60 * 60 * 12;
-const BACKUP_CHANNEL_ID = '1503493171701874788';
+const BACKUP_CHANNEL_ID = '1513631360450035753';
 const LEADERBOARD_CHANNEL_ID = '1470498877168812062';
 // ===================== GAME CONSTANTS =====================
 const GAME_SPEED = 1; 
