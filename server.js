@@ -2452,7 +2452,7 @@ async function createDatabaseBackup() {
 
         const embed = new EmbedBuilder()
             .setColor(EMBED_COLOR)
-            .setTitle('Backup Created')
+            .setTitle('Datasave Created')
             .addFields(
                 {
                     name: 'Timestamp',
@@ -2469,10 +2469,10 @@ async function createDatabaseBackup() {
         fs.unlinkSync(tempDbPath);
         fs.unlinkSync(zipPath);
 
-        console.log('[Backup] Backup uploaded successfully');
+        console.log('Backup uploaded successfully');
 
     } catch (err) {
-        console.error('[Backup] Failed:', err);
+        console.error('fail backup ', err);
     }
 }
 
@@ -2639,7 +2639,6 @@ discordClient.on('interactionCreate', async interaction => {
 
             const embed = new EmbedBuilder()
                 .setColor(EMBED_COLOR)
-                .setTitle('Permission Denied')
                 .setDescription(
                     'You do not have permission to run this command.'
                 )
@@ -2657,7 +2656,6 @@ discordClient.on('interactionCreate', async interaction => {
 
             const embed = new EmbedBuilder()
                 .setColor(EMBED_COLOR)
-                .setTitle('Missing File')
                 .setDescription('No file was attached.')
                 .setTimestamp();
 
@@ -2671,7 +2669,6 @@ discordClient.on('interactionCreate', async interaction => {
 
             const embed = new EmbedBuilder()
                 .setColor(EMBED_COLOR)
-                .setTitle('Invalid File')
                 .setDescription('You must upload a `.zip` backup file.')
                 .setTimestamp();
 
@@ -2683,7 +2680,6 @@ discordClient.on('interactionCreate', async interaction => {
 
         const loadingEmbed = new EmbedBuilder()
             .setColor(EMBED_COLOR)
-            .setTitle('Importing Backup')
             .setDescription('Please wait while the backup is restored...')
             .setTimestamp();
 
@@ -2763,7 +2759,7 @@ discordClient.on('interactionCreate', async interaction => {
         } catch (err) {
 
             console.error(
-                '[Backup Restore Error]',
+                'Backup Restore Error',
                 err
             );
 
