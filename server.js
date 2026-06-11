@@ -152,14 +152,18 @@ const TANK_SPECS = {
         barrels: [], square: true
     },
     'Destroyer': { barrels: [{x:0, y:0, w:33, l:1.9, angle:0, spread: 0, dmg: 4.5, spd: 0.8, rel: 8, size: 1.8, delay: 0}] },
-    'Octo Tank': { barrels: [
+    'Octo Tank': { 
+    barrels: [
         {x:0, y:0, w:16, l:1.8, angle:0, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
         {x:0, y:0, w:16, l:1.8, angle:Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
-       {x:0, y:0, w:16, l:1.8, angle:Math.PI, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
+        {x:0, y:0, w:16, l:1.8, angle:Math.PI/2, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
+        {x:0, y:0, w:16, l:1.8, angle:3*Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
+        {x:0, y:0, w:16, l:1.8, angle:Math.PI, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
         {x:0, y:0, w:16, l:1.8, angle:-3*Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5},
         {x:0, y:0, w:16, l:1.8, angle:-Math.PI/2, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0}, 
         {x:0, y:0, w:16, l:1.8, angle:-Math.PI/4, spread: 0, dmg: 0.51, spd: 1, rel: 1.1, size: 1, delay: 0.5}
-    ]},
+    ]
+},
     'Triplet': { barrels: [
         {x:0, y:-12, w:14, l:1.6, angle:0, spread: 0, dmg: 0.48, spd: 1, rel: 0.8, size: 1, delay: 0.5}, 
         {x:0, y:12, w:14, l:1.6, angle:0, spread: 0, dmg: 0.48, spd: 1, rel: 0.8, size: 1, delay: 0.5},
