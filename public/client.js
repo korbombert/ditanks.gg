@@ -79,7 +79,7 @@ document.body.appendChild(upgradeHoverZone);
 
 const WORLD_SIZE = 4000;
 const BASE_SIZE = 600;
-const TICK_RATE = 45;
+const TICK_RATE = 60;
 const entryCount = 7
 let myProfile = null;
 const shopItems = { 
