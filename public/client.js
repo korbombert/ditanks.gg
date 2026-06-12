@@ -835,29 +835,49 @@ function connectWS(regionStr, modeStr) {
         if (window.inputInterval) clearInterval(window.inputInterval);
         if (window.inputInterval) clearInterval(window.inputInterval);
         window.inputInterval = setInterval(() => {
-            if(myId) {
-                let finalAngle = 0;
-                let me = gameState.entities.find(e => e.id === myId);
-                
-                if (me) {
-                    let myX = renderEntities.has(myId) ? renderEntities.get(myId).renderX : me.x;
-                    let myY = renderEntities.has(myId) ? renderEntities.get(myId).renderY : me.y;
-                    
-                    finalAngle = Math.atan2(mouse.ry - myY, mouse.rx - myX);
-                } else {
-                    finalAngle = Math.atan2(mouse.ry - (camera.y + canvas.height/2), mouse.rx - (camera.x + canvas.width/2));
-                }
+    if (myId) {
+        let finalAngle = 0;
+        let me = gameState.entities.find(e => e.id === myId);
+        
+        if (me) {
+            let myX = renderEntities.has(myId) ? renderEntities.get(myId).renderX : me.x;
+            let myY = renderEntities.has(myId) ? renderEntities.get(myId).renderY : me.y;
+            
+            finalAngle = Math.atan2(mouse.ry - myY, mouse.rx - myX);
+        } else {
+            finalAngle = Math.atan2(mouse.ry - (camera.y + canvas.height / 2), mouse.rx - (camera.x + canvas.width / 2));
+        }
 
-                if (autoSpin) { spinAngle += 0.08; finalAngle = spinAngle; }
+        if (autoSpin) { spinAngle += 0.08; finalAngle = spinAngle; }
 
-                ws.send(JSON.stringify({
-                    type: 'input', up: keys.w || keys.arrowup, down: keys.s || keys.arrowdown,
-                    left: keys.a || keys.arrowleft, right: keys.d || keys.arrowright,
-                    shooting: mouse.pressed || autoFire, angle: finalAngle,
-                    repel: mouse.repel, mouseX: mouse.rx, mouseY: mouse.ry,
-                }));
-            }
-        }, 1000 / TICK_RATE);
+        // 1. Allocate a 14-byte buffer:
+        // Type (1B) + Flags (1B) + Angle (4B) + MouseX (4B) + MouseY (4B) = 14 Bytes
+        const buffer = new ArrayBuffer(14);
+        const view = new DataView(buffer);
+
+        // 2. Set Message Type (1 = 'input')
+        view.setUint8(0, 1);
+
+        // 3. Pack booleans into a single byte using bitwise OR (|)
+        let flags = 0;
+        if (keys.w || keys.arrowup)     flags |= (1 << 0); // Bit 0
+        if (keys.s || keys.arrowdown)   flags |= (1 << 1); // Bit 1
+        if (keys.a || keys.arrowleft)   flags |= (1 << 2); // Bit 2
+        if (keys.d || keys.arrowright)  flags |= (1 << 3); // Bit 3
+        if (mouse.pressed || autoFire)  flags |= (1 << 4); // Bit 4
+        if (mouse.repel)                flags |= (1 << 5); // Bit 5
+        
+        view.setUint8(1, flags);
+
+        // 4. Set the coordinates/angle as 32-bit floats (using little-endian: true)
+        view.setFloat32(2, finalAngle, true);
+        view.setFloat32(6, mouse.rx, true);
+        view.setFloat32(10, mouse.ry, true);
+
+        // 5. Send the raw binary buffer instead of a string
+        ws.send(buffer);
+    }
+}, 1000 / 60); // Assuming a 60Hz tick rate or your custom interval
         const urlParams = new URLSearchParams(window.location.search);
         const token = urlParams.get('token');
         
