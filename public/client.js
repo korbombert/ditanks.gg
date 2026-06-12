@@ -586,15 +586,35 @@ async function fetchServersAndInit() {
 
 function populateModes() {
     const modeSelect = document.getElementById('gameModeInput');
-    modeSelect.innerHTML = ''; 
-    
+    modeSelect.innerHTML = '';
+
     for (let mode in serverData) {
         let opt = document.createElement('option');
         opt.value = mode;
-        opt.innerText = mode === "2TDM" ? "🔵 2 Teams" : (mode === "4TDM" ? "🟪 4 Teams" : "⚔️ Free For All");
+        opt.innerText =
+            mode === "2TDM"
+                ? "🔵 2 Teams"
+                : mode === "4TDM"
+                ? "🟪 4 Teams"
+                : "⚔️ Free For All";
+
         modeSelect.appendChild(opt);
     }
-    populateRegions(); 
+
+    // Restore saved mode if it still exists
+    const savedMode = localStorage.getItem('preferredGameMode');
+
+    if (savedMode && serverData[savedMode]) {
+        modeSelect.value = savedMode;
+    } else {
+        // Fallback to FFA
+        modeSelect.value = serverData.FFA ? "FFA" : modeSelect.options[0]?.value;
+
+        // Clean up invalid saved mode
+        localStorage.removeItem('preferredGameMode');
+    }
+
+    populateRegions();
 }
 
 function populateRegions() {
