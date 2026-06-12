@@ -819,6 +819,7 @@ function readBinaryMessage(ab) {
 function connectWS(regionStr, modeStr) {
     const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
     ws = new WebSocket(protocol + window.location.host);
+    ws.binaryType = 'arraybuffer'
     function sendPing() {
         if (ws && ws.readyState === 1) {
             ws.send(JSON.stringify({ type: 'ping', time: performance.now() }));
