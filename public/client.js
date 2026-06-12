@@ -878,7 +878,7 @@ function connectWS(regionStr, modeStr) {
         // 5. Send the raw binary buffer instead of a string
         ws.send(buffer);
     }
-}, 1000 / 45); // Assuming a 60Hz tick rate or your custom interval
+}, 1000 / 60); // Assuming a 60Hz tick rate or your custom interval
         const urlParams = new URLSearchParams(window.location.search);
         const token = urlParams.get('token');
         
