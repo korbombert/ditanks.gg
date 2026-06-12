@@ -641,16 +641,26 @@ document.getElementById('gameModeInput').addEventListener('change', () => {
 });
 document.getElementById('regionInput').addEventListener('change', initConnection);
 window.onload = fetchServersAndInit;
-
+// Restore saved nickname
+const savedName = localStorage.getItem('playerName');
+if (savedName) {
+    document.getElementById('nameInput').value = savedName;
+}
 // Locate these functions in client.js and update them:
 
 function spawnPlayer() {
     saveColors();
     gameMode = document.getElementById('gameModeInput').value;
     document.getElementById('sb-title').innerText = gameMode === "2TDM" ? "2 Teams" : (gameMode === "4TDM" ? "4 Teams" : "FFA");
+    const playerName = document.getElementById('nameInput').value;
 
-    ws.send(JSON.stringify({ type: 'spawn', name: document.getElementById('nameInput').value || "Unnamed" }));
+// Save nickname
+localStorage.setItem('playerName', playerName);
 
+ws.send(JSON.stringify({
+    type: 'spawn',
+    name: playerName
+}));
     document.getElementById('menu-overlay').style.display = 'none';
     document.getElementById('account-panel').style.display = 'none';
     document.getElementById('changelog-panel').style.display = 'none'; 
