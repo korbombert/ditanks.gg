@@ -2087,47 +2087,53 @@ wss.on('connection', (ws, req) => {
             .catch(err => console.error("GeoIP lookup failed:", err));
     }
 
-    ws.on('message', (message) => {
+    ws.on('message', (message, isBinary) => {
     let data;
 
-    // 1. Determine if the payload is binary (Node.js Buffer) or text (JSON)
-    if (typeof message !== 'string') {
-        // Convert WebSocket message to standard Node buffer wrapper safely
-        const buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
-        const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-        
-        // Byte 0 holds our packet type (1 = 'input')
-        const messageType = view.getUint8(0);
+    try {
+        if (isBinary) {
+            const buffer = Buffer.from(message);
+            const view = new DataView(
+                buffer.buffer,
+                buffer.byteOffset,
+                buffer.byteLength
+            );
 
-        if (messageType === 1) {
-            const flags = view.getUint8(1);
+            const messageType = view.getUint8(0);
 
-            // Reconstruct the payload into the expected JSON-like object structure
-            data = {
-                type: 'input',
-                up:       !!(flags & (1 << 0)), // Read bit 0
-                down:     !!(flags & (1 << 1)), // Read bit 1
-                left:     !!(flags & (1 << 2)), // Read bit 2
-                right:    !!(flags & (1 << 3)), // Read bit 3
-                shooting: !!(flags & (1 << 4)), // Read bit 4
-                repel:    !!(flags & (1 << 5)), // Read bit 5
-                angle:    view.getFloat32(2, true),
-                mouseX:   view.getFloat32(6, true),
-                mouseY:   view.getFloat32(10, true)
-            };
+            switch (messageType) {
+                case 1: {
+                    const flags = view.getUint8(1);
+
+                    data = {
+                        type: 'input',
+                        up: !!(flags & 1),
+                        down: !!(flags & 2),
+                        left: !!(flags & 4),
+                        right: !!(flags & 8),
+                        shooting: !!(flags & 16),
+                        repel: !!(flags & 32),
+                        angle: view.getFloat32(2, true),
+                        mouseX: view.getFloat32(6, true),
+                        mouseY: view.getFloat32(10, true)
+                    };
+
+                    break;
+                }
+
+                default:
+                    return;
+            }
+        } else {
+            data = JSON.parse(message.toString());
         }
-    } else {
-        // Fallback: Handle all traditional text-based JSON frames safely
-        try {
-            data = JSON.parse(message);
-        } catch (e) {
-            console.error("Malformed JSON frame received:", e);
-            return;
-        }
+    } catch (err) {
+        console.error('Malformed packet:', err);
+        return;
     }
 
-    // Guard statement if data couldn't be parsed or was an unknown format
     if (!data) return;
+
 
         if(data.type === 'ping') {
             ws.send(JSON.stringify({ type: 'pong', time: data.time, locationl: SERVER_LOCATION }));
