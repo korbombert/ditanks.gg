@@ -1070,7 +1070,6 @@ let currentLobbyConfig = null;
         try {
             const cfg = await apiCall('/api/admin/game-config');
             document.getElementById('cfg-maintenance').checked = cfg.maintenance_mode === '1';
-            document.getElementById('cfg-motd').value = cfg.motd || '';
             const mult = parseFloat(cfg.coin_multiplier) || 1;
             document.getElementById('cfg-coinmult').value = mult;
             document.getElementById('cfg-coinmult-val').textContent = mult + 'x';
