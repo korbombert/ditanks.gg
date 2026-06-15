@@ -1706,7 +1706,6 @@ class Drone {
 
 const rooms = {
     "FFA-S1": new Room("FFA-S1", "FFA",loadLobbyConfig('FFA-S1')),
-    "FFA-S2": new Room("FFA-S2", "FFA",loadLobbyConfig('FFA-S2')),
     "2TDM-S1": new Room("2TDM-S1", "2TDM",loadLobbyConfig('2TDM-S1')),
     "4TDM-S1": new Room("4TDM-S1", "4TDM",loadLobbyConfig('4TDM-S1')),
 };
