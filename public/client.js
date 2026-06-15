@@ -77,7 +77,7 @@ const upgradeHoverZone = document.createElement('div');
 upgradeHoverZone.id = 'upgrade-hover-zone';
 document.body.appendChild(upgradeHoverZone);
 
-const WORLD_SIZE = 4000;
+const WORLD_SIZE = 5500;
 const BASE_SIZE = 600;
 const TICK_RATE = 60;
 const entryCount = 7
