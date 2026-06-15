@@ -338,6 +338,19 @@
                     <option value="4TDM">4 Teams</option>
                 </select>
             </div>
+            <div class="form-group">
+    <label>Bots</label>
+    <input type="number"
+           id="new-server-bots"
+           value="50">
+</div>
+
+<div class="form-group">
+    <label>Shapes</label>
+    <input type="number"
+           id="new-server-shapes"
+           value="200">
+</div>
             <button class="btn btn-green" onclick="createServer()">+ CREATE</button>
         </div>
 
@@ -461,7 +474,64 @@
         </div>
     </div>
 </div>
+<div class="modal-overlay" id="modal-lobby">
+    <div class="modal-box" style="width:500px;">
+        <h3 id="lobby-title">Lobby Config</h3>
 
+        <div class="form-group">
+            <label>Bot Count</label>
+            <input type="number" id="lobby-bots" min="0">
+        </div>
+
+        <div class="form-group">
+            <label>Shape Count</label>
+            <input type="number" id="lobby-shapes" min="0">
+        </div>
+
+        <div class="toggle-row">
+            <label class="toggle-wrap">
+                <input type="checkbox" id="lobby-shape-respawn">
+                <span class="toggle-slider"></span>
+            </label>
+
+            <div>
+                <div class="toggle-label">
+                    Shape Respawn
+                </div>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Max Players</label>
+            <input type="number" id="lobby-maxplayers">
+        </div>
+
+        <div class="toggle-row">
+            <label class="toggle-wrap">
+                <input type="checkbox" id="lobby-boss">
+                <span class="toggle-slider"></span>
+            </label>
+
+            <div>
+                <div class="toggle-label">
+                    Boss Enabled
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-green"
+                    onclick="saveLobbyConfig()">
+                Save
+            </button>
+
+            <button class="btn btn-gray"
+                    onclick="closeModal('modal-lobby')">
+                Cancel
+            </button>
+        </div>
+    </div>
+</div>
 <script>
     // ===================== AUTH =====================
     const urlParams = new URLSearchParams(window.location.search);
@@ -509,12 +579,29 @@
 
         document.getElementById('room-list').innerHTML = rooms.length
             ? rooms.map(r => `
-                <div class="room-card" onclick="loadPlayers('${r.id}')">
+                <div class="room-card">
                     <div>
-                        <strong style="font-size:18px;color:#00b2e1;">${r.id}</strong>
-                        <span style="color:#888;margin-left:10px;font-size:14px;">${r.mode}</span>
-                    </div>
-                    <div style="font-weight:bold;font-size:18px;">${r.players} 👤</div>
+    <strong style="font-size:18px;color:#00b2e1;">${r.id}</strong>
+    <span style="color:#888;margin-left:10px;font-size:14px;">
+        ${r.mode}
+    </span>
+</div>
+
+<div style="display:flex;gap:8px;">
+    <button class="btn btn-purple btn-sm"
+        onclick="event.stopPropagation();openLobbyConfig('${r.id}')">
+        Configure
+    </button>
+
+    <button class="btn btn-blue btn-sm"
+        onclick="event.stopPropagation();loadPlayers('${r.id}')">
+        View
+    </button>
+
+    <div style="font-weight:bold;font-size:18px;">
+        ${r.players}
+    </div>
+</div>
                 </div>
             `).join('')
             : '<div class="empty-state">No active rooms found.</div>';
@@ -554,7 +641,74 @@
             }).join('')
             : '<tr><td colspan="5" class="empty-state">No players in this room.</td></tr>';
     }
+let currentLobbyConfig = null;
+    async function openLobbyConfig(roomId) {
+    currentLobbyConfig = roomId;
 
+    const cfg = await apiCall(
+        `/api/admin/lobbies/${roomId}/config`
+    );
+
+    document.getElementById('lobby-title').textContent =
+        `${roomId} Configuration`;
+
+    document.getElementById('lobby-bots').value =
+        cfg.botCount ?? 40;
+
+    document.getElementById('lobby-shapes').value =
+        cfg.shapeCount ?? 300;
+
+    document.getElementById('lobby-shape-respawn').checked =
+        cfg.shapeRespawn ?? true;
+
+    document.getElementById('lobby-maxplayers').value =
+        cfg.maxPlayers ?? '';
+
+    document.getElementById('lobby-boss').checked =
+        cfg.bossEnabled ?? false;
+
+    document.getElementById('modal-lobby')
+        .classList.add('open');
+}
+    async function saveLobbyConfig() {
+    await apiCall(
+        `/api/admin/lobbies/${currentLobbyConfig}/config`,
+        'POST',
+        {
+            botCount: parseInt(
+                document.getElementById('lobby-bots').value
+            ),
+
+            shapeCount: parseInt(
+                document.getElementById('lobby-shapes').value
+            ),
+
+            shapeRespawn:
+                document.getElementById(
+                    'lobby-shape-respawn'
+                ).checked,
+
+            maxPlayers: parseInt(
+                document.getElementById(
+                    'lobby-maxplayers'
+                ).value
+            ) || null,
+
+            bossEnabled:
+                document.getElementById(
+                    'lobby-boss'
+                ).checked
+        }
+    );
+
+    alert(
+        'Lobby updated.'
+    );
+
+    closeModal('modal-lobby');
+
+    loadRooms();
+}
     async function takeAction(action, playerId, ipHash) {
         let reason = '', newName = '';
         if (action === 'ban') {
@@ -873,7 +1027,15 @@
         const mode = document.getElementById('new-server-mode').value;
         if (!id) return alert("Please enter a Server ID.");
         try {
-            const result = await apiCall('/api/admin/server_instances/create', 'POST', { id, mode });
+            const result = await apiCall('/api/admin/server_instances/create', 'POST', { id, mode, config: {
+        botCount: parseInt(
+            document.getElementById('new-server-bots').value
+        ),
+
+        shapeCount: parseInt(
+            document.getElementById('new-server-shapes').value
+        )
+    }});
             if (result.error) throw new Error(result.error);
             document.getElementById('new-server-id').value = '';
             loadServers();
