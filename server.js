@@ -101,7 +101,7 @@ const LEADERBOARD_CHANNEL_ID = '1470498877168812062';
 // ===================== GAME CONSTANTS =====================
 const GAME_SPEED = 1; 
 const VIEW_DISTANCE = 1000; 
-const WORLD_SIZE = 4000;
+const WORLD_SIZE = 5500;
 const BASE_SIZE = 600;
 const MAX_LEVEL = 30;
 const TICK_RATE = 60; 
@@ -2053,7 +2053,7 @@ function updateRoom(room) {
     respawningBots.forEach(score => room.spawnBot(Math.floor(Math.random()*100), score));
 
     let shapes = room.entities.filter(e => !['ai','tank'].includes(e.type)).length;
-    if(shapes < 230) room.spawnShape();
+    if(shapes < 300) room.spawnShape();
 }
 
 // ===================== GAME TICK =====================
