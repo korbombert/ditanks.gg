@@ -85,7 +85,12 @@ db.prepare(`
         badge TEXT
     )
 `).run();
-
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS lobby_configs (
+        room_id TEXT PRIMARY KEY,
+        config TEXT
+    )
+`).run();
 db.prepare(`
     CREATE TABLE IF NOT EXISTS user_achievements_v2 (
         user_id TEXT,
@@ -259,7 +264,22 @@ const SHOP_ITEMS = {
         { id: '#ffff00', name: 'Yellow', cost: 5000 }
     ]
 };
+function saveLobbyConfig(roomId, config) {
+    db.prepare(`
+        INSERT OR REPLACE INTO lobby_configs (room_id, config)
+        VALUES (?, ?)
+    `).run(roomId, JSON.stringify(config));
+}
 
+function loadLobbyConfig(roomId) {
+    const row = db.prepare(`
+        SELECT config
+        FROM lobby_configs
+        WHERE room_id = ?
+    `).get(roomId);
+
+    return row ? JSON.parse(row.config) : {};
+}
 // ===================== EXPRESS SETUP =====================
 
 const app = express();
@@ -511,7 +531,11 @@ app.post('/api/admin/server_instances/create', requireAdmin, (req, res) => {
     if (!id || !mode) return res.status(400).json({ error: "Invalid parameters" });
     if (rooms[id]) return res.status(400).json({ error: "Server already exists" });
     
-    rooms[id] = new Room(id, mode);
+    rooms[id] = new Room(
+    id,
+    mode,
+    loadLobbyConfig(id)
+);
     res.json({ success: true });
 });
 
@@ -533,7 +557,62 @@ app.post('/api/admin/server_instances/action', requireAdmin, (req, res) => {
     });
     res.json({ success: true });
 });
+app.get('/api/admin/lobbies/:roomId/config', requireAdmin, (req, res) => {
+    const room = rooms[req.params.roomId];
 
+    if (!room) {
+        return res.status(404).json({ error: "Room not found" });
+    }
+
+    res.json(room.config);
+});
+app.post('/api/admin/lobbies/:roomId/config', requireAdmin, (req, res) => {
+    const room = rooms[req.params.roomId];
+
+    if (!room) {
+        return res.status(404).json({ error: "Room not found" });
+    }
+
+    room.config = {
+        ...room.config,
+        ...req.body
+    };
+
+    saveLobbyConfig(room.id, room.config);
+
+    const bots = room.entities.filter(e => e.type === 'ai');
+
+    if (bots.length < room.config.botCount) {
+        for (let i = bots.length; i < room.config.botCount; i++) {
+            room.spawnBot(i);
+        }
+    }
+
+    if (bots.length > room.config.botCount) {
+        bots
+            .slice(room.config.botCount)
+            .forEach(bot => bot.markedForDeletion = true);
+    }
+    const shapes = room.entities.filter(e =>
+    ['square','triangle','pentagon','hexagon'].includes(e.type)
+);
+
+if (shapes.length < room.config.shapeCount) {
+    for (let i = shapes.length; i < room.config.shapeCount; i++) {
+        room.spawnShape();
+    }
+}
+
+if (shapes.length > room.config.shapeCount) {
+    shapes
+        .slice(room.config.shapeCount)
+        .forEach(shape => shape.markedForDeletion = true);
+}
+    res.json({
+        success: true,
+        config: room.config
+    });
+});
 app.get('/api/changelogs', (req, res) => {
     const logs = db.prepare("SELECT * FROM changelogs ORDER BY sort_order DESC, date DESC").all();
     res.json(logs);
@@ -778,9 +857,15 @@ class SpatialGrid {
 }
 
 class Room {
-    constructor(id, mode) {
+    constructor(id, mode, config = {}) {
         this.id = id;
         this.mode = mode;
+        this.config = {
+            shapeCount: config.shapeCount ?? 300,
+            botCount: config.botCount ?? 40, // increased default
+            shapeRespawn: config.shapeRespawn ?? true,
+            ...config
+        };
         this.entities = [];
         this.bullets = [];
         this.drones = [];
@@ -821,9 +906,14 @@ class Room {
     }
 
     spawnEntities() {
-        for(let i=0; i<200; i++) this.spawnShape();
-        for(let i=0; i<24; i++) this.spawnBot(i);
+    for (let i = 0; i < this.config.shapeCount; i++) {
+        this.spawnShape();
     }
+
+    for (let i = 0; i < this.config.botCount; i++) {
+        this.spawnBot(i);
+    }
+}
 
     spawnShape() {
         let x = Math.random() * WORLD_SIZE, y = Math.random() * WORLD_SIZE;
@@ -1615,10 +1705,10 @@ class Drone {
 // ===================== ROOMS =====================
 
 const rooms = {
-    "FFA-S1": new Room("FFA-S1", "FFA"),
-    "FFA-S2": new Room("FFA-S2", "FFA"),
-    "2TDM-S1": new Room("2TDM-S1", "2TDM"),
-    "4TDM-S1": new Room("4TDM-S1", "4TDM"),
+    "FFA-S1": new Room("FFA-S1", "FFA",loadLobbyConfig('FFA-S1')),
+    "FFA-S2": new Room("FFA-S2", "FFA",loadLobbyConfig('FFA-S2')),
+    "2TDM-S1": new Room("2TDM-S1", "2TDM",loadLobbyConfig('2TDM-S1')),
+    "4TDM-S1": new Room("4TDM-S1", "4TDM",loadLobbyConfig('4TDM-S1')),
 };
 
 // ===================== GAME LOGIC =====================
