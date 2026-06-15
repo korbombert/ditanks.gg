@@ -987,30 +987,37 @@ function connectWS(regionStr, modeStr) {
     };
 
    ws.onclose = (e) => {
-        if(myId) {
-            document.getElementById('death-screen').style.display = 'flex';
-            document.querySelector('.ds-title').innerText = "Disconnected";
-            document.getElementById('ds-level').innerText = "Connection lost.";
-            document.getElementById('ds-score').innerText = "--";
-            document.getElementById('ds-time').innerText = "--";
-        }
-        
-        // Use an inline SVG refresh/reconnect icon and change the text
-        const btn = document.getElementById('playBtn');
-        btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px;"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg> Disconnected`;
-        btn.style.background = "#f14e54"; 
-        btn.style.borderBottomColor = "#c83d42"; 
-        btn.disabled = false;
-        
-        // Change the button's click behavior to attempt a reconnection
-        btn.onclick = initConnection;
+    if(myId) {
+        document.getElementById('death-screen').style.display = 'flex';
+        document.querySelector('.ds-title').innerText = "Disconnected";
+        document.getElementById('ds-level').innerText = "Connection lost.";
+        document.getElementById('ds-score').innerText = "--";
+        document.getElementById('ds-time').innerText = "--";
+    }
+    
+    const btn = document.getElementById('playBtn');
+    btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px;"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg> Disconnected`;
+    btn.style.background = "#f14e54"; 
+    btn.style.borderBottomColor = "#c83d42"; 
+    btn.disabled = false;
+    btn.onclick = initConnection;
 
-        // Show Reason
-        const reasonText = e.reason || "Connection lost to the server.";
-        const reasonDiv = document.getElementById('disconnect-reason');
-        reasonDiv.innerText = reasonText;
-        reasonDiv.style.display = 'flex'; 
+    // Build a human-readable close reason
+    const CLOSE_CODES = {
+        1000: "Normal closure",
+        1001: "Client navigated away",
+        1006: "Connection lost",
+        1011: "Server error",
+        1012: "Server is restarting",
+        4000: "Disconnected by server"
     };
+    const codeLabel = CLOSE_CODES[e.code] || "Unknown reason";
+    const reasonStr = e.reason ? ` — ${e.reason}` : "";
+    
+    const reasonDiv = document.getElementById('disconnect-reason');
+    reasonDiv.innerText = `${e.code} - ${codeLabel}${reasonStr}`;
+    reasonDiv.style.display = 'flex'; 
+};
 }
 let currentUpgradesShown = "";
 let upgradesIgnored = false;
