@@ -1312,7 +1312,7 @@ const escapeHTML = (str) => {
         const entries = gameState.entities
             .filter(e => ['tank', 'ai'].includes(e.type))
             .sort((a, b) => b.score - a.score)
-            .slice(0, entryCount);
+            .slice(0, 10);
 
         const leaderScore = entries.length > 0 ? Math.max(entries[0].score, 1) : 1;
         document.getElementById('score-list').innerHTML = entries.map(s => {
