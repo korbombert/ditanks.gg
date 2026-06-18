@@ -1101,7 +1101,6 @@ function checkUpgrades() {
         else if (myStats.tankType === 'Machine Gun') options = ['Destroyer', 'Sprayer', 'Railgun'];
         else if (myStats.tankType === 'Twin')    options = ['Octo Tank', 'Triplet', 'Twin Flank', 'Pentashot'];
         else if (myStats.tankType === 'Flank Guard') options = ['Tri-angle', 'Octo Tank', 'Twin Flank'];
-        else if (myStats.tankType === 'Twin Flank')  options = ['Pentashot'];
     }
 
     const neededStr = options.join(",");
