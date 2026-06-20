@@ -193,9 +193,9 @@ const TANK_SPECS = {
         {x:0, y:0, w:14, l:1.6, angle:-Math.PI/5, spread:0, dmg:0.5, spd:1, rel:1, size:1, delay:0.2}
     ]},
     'Predator': { barrels: [
-        {x:0, y:0, w:24, l:1.5, angle:0, spread:0, dmg:0.92, spd:1.4, rel:2, size:0.9, delay:0},
-        {x:0, y:0, w:17, l:2, angle:0, spread:0, dmg:0.92, spd:1.4, rel:2, size:1, delay:0.25},
-        {x:0, y:0, w:10, l:2.5, angle:0, spread:0, dmg:0.92, spd:1.4, rel:2, size:1.1, delay:0.5}
+        {x:0, y:0, w:24, l:1.5, angle:0, spread:0, dmg:0.9, spd:1.4, rel:3, size:0.9, delay:0},
+        {x:0, y:0, w:17, l:2, angle:0, spread:0, dmg:0.9, spd:1.4, rel:3,size:1, delay:0.25},
+        {x:0, y:0, w:10, l:2.5, angle:0, spread:0, dmg:0.9, spd:1.4, rel:3,size:1.1, delay:0.5}
     ]},
     'Sprayer': { barrels: [
         {x:0, y:0, w:22, w2:32, l:1.6, angle:0, spread:0.5, dmg:0.745, spd:1, rel:0.5, size:1, delay:0, recoilMult:1.3},
