@@ -614,16 +614,16 @@
             </button>
         </div>
     </div>
+</div>
 
-    <!-- Patch notes modal (triggered from changelog panel) -->
-    <div id="full-changelog-modal" class="modal">
-        <div class="modal-header">
-            <h2>Patch Notes</h2>
-            <button class="close-btn"
-                    onclick="document.getElementById('full-changelog-modal').style.display='none'">✖</button>
-        </div>
-        <div id="full-changelog-content" style="text-align:left; line-height:1.5;"></div>
+<!-- Patch notes modal (triggered from changelog panel) -->
+<div id="full-changelog-modal" class="modal">
+    <div class="modal-header">
+        <h2>Patch Notes</h2>
+        <button class="close-btn"
+                onclick="document.getElementById('full-changelog-modal').style.display='none'">✖</button>
     </div>
+    <div id="full-changelog-content" style="text-align:left; line-height:1.5;"></div>
 </div>
 
 <!-- =============================================
@@ -683,6 +683,9 @@
        Computes --ui-scale from viewport width so every
        anchored panel shrinks smoothly on smaller screens
        without needing separate px-offset media queries.
+       It also keeps the changelog panel hidden whenever
+       the player is actually in a match, regardless of
+       viewport width or resize events.
     ----------------------------------------------- */
     (function() {
         // Design reference width — panels were sized for this viewport
@@ -692,19 +695,36 @@
         // Maximum scale (don't enlarge beyond 1:1 on huge monitors)
         const MAX_SCALE = 1.0;
 
+        function isInGame() {
+            const gameUI = document.getElementById('game-ui');
+            if (!gameUI) return false;
+            return window.getComputedStyle(gameUI).display !== 'none';
+        }
+
         function updateScale() {
             const vw = window.innerWidth;
             const raw = vw / DESIGN_W;
             const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, raw));
             document.documentElement.style.setProperty('--ui-scale', scale.toFixed(4));
 
-            // Hide changelog panel on narrow viewports (saves horizontal room)
+            // Changelog panel should stay hidden whenever we're in a match,
+            // no matter what the viewport width is, and also hide on
+            // narrow viewports the same as before.
             const cl = document.getElementById('changelog-panel');
-            if (cl) cl.style.display = vw < 800 ? 'none' : '';
+            if (cl) cl.style.display = (isInGame() || vw < 800) ? 'none' : '';
         }
 
         updateScale();
         window.addEventListener('resize', updateScale);
+
+        // client.js toggles #game-ui's display directly when the player
+        // spawns/exits without going through this script, so watch it
+        // for changes and re-run updateScale() whenever that happens.
+        const gameUI = document.getElementById('game-ui');
+        if (gameUI && window.MutationObserver) {
+            const observer = new MutationObserver(updateScale);
+            observer.observe(gameUI, { attributes: true, attributeFilter: ['style', 'class'] });
+        }
     })();
 
     /* -----------------------------------------------
