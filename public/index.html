@@ -381,10 +381,19 @@
         }
         #score-bar { width: 100%; height: 100%; background: #40f252; transition: width 0.2s; }
         #score-text-overlay {
-            position: absolute;  left: 0; width: 100%;
-            text-align: center; color: white; font-size: 10px;
-            font-weight: bold; text-shadow: 1px 1px black;
-        }
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 100%;
+    transform: translateY(-50%); /* Perfectly centers the text vertically */
+    text-align: center;
+    color: white;
+    font-size: 10px;
+    font-weight: bold;
+    text-shadow: 1px 1px black;
+    pointer-events: none;        /* Prevents the text box from absorbing mouse clicks */
+    z-index: 2;                  /* Guarantees it renders on top of the green bar fill */
+}
         #level-text-overlay {
     position: absolute;
     top: 50%;
