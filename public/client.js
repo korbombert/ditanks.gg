@@ -1131,7 +1131,7 @@ function updateUI() {
     if (levelText) {
         levelText.innerHTML = `<span style="color:${myNameColor}">${myName}</span>`;
     }
-    let levelText2 = document.getElementById('level-text-2')
+    let levelText2 = document.getElementById('level-text-overlay')
     if (levelText2){
         levelText2.innerHTML = `
             <span style="color: white; font-weight: bold; font-family: Ubuntu, sans-serif; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;">
