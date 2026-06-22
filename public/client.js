@@ -197,7 +197,7 @@ const deathCtx = deathCanvas.getContext('2d');
 
 let gameState = { entities: [], bullets: [], drones: [] };
 let myStats = { xp: 0, level: 1, statPoints: 0, stats: [0,0,0,0,0,0,0,0], tankType: 'Basic', score: 0 };
-
+let myNameColor = '#fff'
 const DEFAULT_COLORS = { 
     bg: "#cdcdcd", team1: "#0099ff", team2: "#fb3c42", 
     team3: "#be7ff5", team4: "#00e16e", // Purple & Green
@@ -920,7 +920,7 @@ function connectWS(regionStr, modeStr) {
 
     ws.onmessage = (e) => {
         const data = JSON.parse(e.data);
-        if(data.type === 'init') { myId = data.id; myTeam = data.team; spectateId = null; }
+        if(data.type === 'init') { myId = data.id; myTeam = data.team; spectateId = null; myNameColor = data.nc}
         else if (data.type === 'achievement_unlocked') {
             unlockedAchievements.push(data.achievement);
             showAchievementPopup(data.achievement);
