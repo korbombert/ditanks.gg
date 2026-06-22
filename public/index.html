@@ -385,6 +385,11 @@
             text-align: center; color: white; font-size: 10px;
             font-weight: bold; text-shadow: 1px 1px black;
         }
+        #level-text-overlay {
+            position: absolute; top: -1px; left: 0; width: 100%;
+            text-align: center; color: white; font-size: 10px;
+            font-weight: bold; text-shadow: 1px 1px black;
+        }
         #xp-bar-container {
             width: 100%; height: 16px; background: #555;
             border: 3px solid #333; border-radius: 8px; overflow: hidden;
@@ -540,7 +545,10 @@
             <div id="score-bar"></div>
             <div id="score-text-overlay">Score: 0</div>
         </div>
-        <div id="xp-bar-container"><div id="xp-bar"></div></div>
+        <div id="xp-bar-container">
+            <div id="xp-bar"></div>
+            <div id="level-text-overlay">Lvl 0 Tank</div>
+        </div>
     </div>
 </div>
 
