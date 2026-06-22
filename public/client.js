@@ -159,6 +159,7 @@ let ws;
 let myId = null;
 let spectateId = null; 
 let myTeam = null;
+let myName = null;
 let gameMode = "FFA";
 let camera = { x: WORLD_SIZE/2, y: WORLD_SIZE/2 };
 let mouse = { x: 0, y: 0, rx: 0, ry: 0, pressed: false, rightDown: false, repel: false };
@@ -920,7 +921,7 @@ function connectWS(regionStr, modeStr) {
 
     ws.onmessage = (e) => {
         const data = JSON.parse(e.data);
-        if(data.type === 'init') { myId = data.id; myTeam = data.team; spectateId = null; myNameColor = data.nc}
+        if(data.type === 'init') { myId = data.id; myTeam = data.team; spectateId = null; myNameColor = data.nc; myName = data.name1}
         else if (data.type === 'achievement_unlocked') {
             unlockedAchievements.push(data.achievement);
             showAchievementPopup(data.achievement);
