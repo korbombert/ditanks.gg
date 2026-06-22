@@ -1120,7 +1120,7 @@ function checkUpgrades() {
 
 function updateUI() {
     let scoreText = document.getElementById('score-text-overlay');
-    if(scoreText) scoreText.innerText = "Score: " + Math.floor(myStats.score);
+    if(scoreText) scoreText.innerText = "Score: " + numberWithCommas(Math.floor(myStats.score));
     
     let xpBar = document.getElementById('xp-bar');
     if (xpBar) {
