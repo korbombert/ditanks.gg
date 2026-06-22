@@ -1129,13 +1129,16 @@ function updateUI() {
     
     let levelText = document.getElementById('level-text');
     if (levelText) {
-        levelText.innerHTML = `
+        levelText.innerHTML = `<span style="color:${myNameColor}">${myName}</span>`;
+    }
+    let levelText2 = document.getElementById('level-text-2')
+    if (levelText2){
+        levelText2.innerHTML = `
             <span style="color: white; font-weight: bold; font-family: Ubuntu, sans-serif; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;">
                 Lvl ${myStats.level} ${myStats.tankType}
             </span>
         `;
     }
-    
     let panel = document.getElementById('stats-panel');
     if (panel) {
         if (myStats.statPoints > 0) {
