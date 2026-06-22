@@ -2273,7 +2273,7 @@ wss.on('connection', (ws, req) => {
             }
             room.entities.push(client.player);
             
-            ws.send(JSON.stringify({ type: 'init', id: client.player.id, team: team }));
+            ws.send(JSON.stringify({ type: 'init', id: client.player.id, team: team, nc: client.player.nameColor }));
         }
         else if (data.type === 'input' && client.player && !client.player.markedForDeletion) {
             client.player.inputs = data;
