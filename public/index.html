@@ -2,10 +2,14 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="description" content="Ditanks.gg — fast-paced multiplayer tank arena game.">
+    <meta name="theme-color" content="#00b2e1">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="icon" type="image/x-icon" href="/favicon.ico.png">
     <title>Ditanks.io</title>
-    <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
         /* =============================================
            BASE RESET & LAYOUT
@@ -15,8 +19,36 @@
             user-select: none;
             box-sizing: border-box;
         }
-        body { margin: 0; overflow: hidden; background: #b1b1b1; }
-        #gameCanvas { display: block; position: absolute; z-index: -1; }
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #b1b1b1;
+            color: #333;
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
+        }
+
+        button, input, select {
+            font: inherit;
+        }
+
+        button:focus-visible, input:focus-visible, select:focus-visible,
+        [role="button"]:focus-visible {
+            outline: 3px solid #fff;
+            outline-offset: 2px;
+            box-shadow: 0 0 0 5px rgba(0,178,225,0.55);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                scroll-behavior: auto !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+
+        #gameCanvas { display: block; position: fixed; inset: 0; width: 100%; height: 100%; z-index: -1; touch-action: none; }
 
         /* =============================================
            SCALE SYSTEM
@@ -88,6 +120,14 @@
             display: flex; align-items: center; justify-content: center;
             flex-direction: row; gap: 20px; z-index: 100;
         }
+
+        @media (max-width: 760px) {
+            body { overflow: auto; }
+            #menu-overlay { flex-direction: column; justify-content: flex-start; padding: 16px; }
+            #menu-box, #color-menu { width: min(100%, 380px); }
+            #account-panel { max-width: calc(100vw - 20px); }
+        }
+
         #menu-box {
             background: #eee; padding: 30px; border-radius: 10px;
             border: 5px solid #555; text-align: center;
@@ -176,7 +216,7 @@
             transform: translate(-50%, -50%);
             background: #eee; color: #333; padding: 30px;
             border-radius: 10px; border: 5px solid #555; z-index: 200;
-            width: 90%; max-width: 400px; max-height: 80vh;
+            width: min(90%, 420px); max-height: min(80vh, 680px);
             overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
         .modal-header {
@@ -460,7 +500,10 @@
         @media (max-width: 1100px) { :root { --ui-scale: 0.85; } }
         @media (max-width:  800px) { :root { --ui-scale: 0.70; } #changelog-panel { display: none; } }
         @media (max-width:  480px) { :root { --ui-scale: 0.60; } }
-    </style>
+            /* Semantic settings button */
+        #settings-btn:active { transform: translateY(1px); }
+
+</style>
 </head>
 <body>
 
@@ -484,9 +527,9 @@
 
         <select id="gameModeInput"><option>Loading</option></select>
         <select id="regionInput"><option>Loading</option></select>
-        <input type="text" id="nameInput" placeholder="This is the tale of..." maxlength="15"><br>
+        <input type="text" id="nameInput" placeholder="This is the tale of..." maxlength="15" autocomplete="nickname" aria-label="Tank name"><br>
 
-        <button class="btn" id="playBtn" onclick="spawnPlayer()" disabled>Connecting...</button>
+        <button class="btn" id="playBtn" onclick="spawnPlayer()" disabled aria-label="Play game">Connecting...</button>
 
         <div id="disconnect-reason">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -495,7 +538,7 @@
             <span id="disconnect-text">Connecting...</span>
         </div>
 
-        <div id="settings-btn" onclick="toggleSettings()">⚙ Edit Colors</div>
+        <button id="settings-btn" type="button" onclick="toggleSettings()">⚙ Edit Colors</button>
     </div>
 
     <!-- Colour customisation panel -->
@@ -757,15 +800,43 @@
     })();
 
     /* -----------------------------------------------
+       SECURITY / DOM HELPERS
+    ----------------------------------------------- */
+    const escapeHtml = (value) => String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+
+    const safeDate = (value, options = {}) => {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return 'Unknown date';
+        return date.toLocaleString(undefined, options);
+    };
+
+    /* -----------------------------------------------
        AUTH / SESSION
     ----------------------------------------------- */
     document.addEventListener("DOMContentLoaded", async () => {
-        let token = new URLSearchParams(window.location.search).get('token')
-                    || localStorage.getItem('sessionToken');
+        const params = new URLSearchParams(window.location.search);
+        const urlToken = params.get('token');
+        let token = urlToken || localStorage.getItem('sessionToken');
+
+        // OAuth/session tokens should not remain visible in browser history,
+        // screenshots, copy/paste, or referrer URLs after they are consumed.
+        if (urlToken) {
+            localStorage.setItem('sessionToken', urlToken);
+            params.delete('token');
+            const cleanUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}${window.location.hash}`;
+            window.history.replaceState({}, document.title, cleanUrl);
+        }
 
         if (token) {
-            localStorage.setItem('sessionToken', token);
-            fetch('/api/me', { headers: { 'Authorization': `Bearer ${token}` } })
+            fetch('/api/me', {
+                headers: { 'Authorization': `Bearer ${token}` },
+                cache: 'no-store'
+            })
                 .then(r => r.json())
                 .then(user => {
                     if (user && user.username === '0darkforce') {
@@ -829,13 +900,13 @@
 
                         card.innerHTML = `
                             <div style="font-size:18px;font-weight:bold;color:${s.title};margin-bottom:6px;">
-                                ⚠ ${d.title}
+                                ⚠ ${escapeHtml(d.title)}
                             </div>
                             <div style="font-size:13px;color:#555;margin-bottom:10px;">
-                                ${new Date(d.date).toLocaleString()}
+                                ${escapeHtml(safeDate(d.date))}
                             </div>
                             <div style="font-size:14px;color:#222;white-space:pre-wrap;margin-bottom:12px;">
-                                ${d.description}
+                                ${escapeHtml(d.description)}
                             </div>
                             ${d.estimated_end ? `
                             <div style="background:rgba(0,0,0,0.08);border-radius:6px;padding:10px;
@@ -878,22 +949,22 @@
 
                 const latest = changelogs[0];
                 latestBox.innerHTML = `
-                    <div style="font-weight:bold;font-size:16px;">${latest.title}</div>
+                    <div style="font-weight:bold;font-size:16px;">${escapeHtml(latest.title)}</div>
                     <div style="font-size:12px;color:#777;margin-bottom:8px;">
-                        ${new Date(latest.date).toLocaleDateString()}
+                        ${escapeHtml(safeDate(latest.date, { dateStyle: 'medium' }))}
                     </div>
-                    <div style="font-size:14px;">${latest.description}</div>
+                    <div style="font-size:14px;">${escapeHtml(latest.description)}</div>
                 `;
 
                 fullBox.innerHTML = changelogs.map(l => `
                     <div style="margin-bottom:20px;border-bottom:1px solid #ccc;padding-bottom:15px;">
-                        <h3 style="margin:0;color:#00b2e1;">${l.title}</h3>
+                        <h3 style="margin:0;color:#00b2e1;">${escapeHtml(l.title)}</h3>
                         <div style="font-size:12px;color:#666;margin-bottom:8px;">
-                            ${new Date(l.date).toLocaleDateString()}
+                            ${escapeHtml(safeDate(l.date, { dateStyle: 'medium' }))}
                         </div>
-                        <p style="font-weight:bold;margin-top:0;">${l.description}</p>
+                        <p style="font-weight:bold;margin-top:0;">${escapeHtml(l.description)}</p>
                         <div style="white-space:pre-wrap;font-size:14px;background:#ddd;
-                                    padding:10px;border-radius:5px;">${l.markdown}</div>
+                                    padding:10px;border-radius:5px;">${escapeHtml(l.markdown)}</div>
                     </div>
                 `).join('');
             });
@@ -901,7 +972,8 @@
 
     function goToAdmin() {
         const token = localStorage.getItem('sessionToken');
-        window.location.href = `/app?token=${token}`;
+        if (!token) return;
+        window.location.href = `/app?token=${encodeURIComponent(token)}`;
     }
 </script>
 </body>
