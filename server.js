@@ -208,6 +208,22 @@ const TANK_SPECS = {
         {x:0, y:8, w:7, l:1.7, angle:0, spread:0, dmg:0.26, spd:1.2, rel:0.8, size:0.58, delay:0.75}
     ]}
 };
+const POWERUP_SPAWN_CHANCE = 1 / 150;
+const POWERUP_DURATION = 30_000;
+
+// Fixed heal amount for every powerup pickup.
+const POWERUP_HEAL_AMOUNT = 25;
+
+const POWERUP_TYPES = [
+    'movementSpeed',
+    'reload',
+    'damage',
+    'fov',
+    'bulletSpeed',
+    'forceField',
+    'maxHealth',
+    'healthRegen'
+];
 const ACHIEVEMENTS = [
     {
         id: 'millionaire_hunter',
@@ -930,7 +946,21 @@ class Room {
                 ? ['pentagon', 'pentagon', 'triangle', 'pentagon'][Math.floor(Math.random()*4)]
                 : ['square','square','square','triangle','triangle','pentagon'][Math.floor(Math.random()*5)]; 
         }
-        this.entities.push(new Entity(this, x, y, type));
+        const shape = new Entity(this, x, y, type);
+
+if (Math.random() < 1 / 60) {
+    shape.type = 'powerup';
+    shape.powerupType = POWERUP_TYPES[
+        Math.floor(Math.random() * POWERUP_TYPES.length)
+    ];
+
+    shape.hp = 1500;
+    shape.maxHp = 1500;
+    shape.radius = 30;
+    shape.xpVal = 7000;
+}
+
+this.entities.push(shape);
     }
 
     spawnBot(index, startScore = 0) {
@@ -1109,6 +1139,19 @@ class Entity {
         this.score = 0; this.level = 1; this.xp = 0; this.statPoints = 0;
         this.stats = [0,0,0,0,0,0,0,0];
         this.hp = 100; this.maxHp = 100;
+        this.powerups = {
+    movementSpeed: 0,
+    reload: 0,
+    damage: 0,
+    fov: 0,
+    bulletSpeed: 0,
+    forceField: 0,
+    maxHealth: 0,
+    healthRegen: 0
+};
+
+this.maxHealthPowerupActive = false;
+this.baseMaxHpBeforePowerup = null;
         this.radius = 20; this.angle = 0;
         this.vx = 0; this.vy = 0;
         this.barrelTimers = []; this.wasShooting = false; this.activeDrones = 0;
@@ -1132,7 +1175,29 @@ class Entity {
         if(type === 'hexagon') { this.hp = 750; this.maxHp = 750; this.radius = 45; this.xpVal = 2000; }
         if(type === 'ai') { this.name = BOT_NAMES[Math.floor(Math.random()*BOT_NAMES.length)] || "Bot"; }
     }
+    getPowerupActive(type) {
+    return (this.powerups?.[type] || 0) > Date.now();
+}
 
+getEffectiveMaxHp() {
+    return this.maxHp + (this.stats[1] * 20);
+}
+
+getPowerupDamageMultiplier() {
+    return this.getPowerupActive('damage') ? 1.5 : 1;
+}
+
+getPowerupReloadMultiplier() {
+    return this.getPowerupActive('reload') ? (1 / 1.5) : 1;
+}
+
+getPowerupMoveMultiplier() {
+    return this.getPowerupActive('movementSpeed') ? 1.5 : 1;
+}
+
+getPowerupBulletSpeedMultiplier() {
+    return this.getPowerupActive('bulletSpeed') ? 1.5 : 1;
+}
     addXP(amt) {
         if(['square','triangle','pentagon','hexagon'].includes(this.type)) return;
         this.score += amt; 
@@ -1179,6 +1244,20 @@ class Entity {
         this.x += this.vx; this.y += this.vy;
         this.x = Math.max(0, Math.min(WORLD_SIZE, this.x));
         this.y = Math.max(0, Math.min(WORLD_SIZE, this.y));
+        const now = Date.now();
+
+if (this.maxHealthPowerupActive &&
+    this.powerups.maxHealth <= now) {
+
+    this.maxHealthPowerupActive = false;
+
+    if (this.baseMaxHpBeforePowerup !== null) {
+        this.maxHp = this.baseMaxHpBeforePowerup;
+        this.baseMaxHpBeforePowerup = null;
+    }
+
+    this.hp = Math.min(this.hp, this.getEffectiveMaxHp());
+}
         if (this.tankType === 'Necromancer') {
             let nearby = this.room.grid.getNearby(this.x, this.y, this.radius + 60);
             nearby.entities.forEach(e => {
@@ -1201,19 +1280,31 @@ class Entity {
         for(let i=0; i<this.barrelTimers.length; i++) {
             if(this.barrelTimers[i] > 0) this.barrelTimers[i]--;
         }
-        let effectiveMaxHp = this.maxHp + (this.stats[1] * 20); 
+        let effectiveMaxHp = this.getEffectiveMaxHp();
 
-        if (this.hp < effectiveMaxHp) {
-            let timeSinceDamage = Date.now() - this.lastDamageTime;
-            
-            if (timeSinceDamage >= 30000) {
-                this.hp += effectiveMaxHp * 0.05; 
-            } else {
-                this.hp += 0.1 * (1 + this.stats[0] * 1); 
-            }
-            if (this.hp > effectiveMaxHp) this.hp = effectiveMaxHp;
-        }
-        let moveSpeed = (0.5 * 0.998) + (this.stats[7] * (0.04 * 0.995)); 
+if (this.hp < effectiveMaxHp) {
+    let timeSinceDamage = Date.now() - this.lastDamageTime;
+
+    if (timeSinceDamage >= 30000) {
+        this.hp += effectiveMaxHp * 0.05;
+    } else {
+        // Existing tank regen.
+        this.hp += 0.1 * (1 + this.stats[0] * 1);
+    }
+
+    // +10% max HP/sec from the powerup.
+    // This stacks on top of the tank's existing regen.
+    if (this.getPowerupActive('healthRegen')) {
+        this.hp += effectiveMaxHp * 0.10 / TICK_RATE;
+    }
+
+    if (this.hp > effectiveMaxHp) {
+        this.hp = effectiveMaxHp;
+    }
+}
+        let moveSpeed =
+    ((0.5 * 0.998) + (this.stats[7] * (0.04 * 0.995))) *
+    this.getPowerupMoveMultiplier();
         let isShooting = false;
         const effectiveMaxHpForFlee = this.maxHp + (this.stats[1] * 20);
         if(this.isPlayer) {
@@ -1526,7 +1617,11 @@ if (tooDeep) {
             this.stillTicks = 0;
         }
 
-        const baseReload = Math.max(5, ((30 * 1.002) - (this.stats[6] * (3 * 0.995))));
+        const baseReload =
+    Math.max(
+        5,
+        ((30 * 1.002) - (this.stats[6] * (3 * 0.995)))
+    ) * this.getPowerupReloadMultiplier();
 
         if (isShooting && !this.wasShooting) {
             specs.barrels.forEach((b, i) => {
@@ -1722,8 +1817,13 @@ function shoot(who) {
     }
 
     let baseReload = Math.max(5, ((30 * 1.002) - (who.stats[6] * (3 * 0.995))));
-    let baseSpeed = (6 * 0.998) + (who.stats[3] * (0.4 * 0.995));
-    let baseDmg = 8 + (who.stats[5]*3);
+    let baseSpeed =
+    ((6 * 0.998) + (who.stats[3] * (0.4 * 0.995))) *
+    who.getPowerupBulletSpeedMultiplier();
+
+let baseDmg =
+    (8 + (who.stats[5] * 3)) *
+    who.getPowerupDamageMultiplier();
     let basePen = 1 + (who.stats[4]*0.5);
     if (who.tankType === 'Destroyer') {
         basePen *= 10;
@@ -1755,18 +1855,139 @@ function shoot(who) {
 
             let bulletSize = (8 + (who.stats[5]*0.5)) * (b.size || 1);
 
-            room.bullets.push({ 
-                id: room.nextBulletId++, 
-                x: bx, y: by, vx: Math.cos(finalAngle)*bSpeed, vy: Math.sin(finalAngle)*bSpeed, 
-                r: bulletSize, life: 100 * (1 + who.stats[3]*0.1), dmg: bDmg, pen: basePen, 
-                owner: who, team: who.team 
-            });
+            const powerupEffects = [];
+
+if (who.getPowerupActive('damage')) {
+    powerupEffects.push('damage');
+}
+
+if (who.getPowerupActive('bulletSpeed')) {
+    powerupEffects.push('bulletSpeed');
+}
+
+room.bullets.push({
+    id: room.nextBulletId++,
+    x: bx,
+    y: by,
+    vx: Math.cos(finalAngle) * bSpeed,
+    vy: Math.sin(finalAngle) * bSpeed,
+    r: bulletSize,
+    life: 100 * (1 + who.stats[3] * 0.1),
+    dmg: bDmg,
+    pen: basePen,
+    owner: who,
+    team: who.team,
+    powerupEffects
+});
 
             who.barrelTimers[i] = Math.max(5, baseReload * (b.rel || 1));
         }
     });
 }
 
+function updateForceField(player) {
+    if (!player.getPowerupActive('forceField')) return;
+
+    const AURA_RADIUS = 100;
+    const AURA_DAMAGE = 2;
+
+    const nearby = player.room.grid.getNearby(
+        player.x,
+        player.y,
+        AURA_RADIUS
+    );
+
+    // Entities: players, bots, shapes.
+    nearby.entities.forEach(target => {
+        if (
+            target === player ||
+            target.markedForDeletion ||
+            target.type === 'powerup'
+        ) return;
+
+        // Don't damage teammates in TDM.
+        if (
+            player.room.mode.includes("TDM") &&
+            target.team === player.team &&
+            target.team !== 0
+        ) return;
+
+        const dx = target.x - player.x;
+        const dy = target.y - player.y;
+        const distSq = dx * dx + dy * dy;
+        const radius = AURA_RADIUS + target.radius;
+
+        if (distSq <= radius * radius) {
+            const damage =
+                AURA_DAMAGE *
+                player.getPowerupDamageMultiplier();
+
+            target.hp -= damage;
+            target.lastDamageTime = Date.now();
+            target.lastDamagedBy = player.id;
+
+            if (target.hp <= 0) {
+                target.xpAwarded = target.xpAwarded || false;
+
+                if (
+                    !target.xpAwarded &&
+                    typeof player.addXP === 'function'
+                ) {
+                    target.xpAwarded = true;
+                    player.addXP(
+                        Math.min(
+                            target.xpVal || 100,
+                            24700
+                        )
+                    );
+                }
+            }
+        }
+    });
+
+    // Bullets.
+    nearby.bullets.forEach(bullet => {
+        if (bullet.life <= 0 || bullet.owner === player) return;
+
+        if (
+            player.room.mode.includes("TDM") &&
+            bullet.team === player.team &&
+            bullet.team !== 0
+        ) return;
+
+        const dx = bullet.x - player.x;
+        const dy = bullet.y - player.y;
+
+        if (dx * dx + dy * dy <= AURA_RADIUS * AURA_RADIUS) {
+            bullet.life = 0;
+        }
+    });
+
+    // Drones.
+    nearby.drones.forEach(drone => {
+        if (
+            drone.markedForDeletion ||
+            drone.owner === player
+        ) return;
+
+        if (
+            player.room.mode.includes("TDM") &&
+            drone.team === player.team &&
+            drone.team !== 0
+        ) return;
+
+        const dx = drone.x - player.x;
+        const dy = drone.y - player.y;
+
+        if (dx * dx + dy * dy <= AURA_RADIUS * AURA_RADIUS) {
+            drone.hp -= AURA_DAMAGE;
+
+            if (drone.hp <= 0) {
+                drone.markedForDeletion = true;
+            }
+        }
+    });
+}
 function updateRoom(room) {
     if (room.status === 'stopped') return;
     const BASE_SIZE_4 = 600;
@@ -2052,6 +2273,11 @@ function updateRoom(room) {
         }
         return true;
     });
+    room.entities.forEach(e => {
+    if (!e.markedForDeletion && e.isPlayer) {
+        updateForceField(e);
+    }
+});
     let respawningBots = [];
     room.entities = room.entities.filter(e => {
         if(e.hp <= 0) {
@@ -2402,11 +2628,13 @@ setInterval(() => {
                             id: e.id, 
                             x: (isVisible && !isInvisible) ? Math.round(e.x) : null, 
                             y: (isVisible && !isInvisible) ? Math.round(e.y) : null, 
+                            powerupType: e.powerupType || null,
                             type: e.type, team: e.team, hp: e.hp, maxHp: e.maxHp, 
                             radius: e.radius, angle: Math.round(e.angle * 100) / 100, tankType: e.tankType, 
                             name: e.name, score: e.score, nameColor: e.nameColor,
                             inView: isVisible && !isInvisible,
-                            opacity: (e.opacity !== undefined) ? Math.round(e.opacity * 100) / 100 : 1
+                            opacity: (e.opacity !== undefined) ? Math.round(e.opacity * 100) / 100 : 1,
+                            powerups: getActivePowerups(e)
                         });
                     }
                 }
@@ -2415,17 +2643,35 @@ setInterval(() => {
                     let e = nearby.entities[i];
                     if (!processedEntities.has(e.id)) { 
                         payloadEntities.push({
-                            id: e.id, x: Math.round(e.x), y: Math.round(e.y), 
-                            type: e.type, team: e.team, hp: e.hp, maxHp: e.maxHp, 
-                            radius: e.radius, angle: Math.round(e.angle * 100) / 100, inView: true
-                        });
+    id: e.id,
+    x: Math.round(e.x),
+    y: Math.round(e.y),
+    type: e.type,
+    team: e.team,
+    hp: e.hp,
+    maxHp: e.maxHp,
+    radius: e.radius,
+    angle: Math.round(e.angle * 100) / 100,
+    inView: true,
+    powerupType: e.powerupType || null,
+
+    // Active tank powerups
+    powerups: getActivePowerups(e)
+});
                     }
                 }
 
                 for(let i=0; i<nearby.bullets.length; i++) {
                     let b = nearby.bullets[i];
                     if (Math.abs(b.y - focalY) < VIEW_DISTANCE/1.8) {
-                        payloadBullets.push({ id: b.id, x: Math.round(b.x), y: Math.round(b.y), r: b.r, team: b.team });
+                        payloadBullets.push({
+    id: b.id,
+    x: Math.round(b.x),
+    y: Math.round(b.y),
+    r: b.r,
+    team: b.team,
+    powerupEffects: b.powerupEffects || []
+});
                     }
                 }
 
