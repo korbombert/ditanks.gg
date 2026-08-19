@@ -36,22 +36,6 @@ db.prepare(`
     )
 `).run();
 
-const migrations = [
-    `ALTER TABLE changelogs ADD COLUMN type TEXT DEFAULT 'changelog'`,
-    `ALTER TABLE changelogs ADD COLUMN estimated_end INTEGER`
-];
-
-migrations.forEach(query => {
-    try {
-        db.prepare(query).run();
-        console.log(`[Database] Migration successful: ${query}`);
-    } catch (err) {
-        if (!err.message.includes("duplicate column name")) {
-            console.error(`[Database] Migration failed: ${err.message}`);
-        }
-    }
-});
-
 db.prepare(`
     CREATE TABLE IF NOT EXISTS bot_config (
         key TEXT PRIMARY KEY,
@@ -99,6 +83,24 @@ db.prepare(`
         PRIMARY KEY (user_id, achievement_id)
     )
 `).run();
+
+// Migrations must run after every CREATE TABLE above, since they ALTER
+// tables (e.g. changelogs) that need to already exist.
+const migrations = [
+    `ALTER TABLE changelogs ADD COLUMN type TEXT DEFAULT 'changelog'`,
+    `ALTER TABLE changelogs ADD COLUMN estimated_end INTEGER`
+];
+
+migrations.forEach(query => {
+    try {
+        db.prepare(query).run();
+        console.log(`[Database] Migration successful: ${query}`);
+    } catch (err) {
+        if (!err.message.includes("duplicate column name")) {
+            console.error(`[Database] Migration failed: ${err.message}`);
+        }
+    }
+});
 // ===================== BOT CONSTANTS =====================
 const BACKUP_INTERVAL = 1000 * 60 * 60 * 12;
 const BACKUP_CHANNEL_ID = '1513631360450035753';
@@ -213,6 +215,10 @@ const POWERUP_DURATION = 30_000;
 
 // Fixed heal amount for every powerup pickup.
 const POWERUP_HEAL_AMOUNT = 25;
+
+// Multiplier applied to max HP while the maxHealth powerup is active.
+// Kept consistent with the 1.5x used by the other powerup multipliers.
+const MAX_HEALTH_POWERUP_MULTIPLIER = 1.5;
 
 const POWERUP_TYPES = [
     'movementSpeed',
@@ -948,7 +954,7 @@ class Room {
         }
         const shape = new Entity(this, x, y, type);
 
-if (Math.random() < 1 / 60) {
+if (Math.random() < POWERUP_SPAWN_CHANCE) {
     shape.type = 'powerup';
     shape.powerupType = POWERUP_TYPES[
         Math.floor(Math.random() * POWERUP_TYPES.length)
@@ -1354,6 +1360,7 @@ if (this.hp < effectiveMaxHp) {
                 let enemyTarget = null; let minEnemyDistSq = Infinity;
                 let shapeTarget = null; let minShapeDistSq = Infinity;
                 let droneTarget = null; let minDroneDistSq = Infinity;
+                let powerupTarget = null; let minPowerupDistSq = Infinity;
 
                 nearby.drones.forEach(d => {
                     if (d.owner === this || d.markedForDeletion) return;
@@ -1369,11 +1376,12 @@ if (this.hp < effectiveMaxHp) {
                     let isTank = ['tank', 'ai'].includes(e.type);
                     let isSameTeam = this.room.mode.includes("TDM") && e.team === this.team && e.team !== 0;
                     let isShape = ['square','triangle','pentagon','hexagon'].includes(e.type);
-                    if (isSameTeam && !isShape) return;
+                    let isPowerup = e.type === 'powerup';
+                    if (isSameTeam && !isShape && !isPowerup) return;
 
                     let distSq = (this.x - e.x)**2 + (this.y - e.y)**2;
 
-                    if (!isShape && !isSameTeam && isTank) {
+                    if (!isShape && !isPowerup && !isSameTeam && isTank) {
                         if (isInProtectedBase(this.room, e, this.team)) return;
                         // Invisible Manager tanks are undetectable by AI
                         if (e.tankType === 'Manager' && e.opacity < 0.15) return;
@@ -1384,6 +1392,13 @@ if (this.hp < effectiveMaxHp) {
                         if(distSq < detectionSq && distSq < minEnemyDistSq) { 
                             minEnemyDistSq = distSq; 
                             enemyTarget = e; 
+                        }
+                    } else if (isPowerup) {
+                        // Skip powerups inside enemy bases for the same reason shapes are skipped.
+                        if (isInEnemyBase(this.room, e, this.team)) return;
+                        if(distSq < minPowerupDistSq) {
+                            minPowerupDistSq = distSq;
+                            powerupTarget = e;
                         }
                     } else if (isShape) {
                         if (this.tankType === 'Overlord') return;
@@ -1397,7 +1412,15 @@ if (this.hp < effectiveMaxHp) {
                     }
                 });
 
-                this.aiTarget = droneTarget || enemyTarget || shapeTarget;
+                // Powerups are valuable but shouldn't distract a bot from a close,
+                // actively dangerous enemy — same threat override used for drones below.
+                this.aiTarget = droneTarget || enemyTarget || powerupTarget || shapeTarget;
+                if (powerupTarget && enemyTarget) {
+                    const closeThreatDistSq = 200 * 200;
+                    if (minEnemyDistSq < closeThreatDistSq) {
+                        this.aiTarget = enemyTarget;
+                    }
+                }
                 // If a drone is the primary target but an enemy tank is dangerously close
                 // and actively shooting at us, switch to the enemy instead.
                 if (droneTarget && enemyTarget) {
@@ -1649,6 +1672,33 @@ if (tooDeep) {
         }
     }
 }
+// Grants the effect of a picked-up powerup to `entity`.
+// Handles the generic timed-multiplier powerups plus the special-cased
+// maxHealth powerup (which needs to bump maxHp for its duration and
+// cleanly revert it afterwards - see Entity#update()).
+function applyPowerupEffect(entity, powerupType) {
+    if (!entity || !entity.powerups) return;
+
+    const expiry = Date.now() + POWERUP_DURATION;
+
+    if (powerupType === 'maxHealth') {
+        if (!entity.maxHealthPowerupActive) {
+            entity.baseMaxHpBeforePowerup = entity.maxHp;
+        }
+        entity.maxHealthPowerupActive = true;
+        entity.maxHp = Math.round(entity.baseMaxHpBeforePowerup * MAX_HEALTH_POWERUP_MULTIPLIER);
+    }
+
+    entity.powerups[powerupType] = expiry;
+
+    // Every pickup also heals for a fixed amount, capped at the entity's
+    // current effective max HP.
+    const effectiveMaxHp = typeof entity.getEffectiveMaxHp === 'function'
+        ? entity.getEffectiveMaxHp()
+        : entity.maxHp;
+    entity.hp = Math.min(entity.hp + POWERUP_HEAL_AMOUNT, effectiveMaxHp);
+}
+
 function getActivePowerups(entity) {
     if (!entity.powerups) return {};
 
@@ -2369,6 +2419,14 @@ function updateRoom(room) {
                 }
             }
             if(e.type === 'ai') respawningBots.push(Math.min(e.score / 5, 6124));
+
+            // Grant the powerup's effect to whoever landed the killing blow.
+            if (e.type === 'powerup' && e.powerupType) {
+                const picker = room.entities.find(p => p.id === e.lastDamagedBy && ['tank', 'ai'].includes(p.type));
+                if (picker) {
+                    applyPowerupEffect(picker, e.powerupType);
+                }
+            }
 
             room.clients.forEach(c => {
                 if (c.spectatingId === e.id) c.spectatingId = e.lastDamagedBy || null; 
