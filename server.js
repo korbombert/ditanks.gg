@@ -1649,7 +1649,20 @@ if (tooDeep) {
         }
     }
 }
+function getActivePowerups(entity) {
+    if (!entity.powerups) return {};
 
+    const now = Date.now();
+    const result = {};
+
+    for (const [type, expiry] of Object.entries(entity.powerups)) {
+        if (expiry > now) {
+            result[type] = expiry - now;
+        }
+    }
+
+    return result;
+}
 class Drone {
     constructor(room, x, y, owner) {
         this.room = room;
