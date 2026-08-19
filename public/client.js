@@ -130,9 +130,20 @@ function renderShopContent(category) {
         return;
     }
 
-    let unlocked = JSON.parse(myProfile.unlocked_colors);
+    let unlocked = [];
+    try {
+        unlocked = Array.isArray(myProfile.unlocked_colors)
+            ? myProfile.unlocked_colors
+            : JSON.parse(myProfile.unlocked_colors);
+    } catch (err) {
+        console.error('Failed to parse unlocked_colors:', err);
+    }
     
-    shopItems[category].forEach(item => {
+    // Build the whole list once and assign it a single time. The old version
+    // did container.innerHTML += '...' inside the loop, which forces the
+    // browser to re-parse and re-render the entire (growing) HTML string on
+    // every iteration - O(n^2) work for n shop items instead of O(n).
+    container.innerHTML = shopItems[category].map(item => {
         let isUnlocked = unlocked.includes(item.id);
         let isEquipped = myProfile.selected_color === item.id;
         
@@ -146,13 +157,13 @@ function renderShopContent(category) {
             btnHtml = `<button class="shop-btn btn-buy" ${!canAfford ? 'disabled' : ''} onclick="ws.send(JSON.stringify({type:'buy_item', category:'${category}', itemId:'${item.id}'}))">Buy (🪙 ${item.cost})</button>`;
         }
 
-        container.innerHTML += `
+        return `
             <div class="shop-item">
                 <span style="color: ${item.id}; font-weight:bold; font-size: 16px;">${item.name}</span>
                 ${btnHtml}
             </div>
         `;
-    });
+    }).join('');
 }
 
 let ws;
@@ -359,13 +370,11 @@ function openAchievements() {
 
     const unlockedIds = unlockedAchievements.map(a => a.id);
 
-    list.innerHTML = '';
-
-    achievementsData.forEach(a => {
-
+    // Same fix as renderShopContent: build once with map/join instead of
+    // innerHTML += per item, avoiding repeated re-parse of a growing string.
+    list.innerHTML = achievementsData.map(a => {
         const unlocked = unlockedIds.includes(a.id);
-
-        list.innerHTML += `
+        return `
             <div class="achievement-card ${unlocked ? 'unlocked' : ''}">
                 
                 <div class="achievement-badge">
@@ -384,7 +393,7 @@ function openAchievements() {
 
             </div>
         `;
-    });
+    }).join('');
 
     modal.style.display = 'flex';
 }
@@ -864,7 +873,6 @@ function connectWS(regionStr, modeStr) {
             ws.send(JSON.stringify({ type: 'auth_login', token: sessionToken }));
         }
         sendPing();
-        if (window.inputInterval) clearInterval(window.inputInterval);
         if (window.inputInterval) clearInterval(window.inputInterval);
         window.inputInterval = setInterval(() => {
     if (myId) {
@@ -1357,8 +1365,8 @@ function draw() {
     ctx.fillRect(0,0,canvas.width,canvas.height);
 
     // Camera targeting logic stays exactly the same...
-    let targetCamX = WORLD_SIZE/2 - canvas.width/2;
-    let targetCamY = WORLD_SIZE/2 - canvas.height/2;
+    let targetCamX = WORLD_SIZE/2 - (canvas.width * fov) / 2;
+    let targetCamY = WORLD_SIZE/2 - (canvas.height * fov) / 2;
 
     if (myId) {
         let me = gameState.entities.find(e => e.id === myId);
@@ -1440,6 +1448,34 @@ ctx.translate(-((camera.x / fov) % scaledGridSize), -((camera.y / fov) % scaledG
     scaleSize(600),
     scaleSize(600)
 );
+
+    // --- ENTITY (tank/ai/shape) DEATH DETECTION ---
+    // renderEntities previously only ever grew: entries were added but never
+    // removed once an entity died or permanently left the world, which leaked
+    // memory over long sessions. This mirrors the bullet/drone diffing below -
+    // anything we were tracking that's no longer in the latest state gets a
+    // shrink/fade death animation (if it was on screen) and is dropped.
+    const activeEntityIds = new Set(gameState.entities.map(en => en.id));
+    for (let [id, rEn] of renderEntities.entries()) {
+        if (!activeEntityIds.has(id)) {
+            const sx = worldToScreenX(rEn.renderX);
+            const sy = worldToScreenY(rEn.renderY);
+            if (
+                sx > -scaleSize(150) &&
+                sx < canvas.width + scaleSize(150) &&
+                sy > -scaleSize(150) &&
+                sy < canvas.height + scaleSize(150)
+            ) {
+                dyingEntities.push({
+                    ...rEn,
+                    renderX: rEn.renderX,
+                    renderY: rEn.renderY,
+                    deathTime: Date.now()
+                });
+            }
+            renderEntities.delete(id);
+        }
+    }
 
     // --- BULLET LERPING ---
     const activeBulletIds = new Set(gameState.bullets.map(b => b.id));
@@ -1618,10 +1654,10 @@ if (e.square) {
             drawEntityBody(deathCtx, e);
             
             if (['tank', 'ai'].includes(e.type)) {
-    const isWhite = !en.nameColor || ["white", "#fff", "#ffffff"].includes(en.nameColor);
+    const isWhite = !e.nameColor || ["white", "#fff", "#ffffff"].includes(e.nameColor);
     
     // 1. Calculate scaled values once for this entity
-    const sRadius = scaleSize(en.radius);
+    const sRadius = scaleSize(e.radius);
     const nameOffset = scaleSize(25);  // Scaled gap for name
     const scoreOffset = scaleSize(12); // Scaled gap for score
     
@@ -1631,19 +1667,19 @@ if (e.square) {
     ctx.textAlign = "center";
     
     // 3. Render Name
-    ctx.fillStyle = en.nameColor || "white";
-    ctx.strokeStyle = isWhite ? "black" : (darkenColor(en.nameColor, 50) || "black");
+    ctx.fillStyle = e.nameColor || "white";
+    ctx.strokeStyle = isWhite ? "black" : (darkenColor(e.nameColor, 50) || "black");
     ctx.lineWidth = 3;
     // Use sx, sy (which are worldToScreen results) and subtract scaled offsets
-    ctx.strokeText(en.name, sx, sy - sRadius - nameOffset);
-    ctx.fillText(en.name, sx, sy - sRadius - nameOffset);
+    ctx.strokeText(e.name, sx, sy - sRadius - nameOffset);
+    ctx.fillText(e.name, sx, sy - sRadius - nameOffset);
     
     // 4. Render Score
     fontSize = Math.max(5.5, 11 / fov); 
     ctx.font = `bold ${fontSize}px Ubuntu`;
     ctx.fillStyle = "white";
     ctx.strokeStyle = "black";
-    const displayScore = formatScore(Math.floor(en.score));
+    const displayScore = formatScore(Math.floor(e.score));
     ctx.strokeText(displayScore, sx, sy - sRadius - scoreOffset);
     ctx.fillText(displayScore, sx, sy - sRadius - scoreOffset);
 }
@@ -1658,7 +1694,16 @@ if (e.square) {
     });
 
     // --- ENTITY LERPING ---
-    [...gameState.entities].sort((a,b) => (a.type.includes('tank')||a.type==='ai'?1:-1)).forEach(en => {
+    // Draw shapes first, tanks/ai on top. Previously this re-allocated and
+    // fully re-sorted the entire entity array every single frame just to
+    // separate two draw-order buckets - an O(n log n) comparator sort with a
+    // constant return value. A single O(n) partition does the same job cheaper.
+    const shapeEntities = [];
+    const tankEntities = [];
+    gameState.entities.forEach(en => {
+        (en.type === 'tank' || en.type === 'ai' ? tankEntities : shapeEntities).push(en);
+    });
+    shapeEntities.concat(tankEntities).forEach(en => {
         if(!en.inView){ return; }
         
         // Initialize render positions if new
@@ -1676,7 +1721,20 @@ if (e.square) {
         // Apply Lerping (adjusted to 0.2 to compensate for the slower server tick)
         rPos.renderX = lerp(rx, en.x, 0.2);
         rPos.renderY = lerp(ry, en.y, 0.2);
-        rPos.renderAngle = lerpAngle(ra, en.angle, 0.2);
+
+        if (en.id === myId && (en.type === 'tank' || en.type === 'ai')) {
+            // Own tank: point the barrel straight at the cursor every frame
+            // instead of lerping toward whatever angle the last server state
+            // said. The server angle already arrives a tick or two late and
+            // then gets smoothed on top of that, so our own aim always felt
+            // laggy even though nothing else about it needs server round-trip.
+            // Everyone else's tank still uses the smoothed server angle below -
+            // this only changes what we draw for ourselves, not what's sent
+            // to (or authoritative on) the server.
+            rPos.renderAngle = autoSpin ? spinAngle : Math.atan2(mouse.ry - rPos.renderY, mouse.rx - rPos.renderX);
+        } else {
+            rPos.renderAngle = lerpAngle(ra, en.angle, 0.2);
+        }
         
         // Feed the smoothed angle back into rPos so the draw function uses it
         rPos.angle = rPos.renderAngle; 
@@ -1777,7 +1835,16 @@ if (e.square) {
 // Variables and State
 let holdingM = false;
 
+// Skip game hotkey handling while the user is focused on a text field (e.g.
+// the name input) - otherwise typing "e"/"c"/a digit toggles autofire/autospin
+// or fires off a stat-upgrade request instead of typing a name.
+function isTypingInField(e) {
+    const t = e.target;
+    return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+}
+
 window.onkeydown = e => { 
+    if (isTypingInField(e)) return;
     let key = e.key.toLowerCase();
     keys[key] = true; 
 
@@ -1810,6 +1877,7 @@ window.onkeydown = e => {
 };
 
 window.onkeyup = e => { 
+    if (isTypingInField(e)) return;
     let key = e.key.toLowerCase();
     keys[key] = false; 
 
@@ -1856,9 +1924,11 @@ window.oncontextmenu = e => e.preventDefault(); function resizeGame() {
     fov = (REF_WIDTH * BASE_FOV) / canvas.width;
 
     // Center the camera immediately to prevent visual stutter on resize
+    // (must scale by fov too, or this only centers correctly at exactly
+    // the 1536px reference width - see worldToScreenX/Y)
     if (!myId && camera) {
-        camera.x = WORLD_SIZE/2 - canvas.width/2;
-        camera.y = WORLD_SIZE/2 - canvas.height/2;
+        camera.x = WORLD_SIZE/2 - (canvas.width * fov) / 2;
+        camera.y = WORLD_SIZE/2 - (canvas.height * fov) / 2;
     }
 }
 window.addEventListener('resize', resizeGame);
