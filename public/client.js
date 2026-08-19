@@ -380,7 +380,12 @@ const REF_WIDTH = 1536;
 
 const BASE_FOV = 1.2;
 
+let baseFov = BASE_FOV;
 let fov = BASE_FOV;
+
+function updateVisualFov() {
+    fov = baseFov * (powerupActive(myStats, "fov") ? 1.3 : 1);
+}
 
 function worldToScreenX(x) {
 
@@ -424,7 +429,7 @@ const deathCtx = deathCanvas.getContext('2d');
 
 let gameState = { entities: [], bullets: [], drones: [] };
 
-let myStats = { xp: 0, level: 1, statPoints: 0, stats: [0,0,0,0,0,0,0,0], tankType: 'Basic', score: 0 };
+let myStats = { xp: 0, level: 1, statPoints: 0, stats: [0,0,0,0,0,0,0,0], tankType: 'Basic', score: 0, powerups: {} };
 
 let myNameColor = '#fff'
 
@@ -487,6 +492,169 @@ const STAT_INFO = [
 ];
 
 
+
+
+// Powerup visuals intentionally reuse the corresponding stat palette.
+const POWERUP_COLORS = {
+    movementSpeed: STAT_INFO[7].color,
+    reload: STAT_INFO[6].color,
+    damage: STAT_INFO[5].color,
+    fov: STAT_INFO[4].color,
+    bulletSpeed: STAT_INFO[3].color,
+    forceField: STAT_INFO[2].color,
+    maxHealth: STAT_INFO[1].color,
+    healthRegen: STAT_INFO[0].color
+};
+
+const POWERUP_NAMES = {
+    movementSpeed: "Movement Speed",
+    reload: "Reload",
+    damage: "Damage",
+    fov: "FOV",
+    bulletSpeed: "Bullet Speed",
+    forceField: "Force Field",
+    maxHealth: "Max Health",
+    healthRegen: "Health Regen"
+};
+
+let powerupParticles = [];
+let bulletParticles = [];
+let powerupParticleClock = 0;
+
+function powerupColor(type) {
+    return POWERUP_COLORS[type] || "#ffffff";
+}
+
+function powerupActive(source, type) {
+    if (!source || !source.powerups) return false;
+    const value = source.powerups[type];
+    if (typeof value === "number") {
+        if (value <= 0) return false;
+        return value > Date.now() || value <= 30000;
+    }
+    return !!value;
+}
+
+function activePowerupTypes(source) {
+    if (!source || !source.powerups) return [];
+    return Object.keys(POWERUP_COLORS).filter(type => powerupActive(source, type));
+}
+
+function spawnPowerupParticle(x, y, type, scale = 1) {
+    const a = Math.random() * Math.PI * 2;
+    const speed = (0.25 + Math.random() * 0.9) * scale;
+    powerupParticles.push({
+        x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
+        life: 350 + Math.random() * 450, maxLife: 800,
+        size: (1.2 + Math.random() * 2.5) * scale, type
+    });
+}
+
+function spawnBulletParticle(x, y, type, scale = 1) {
+    const a = Math.random() * Math.PI * 2;
+    const speed = (0.15 + Math.random() * 0.45) * scale;
+    bulletParticles.push({
+        x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
+        life: 180 + Math.random() * 220, maxLife: 400,
+        size: (0.8 + Math.random() * 1.8) * scale, type
+    });
+}
+
+function updateAndDrawPowerupParticles() {
+    const dt = 16.67;
+
+    powerupParticles = powerupParticles.filter(p => {
+        p.x += p.vx; p.y += p.vy; p.vx *= 0.985; p.vy *= 0.985; p.life -= dt;
+        if (p.life <= 0) return false;
+        const sx = worldToScreenX(p.x), sy = worldToScreenY(p.y);
+        if (sx < -20 || sx > canvas.width + 20 || sy < -20 || sy > canvas.height + 20) return true;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+        ctx.fillStyle = powerupColor(p.type);
+        ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = scaleSize(5);
+        ctx.beginPath(); ctx.arc(sx, sy, Math.max(0.8, scaleSize(p.size)), 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        return true;
+    });
+
+    bulletParticles = bulletParticles.filter(p => {
+        p.x += p.vx; p.y += p.vy; p.life -= dt;
+        if (p.life <= 0) return false;
+        const sx = worldToScreenX(p.x), sy = worldToScreenY(p.y);
+        if (sx < -20 || sx > canvas.width + 20 || sy < -20 || sy > canvas.height + 20) return true;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+        ctx.fillStyle = powerupColor(p.type);
+        ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = scaleSize(4);
+        ctx.beginPath(); ctx.arc(sx, sy, Math.max(0.7, scaleSize(p.size)), 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        return true;
+    });
+}
+
+function drawPowerupCore(context, en, alpha = 1) {
+    const radius = scaleSize(en.radius || 18);
+    const color = powerupColor(en.powerupType);
+
+    context.save();
+    context.globalAlpha *= alpha;
+    context.shadowColor = color; context.shadowBlur = scaleSize(14);
+
+    context.fillStyle = color;
+    context.globalAlpha *= 0.18;
+    context.beginPath(); context.arc(0, 0, radius * 1.45, 0, Math.PI * 2); context.fill();
+
+    context.globalAlpha = alpha;
+    context.fillStyle = color;
+    context.strokeStyle = darkenColor(color, 35);
+    context.lineWidth = Math.max(1.5, 3 / fov);
+    context.beginPath();
+    context.moveTo(0, -radius * 1.05);
+    context.lineTo(radius * 0.72, 0);
+    context.lineTo(0, radius * 1.05);
+    context.lineTo(-radius * 0.72, 0);
+    context.closePath(); context.fill(); context.stroke();
+
+    context.globalAlpha = alpha * 0.85;
+    context.fillStyle = "#ffffff";
+    context.beginPath(); context.arc(-radius * 0.22, -radius * 0.22, radius * 0.22, 0, Math.PI * 2); context.fill();
+    context.restore();
+}
+
+function drawTankPowerupEffects(context, en) {
+    const active = activePowerupTypes(en);
+    if (!active.length) return;
+    const radius = scaleSize(en.radius || 20);
+
+    if (active.includes('forceField')) {
+        const t = performance.now() * 0.004;
+        const pulse = 1 + Math.sin(t) * 0.08;
+        const auraR = radius * 3.1 * pulse;
+        const color = powerupColor('forceField');
+        context.save();
+        context.globalAlpha = 0.16; context.fillStyle = color;
+        context.beginPath(); context.arc(0, 0, auraR, 0, Math.PI * 2); context.fill();
+        context.globalAlpha = 0.55; context.strokeStyle = color;
+        context.lineWidth = Math.max(1.5, 2 / fov);
+        context.setLineDash([scaleSize(8), scaleSize(5)]);
+        context.beginPath(); context.arc(0, 0, auraR, t * 0.25, t * 0.25 + Math.PI * 1.75); context.stroke();
+        context.setLineDash([]); context.restore();
+    }
+
+    const time = performance.now() * 0.002;
+    active.forEach((type, index) => {
+        const angle = time * (0.65 + index * 0.07) + index * Math.PI * 0.9;
+        const orbit = radius * (1.25 + (index % 3) * 0.18);
+        context.save();
+        context.fillStyle = powerupColor(type);
+        context.shadowColor = context.fillStyle; context.shadowBlur = scaleSize(8);
+        context.globalAlpha = 0.9;
+        context.beginPath();
+        context.arc(Math.cos(angle) * orbit, Math.sin(angle) * orbit,
+            Math.max(1.2, radius * 0.10), 0, Math.PI * 2);
+        context.fill(); context.restore();
+    });
+}
 
 // Updated TANK_SPECS with Smasher removed
 
@@ -2038,7 +2206,7 @@ function connectWS(regionStr, modeStr) {
 
         }
 
-        else if(data.type === 'playerStats') { myStats = data; updateUI(); checkUpgrades(); }
+        else if(data.type === 'playerStats') { myStats = data; myStats.powerups = data.powerups || myStats.powerups || {}; updateVisualFov(); updateUI(); checkUpgrades(); }
 
         else if(data.type === 'spectate_update') { spectateId = data.id; }
 
@@ -2537,6 +2705,11 @@ function drawEntityBody(context, en) {
     context.lineWidth = 4 / fov;
 
     const radius = scaleSize(en.radius);
+
+    if (en.type === 'powerup') {
+        drawPowerupCore(context, en);
+        return;
+    }
 
 
 
@@ -3120,6 +3293,22 @@ ctx.translate(-((camera.x / fov) % scaledGridSize), -((camera.y / fov) % scaledG
 
 
 
+    // --- POWERUP / TANK PARTICLE FX ---
+    powerupParticleClock++;
+    if (powerupParticleClock % 3 === 0) {
+        gameState.entities.forEach(en => {
+            if (!['tank', 'ai'].includes(en.type) || !en.inView) return;
+            const active = activePowerupTypes(en);
+            if (!active.length) return;
+            const count = Math.min(2, active.length);
+            for (let i = 0; i < count; i++) {
+                const type = active[(powerupParticleClock + i) % active.length];
+                spawnPowerupParticle(en.x, en.y, type, Math.max(0.7, en.radius / 20));
+            }
+        });
+    }
+    updateAndDrawPowerupParticles();
+
     // --- BULLET LERPING ---
 
     const activeBulletIds = new Set(gameState.bullets.map(b => b.id));
@@ -3178,7 +3367,7 @@ ctx.translate(-((camera.x / fov) % scaledGridSize), -((camera.y / fov) % scaledG
 
             let existing = lastBullets.get(b.id);
 
-            existing.x = b.x; existing.y = b.y; existing.r = b.r;
+            existing.x = b.x; existing.y = b.y; existing.r = b.r; existing.powerupEffects = b.powerupEffects || [];
 
         }
 
@@ -3194,15 +3383,46 @@ ctx.translate(-((camera.x / fov) % scaledGridSize), -((camera.y / fov) % scaledG
 
         b.renderY = lerp(b.renderY, b.y, 0.2);
 
-        ctx.fillStyle = getTeamColor(b.team); ctx.strokeStyle = darkenColor(ctx.fillStyle, 30); ctx.lineWidth = 2;
+        const bulletX = worldToScreenX(b.renderX);
+        const bulletY = worldToScreenY(b.renderY);
+        const bulletR = scaleSize(b.r);
+        const effects = b.powerupEffects || [];
 
-        ctx.beginPath(); ctx.arc(
+        if (effects.length) {
+            effects.forEach((type, idx) => {
+                ctx.save();
+                ctx.globalAlpha = 0.25;
+                ctx.fillStyle = powerupColor(type);
+                ctx.shadowColor = ctx.fillStyle;
+                ctx.shadowBlur = scaleSize(8);
+                ctx.beginPath();
+                ctx.arc(bulletX, bulletY, bulletR * (1.45 + idx * 0.18), 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
 
-    worldToScreenX(b.renderX),
+                if (Math.random() < 0.45) {
+                    spawnBulletParticle(b.renderX, b.renderY, type, Math.max(0.6, b.r / 8));
+                }
+            });
+        }
 
-    worldToScreenY(b.renderY),
+        ctx.fillStyle = getTeamColor(b.team);
+        ctx.strokeStyle = darkenColor(ctx.fillStyle, 30);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(bulletX, bulletY, bulletR, 0, Math.PI*2);
+        ctx.fill();
+        ctx.stroke();
 
-    scaleSize(b.r), 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        if (effects.length) {
+            ctx.save();
+            ctx.globalAlpha = 0.9;
+            ctx.fillStyle = powerupColor(effects[0]);
+            ctx.beginPath();
+            ctx.arc(bulletX, bulletY, Math.max(1, bulletR * 0.32), 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
 
     });
 
@@ -3766,6 +3986,9 @@ if (e.square) {
 
         ctx.translate(sx, sy);
 
+        // Powerup effects sit behind the tank body.
+        drawTankPowerupEffects(ctx, rPos);
+
         // Manager invisibility: body fades with the same opacity as name/score
 
         if (en.tankType === 'Manager' && en.id !== myId) {
@@ -4010,7 +4233,8 @@ window.oncontextmenu = e => e.preventDefault(); function resizeGame() {
 
     // Scale fov so every screen sees the same world coverage as 1536px wide at BASE_FOV
 
-    fov = (REF_WIDTH * BASE_FOV) / canvas.width;
+    baseFov = (REF_WIDTH * BASE_FOV) / canvas.width;
+        updateVisualFov();
 
 
 
