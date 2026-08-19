@@ -954,10 +954,10 @@ if (Math.random() < 1 / 60) {
         Math.floor(Math.random() * POWERUP_TYPES.length)
     ];
 
-    shape.hp = 1500;
-    shape.maxHp = 1500;
+    shape.hp = 550;
+    shape.maxHp = 550;
     shape.radius = 30;
-    shape.xpVal = 7000;
+    shape.xpVal = 4000;
 }
 
 this.entities.push(shape);
