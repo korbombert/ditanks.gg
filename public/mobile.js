@@ -3,57 +3,55 @@
     const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
     if (!isTouchDevice) return; 
 
-    // 2. Inject CSS for New Layout
+    // 2. Inject CSS for Scalable Layout
     const style = document.createElement('style');
     style.innerHTML = `
         #mobile-controls {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
             pointer-events: none; z-index: 1000;
         }
+        /* vmin ensures joysticks scale proportionally without stretching */
         .joystick-base {
-            position: absolute; bottom: 12vh; width: 120px; height: 120px;
-            background: rgba(255, 255, 255, 0.15); border: 2px solid rgba(255, 255, 255, 0.3);
+            position: absolute; bottom: 10vh; width: 22vmin; height: 22vmin;
+            background: rgba(255, 255, 255, 0.15); border: 0.5vmin solid rgba(255, 255, 255, 0.3);
             border-radius: 50%; pointer-events: auto; touch-action: none;
         }
-        /* Shifted inwards using viewport units for responsive centering */
-        #joy-left { left: 10vw; }
-        #joy-right { right: 10vw; }
+        #joy-left { left: 8vw; }
+        #joy-right { right: 8vw; }
         
         .joystick-knob {
-            position: absolute; top: 50%; left: 50%; width: 50px; height: 50px;
+            position: absolute; top: 50%; left: 50%; width: 8vmin; height: 8vmin;
             background: rgba(255, 255, 255, 0.6); border-radius: 50%;
             transform: translate(-50%, -50%); pointer-events: none;
             transition: transform 0.05s linear;
         }
 
-        /* Top-Right Container for C & E */
         #top-action-group {
-            position: absolute; top: 20px; right: 20px;
-            display: flex; flex-direction: column; gap: 10px;
+            position: absolute; top: 3vmin; right: 3vmin;
+            display: flex; flex-direction: column; gap: 2vmin;
             pointer-events: auto;
         }
         
         .mobile-btn {
             background: rgba(0, 0, 0, 0.5); color: white;
-            border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 6px;
-            padding: 10px 16px; font-weight: bold; pointer-events: auto;
+            border: 0.3vmin solid rgba(255, 255, 255, 0.3); border-radius: 1.5vmin;
+            padding: 2.5vmin 4vmin; font-weight: bold; pointer-events: auto;
             user-select: none; font-family: 'Ubuntu', sans-serif;
-            font-size: 13px; text-shadow: 1px 1px 0 #000;
+            font-size: 3.5vmin; text-shadow: 1px 1px 0 #000;
             box-sizing: border-box; text-align: center;
         }
         .mobile-btn.active { background: rgba(255, 255, 255, 0.7); color: black; text-shadow: none; }
 
-        /* Ability Button positioned directly above right joystick */
+        /* Scaled up ability button placed above right joystick */
         #ability-btn { 
-            position: absolute; bottom: calc(12vh + 140px); right: 10vw;
-            width: 60px; height: 60px; padding: 0;
+            position: absolute; bottom: calc(10vh + 26vmin); right: 8vw;
+            width: 18vmin; height: 18vmin; padding: 0;
             border-radius: 50%; display: flex; align-items: center; justify-content: center;
         }
         
-        /* Crosshair UI */
         #mobile-crosshair {
-            position: fixed; width: 30px; height: 30px;
-            border: 2px solid rgba(255, 0, 0, 0.7); border-radius: 50%;
+            position: fixed; width: 6vmin; height: 6vmin;
+            border: 0.4vmin solid rgba(255, 0, 0, 0.7); border-radius: 50%;
             pointer-events: none; display: none; z-index: 999;
             transform: translate(-50%, -50%);
             background: radial-gradient(circle, rgba(255,0,0,0.4) 10%, transparent 20%);
@@ -75,14 +73,14 @@
         </div>
 
         <button id="ability-btn" class="mobile-btn">
-            <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+            <!-- Scaled up SVG -->
+            <svg viewBox="0 0 24 24" style="width: 65%; height: 65%;" fill="currentColor">
                 <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
             </svg>
         </button>
     `;
     document.body.appendChild(container);
     
-    // Inject crosshair outside the hidden container so it maps properly to the screen
     const crosshair = document.createElement('div');
     crosshair.id = 'mobile-crosshair';
     document.body.appendChild(crosshair);
@@ -110,7 +108,6 @@
             const maxRadius = base.clientWidth / 2;
             const dist = Math.min(Math.hypot(dx, dy), maxRadius);
             const angle = Math.atan2(dy, dx);
-            // Apply -50% translation baseline to keep knob perfectly centered
             knob.style.transform = `translate(calc(-50% + ${Math.cos(angle) * dist}px), calc(-50% + ${Math.sin(angle) * dist}px))`;
         }
 
@@ -126,7 +123,7 @@
             const dx = e.clientX - centerX;
             const dy = e.clientY - centerY;
             updateKnob(dx, dy);
-            callbacks.onMove(dx, dy, Math.hypot(dx, dy));
+            callbacks.onMove(dx, dy, Math.hypot(dx, dy), base.clientWidth / 2);
             e.preventDefault();
         };
 
@@ -135,7 +132,7 @@
             const dx = e.clientX - centerX;
             const dy = e.clientY - centerY;
             updateKnob(dx, dy);
-            callbacks.onMove(dx, dy, Math.hypot(dx, dy));
+            callbacks.onMove(dx, dy, Math.hypot(dx, dy), base.clientWidth / 2);
             e.preventDefault();
         };
 
@@ -173,32 +170,52 @@
         }
     });
 
-    // Right Joystick: Dynamic Crosshair Aiming
+    // Right Joystick: Perfect Rectangular Crosshair Mapping
     setupJoy('joy-right', {
         onStart: () => { 
             if (typeof mobileAim !== 'undefined') { mobileAim.active = true; mobileAim.firing = true; }
             crosshair.style.display = 'block';
         },
-        onMove: (dx, dy, dist) => {
-            if (typeof mobileAim === 'undefined' || dist < 10) return;
+        onMove: (dx, dy, dist, maxRadius) => {
+            let angle = Math.atan2(dy, dx);
             
-            // Basic angle calculation for your global object
-            mobileAim.angle = Math.atan2(dy, dx);
+            // Set aiming angle directly (only if outside a tiny deadzone to prevent jitter)
+            if (typeof mobileAim !== 'undefined' && dist >= 5) {
+                mobileAim.angle = angle;
+            }
 
-            // Crosshair scaling logic: Maps joystick radius (60px) to screen boundaries
-            const maxJoyRadius = 60; 
-            const maxScreenRadius = Math.min(window.innerWidth, window.innerHeight) / 2;
-            const scaleFactor = maxScreenRadius / maxJoyRadius;
+            // Screen bounds
+            const w = window.innerWidth / 2;
+            const h = window.innerHeight / 2;
             
-            // Calculate global screen coordinates relative to center
-            const screenX = (window.innerWidth / 2) + (dx * scaleFactor);
-            const screenY = (window.innerHeight / 2) + (dy * scaleFactor);
+            // Raycast calculation to map the circular joystick exactly to the rectangular screen bounds
+            let absCos = Math.abs(Math.cos(angle));
+            let absSin = Math.abs(Math.sin(angle));
+            let distToEdge = 0;
             
-            // Update UI crosshair
+            if (absCos === 0) {
+                distToEdge = h;
+            } else if (absSin === 0) {
+                distToEdge = w;
+            } else if (w * absSin < h * absCos) {
+                distToEdge = w / absCos;
+            } else {
+                distToEdge = h / absSin;
+            }
+            
+            // Limit joystick drag visual dist to maxRadius to prevent overshooting math
+            const clampedDist = Math.min(dist, maxRadius);
+            const pushRatio = clampedDist / maxRadius;
+            
+            // Project exact coordinates onto the screen
+            const screenX = w + (Math.cos(angle) * distToEdge * pushRatio);
+            const screenY = h + (Math.sin(angle) * distToEdge * pushRatio);
+            
+            // Assign to crosshair element
             crosshair.style.left = `${screenX}px`;
             crosshair.style.top = `${screenY}px`;
             
-            // Injecting aiming coordinates into the global mouse object (if your game supports it)
+            // Directly overwrite game's mouse object
             if (typeof mouse !== 'undefined') {
                 mouse.x = screenX;
                 mouse.y = screenY;
@@ -209,6 +226,13 @@
         onEnd: () => { 
             if (typeof mobileAim !== 'undefined') { mobileAim.active = false; mobileAim.firing = false; }
             crosshair.style.display = 'none';
+            // Snap mouse back to center of screen when released (Crucial for drone control)
+            if (typeof mouse !== 'undefined') {
+                mouse.x = window.innerWidth / 2;
+                mouse.y = window.innerHeight / 2;
+                mouse.clientX = mouse.x;
+                mouse.clientY = mouse.y;
+            }
         }
     });
 
