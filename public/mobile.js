@@ -1,9 +1,9 @@
 (function initMobileControls() {
-    // 1. Detect if the user is on a mobile/touch device
-    const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-    if (!isTouchDevice) return; // Exit if playing on PC
+    // 1. Detect coarse touch input (mobile screens)
+    const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
+    if (!isTouchDevice) return; 
 
-    // 2. Inject CSS for Joysticks and Buttons
+    // 2. Inject CSS
     const style = document.createElement('style');
     style.innerHTML = `
         #mobile-controls {
@@ -29,6 +29,7 @@
             padding: 12px; font-weight: bold; pointer-events: auto;
             user-select: none; font-family: 'Ubuntu', sans-serif;
             font-size: 14px; text-shadow: 1px 1px 0 #000;
+            box-sizing: border-box;
         }
         #btn-e { bottom: 180px; right: 40px; }
         #btn-c { bottom: 240px; right: 40px; }
@@ -40,10 +41,10 @@
     `;
     document.head.appendChild(style);
 
-    // 3. Inject HTML Container
+    // 3. Inject Container
     const container = document.createElement('div');
     container.id = 'mobile-controls';
-    container.style.display = 'none'; // Hidden by default on the menu
+    container.style.display = 'none';
     container.innerHTML = `
         <div id="joy-left" class="joystick-base"><div class="joystick-knob"></div></div>
         <div id="joy-right" class="joystick-base"><div class="joystick-knob"></div></div>
@@ -53,22 +54,22 @@
     `;
     document.body.appendChild(container);
 
-    // 4. Visibility Logic (Disappear on Menu/Death Screen)
-    // We poll the display properties of the existing UI components to toggle our controls.
+    // 4. Robust Display Logic
     setInterval(() => {
         const gameUi = document.getElementById('game-ui');
         const deathScreen = document.getElementById('death-screen');
         
-        // Show controls ONLY if game-ui is active AND death-screen is hidden
-        if (gameUi && gameUi.style.display === 'block' && 
-            deathScreen && deathScreen.style.display !== 'flex') {
+        const isGameVisible = gameUi && window.getComputedStyle(gameUi).display !== 'none';
+        const isDeathVisible = deathScreen && window.getComputedStyle(deathScreen).display !== 'none';
+
+        if (isGameVisible && !isDeathVisible) {
             container.style.display = 'block';
         } else {
             container.style.display = 'none';
         }
     }, 200);
 
-    // 5. Joystick Touch Implementation
+    // 5. Joystick Implementation
     function setupJoy(baseId, callbacks) {
         const base = document.getElementById(baseId);
         const knob = base.querySelector('.joystick-knob');
@@ -79,7 +80,7 @@
             const maxRadius = base.clientWidth / 2;
             const dist = Math.min(Math.hypot(dx, dy), maxRadius);
             const angle = Math.atan2(dy, dx);
-            knob.style.transform = \`translate(\${Math.cos(angle) * dist}px, \${Math.sin(angle) * dist}px)\`;
+            knob.style.transform = `translate(${Math.cos(angle) * dist}px, ${Math.sin(angle) * dist}px)`;
         }
 
         base.addEventListener('pointerdown', e => {
@@ -117,9 +118,9 @@
         base.addEventListener('pointercancel', release);
     }
 
-    // Left Joystick: Translates to global WASD keys
     setupJoy('joy-left', {
         onMove: (dx, dy, dist) => {
+            if (typeof keys === 'undefined') return;
             if (dist < 16) { keys.w = keys.a = keys.s = keys.d = false; return; }
             let angle = Math.atan2(-dy, dx);
             if (angle < 0) angle += Math.PI * 2;
@@ -132,22 +133,25 @@
             
             keys.w = !!dirs.w; keys.a = !!dirs.a; keys.s = !!dirs.s; keys.d = !!dirs.d;
         },
-        onEnd: () => { keys.w = keys.a = keys.s = keys.d = false; }
+        onEnd: () => { 
+            if (typeof keys !== 'undefined') keys.w = keys.a = keys.s = keys.d = false; 
+        }
     });
 
-    // Right Joystick: Translates to global mobileAim variables
     setupJoy('joy-right', {
-        onStart: () => { mobileAim.active = true; mobileAim.firing = true; },
+        onStart: () => { 
+            if (typeof mobileAim !== 'undefined') { mobileAim.active = true; mobileAim.firing = true; }
+        },
         onMove: (dx, dy, dist) => {
-            if (dist < 10) return; // Deadzone
+            if (typeof mobileAim === 'undefined' || dist < 10) return;
             mobileAim.angle = Math.atan2(dy, dx);
         },
-        onEnd: () => { mobileAim.active = false; mobileAim.firing = false; }
+        onEnd: () => { 
+            if (typeof mobileAim !== 'undefined') { mobileAim.active = false; mobileAim.firing = false; }
+        }
     });
 
-    // 6. Action Button Implementation
-    
-    // Simulates a keyboard event so it triggers the window.onkeydown logic in your main script
+    // 6. Action Buttons
     const simulateKey = (keyName) => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: keyName }));
         window.dispatchEvent(new KeyboardEvent('keyup', { key: keyName }));
@@ -169,22 +173,18 @@
 
     const abilityBtn = document.getElementById('ability-btn');
     const pressAbility = (e) => { 
-        mouse.repel = true; 
-        mouse.rightDown = true; 
+        if (typeof mouse !== 'undefined') { mouse.repel = true; mouse.rightDown = true; }
         abilityBtn.classList.add('active'); 
         e.preventDefault(); 
     };
     const releaseAbility = (e) => { 
-        mouse.repel = false; 
-        mouse.rightDown = false; 
+        if (typeof mouse !== 'undefined') { mouse.repel = false; mouse.rightDown = false; }
         abilityBtn.classList.remove('active'); 
         e.preventDefault(); 
     };
     
-    // Ability hooks
     abilityBtn.addEventListener('pointerdown', pressAbility);
     abilityBtn.addEventListener('pointerup', releaseAbility);
     abilityBtn.addEventListener('pointercancel', releaseAbility);
     abilityBtn.addEventListener('pointerleave', releaseAbility);
-
 })();
