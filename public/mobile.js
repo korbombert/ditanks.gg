@@ -3,7 +3,7 @@
     const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
     if (!isTouchDevice) return; 
 
-    // 2. Inject CSS
+    // 2. Inject CSS for New Layout
     const style = document.createElement('style');
     style.innerHTML = `
         #mobile-controls {
@@ -11,48 +11,81 @@
             pointer-events: none; z-index: 1000;
         }
         .joystick-base {
-            position: absolute; bottom: 40px; width: 120px; height: 120px;
+            position: absolute; bottom: 12vh; width: 120px; height: 120px;
             background: rgba(255, 255, 255, 0.15); border: 2px solid rgba(255, 255, 255, 0.3);
             border-radius: 50%; pointer-events: auto; touch-action: none;
         }
-        #joy-left { left: 40px; }
-        #joy-right { right: 40px; }
+        /* Shifted inwards using viewport units for responsive centering */
+        #joy-left { left: 10vw; }
+        #joy-right { right: 10vw; }
+        
         .joystick-knob {
             position: absolute; top: 50%; left: 50%; width: 50px; height: 50px;
-            background: rgba(255, 255, 255, 0.5); border-radius: 50%;
-            margin-top: -25px; margin-left: -25px; pointer-events: none;
+            background: rgba(255, 255, 255, 0.6); border-radius: 50%;
+            transform: translate(-50%, -50%); pointer-events: none;
             transition: transform 0.05s linear;
         }
-        .mobile-btn {
-            position: absolute; background: rgba(0, 0, 0, 0.4); color: white;
-            border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 8px;
-            padding: 12px; font-weight: bold; pointer-events: auto;
-            user-select: none; font-family: 'Ubuntu', sans-serif;
-            font-size: 14px; text-shadow: 1px 1px 0 #000;
-            box-sizing: border-box;
+
+        /* Top-Right Container for C & E */
+        #top-action-group {
+            position: absolute; top: 20px; right: 20px;
+            display: flex; flex-direction: column; gap: 10px;
+            pointer-events: auto;
         }
-        #btn-e { bottom: 180px; right: 40px; }
-        #btn-c { bottom: 240px; right: 40px; }
+        
+        .mobile-btn {
+            background: rgba(0, 0, 0, 0.5); color: white;
+            border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 6px;
+            padding: 10px 16px; font-weight: bold; pointer-events: auto;
+            user-select: none; font-family: 'Ubuntu', sans-serif;
+            font-size: 13px; text-shadow: 1px 1px 0 #000;
+            box-sizing: border-box; text-align: center;
+        }
+        .mobile-btn.active { background: rgba(255, 255, 255, 0.7); color: black; text-shadow: none; }
+
+        /* Ability Button positioned directly above right joystick */
         #ability-btn { 
-            bottom: 40px; right: 180px; width: 70px; height: 70px; 
+            position: absolute; bottom: calc(12vh + 140px); right: 10vw;
+            width: 60px; height: 60px; padding: 0;
             border-radius: 50%; display: flex; align-items: center; justify-content: center;
         }
-        .mobile-btn.active { background: rgba(255, 255, 255, 0.5); color: black; text-shadow: none; }
+        
+        /* Crosshair UI */
+        #mobile-crosshair {
+            position: fixed; width: 30px; height: 30px;
+            border: 2px solid rgba(255, 0, 0, 0.7); border-radius: 50%;
+            pointer-events: none; display: none; z-index: 999;
+            transform: translate(-50%, -50%);
+            background: radial-gradient(circle, rgba(255,0,0,0.4) 10%, transparent 20%);
+        }
     `;
     document.head.appendChild(style);
 
-    // 3. Inject Container
+    // 3. Inject HTML
     const container = document.createElement('div');
     container.id = 'mobile-controls';
     container.style.display = 'none';
     container.innerHTML = `
         <div id="joy-left" class="joystick-base"><div class="joystick-knob"></div></div>
         <div id="joy-right" class="joystick-base"><div class="joystick-knob"></div></div>
-        <button id="btn-e" class="mobile-btn">E (Auto-Fire)</button>
-        <button id="btn-c" class="mobile-btn">C (Auto-Spin)</button>
-        <div id="ability-btn" class="mobile-btn">Ability</div>
+        
+        <div id="top-action-group">
+            <button id="btn-c" class="mobile-btn">C (Spin)</button>
+            <button id="btn-e" class="mobile-btn">E (Fire)</button>
+        </div>
+
+        <button id="ability-btn" class="mobile-btn">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+            </svg>
+        </button>
     `;
     document.body.appendChild(container);
+    
+    // Inject crosshair outside the hidden container so it maps properly to the screen
+    const crosshair = document.createElement('div');
+    crosshair.id = 'mobile-crosshair';
+    document.body.appendChild(crosshair);
 
     // 4. Robust Display Logic
     setInterval(() => {
@@ -62,14 +95,11 @@
         const isGameVisible = gameUi && window.getComputedStyle(gameUi).display !== 'none';
         const isDeathVisible = deathScreen && window.getComputedStyle(deathScreen).display !== 'none';
 
-        if (isGameVisible && !isDeathVisible) {
-            container.style.display = 'block';
-        } else {
-            container.style.display = 'none';
-        }
+        container.style.display = (isGameVisible && !isDeathVisible) ? 'block' : 'none';
+        if (!isGameVisible || isDeathVisible) crosshair.style.display = 'none';
     }, 200);
 
-    // 5. Joystick Implementation
+    // 5. Joystick Framework
     function setupJoy(baseId, callbacks) {
         const base = document.getElementById(baseId);
         const knob = base.querySelector('.joystick-knob');
@@ -80,10 +110,11 @@
             const maxRadius = base.clientWidth / 2;
             const dist = Math.min(Math.hypot(dx, dy), maxRadius);
             const angle = Math.atan2(dy, dx);
-            knob.style.transform = `translate(${Math.cos(angle) * dist}px, ${Math.sin(angle) * dist}px)`;
+            // Apply -50% translation baseline to keep knob perfectly centered
+            knob.style.transform = `translate(calc(-50% + ${Math.cos(angle) * dist}px), calc(-50% + ${Math.sin(angle) * dist}px))`;
         }
 
-        base.addEventListener('pointerdown', e => {
+        const handleStart = (e) => {
             if (activePointerId !== null) return;
             activePointerId = e.pointerId;
             base.setPointerCapture(e.pointerId);
@@ -91,33 +122,37 @@
             centerX = rect.left + rect.width / 2;
             centerY = rect.top + rect.height / 2;
             if (callbacks.onStart) callbacks.onStart();
+            
             const dx = e.clientX - centerX;
             const dy = e.clientY - centerY;
             updateKnob(dx, dy);
             callbacks.onMove(dx, dy, Math.hypot(dx, dy));
             e.preventDefault();
-        });
+        };
 
-        base.addEventListener('pointermove', e => {
+        const handleMove = (e) => {
             if (e.pointerId !== activePointerId) return;
             const dx = e.clientX - centerX;
             const dy = e.clientY - centerY;
             updateKnob(dx, dy);
             callbacks.onMove(dx, dy, Math.hypot(dx, dy));
             e.preventDefault();
-        });
+        };
 
-        function release(e) {
+        const handleEnd = (e) => {
             if (e.pointerId !== activePointerId) return;
             activePointerId = null;
-            knob.style.transform = 'translate(0px, 0px)';
+            knob.style.transform = 'translate(-50%, -50%)';
             if (callbacks.onEnd) callbacks.onEnd();
-        }
+        };
 
-        base.addEventListener('pointerup', release);
-        base.addEventListener('pointercancel', release);
+        base.addEventListener('pointerdown', handleStart);
+        base.addEventListener('pointermove', handleMove);
+        base.addEventListener('pointerup', handleEnd);
+        base.addEventListener('pointercancel', handleEnd);
     }
 
+    // Left Joystick: WASD
     setupJoy('joy-left', {
         onMove: (dx, dy, dist) => {
             if (typeof keys === 'undefined') return;
@@ -138,16 +173,42 @@
         }
     });
 
+    // Right Joystick: Dynamic Crosshair Aiming
     setupJoy('joy-right', {
         onStart: () => { 
             if (typeof mobileAim !== 'undefined') { mobileAim.active = true; mobileAim.firing = true; }
+            crosshair.style.display = 'block';
         },
         onMove: (dx, dy, dist) => {
             if (typeof mobileAim === 'undefined' || dist < 10) return;
+            
+            // Basic angle calculation for your global object
             mobileAim.angle = Math.atan2(dy, dx);
+
+            // Crosshair scaling logic: Maps joystick radius (60px) to screen boundaries
+            const maxJoyRadius = 60; 
+            const maxScreenRadius = Math.min(window.innerWidth, window.innerHeight) / 2;
+            const scaleFactor = maxScreenRadius / maxJoyRadius;
+            
+            // Calculate global screen coordinates relative to center
+            const screenX = (window.innerWidth / 2) + (dx * scaleFactor);
+            const screenY = (window.innerHeight / 2) + (dy * scaleFactor);
+            
+            // Update UI crosshair
+            crosshair.style.left = `${screenX}px`;
+            crosshair.style.top = `${screenY}px`;
+            
+            // Injecting aiming coordinates into the global mouse object (if your game supports it)
+            if (typeof mouse !== 'undefined') {
+                mouse.x = screenX;
+                mouse.y = screenY;
+                mouse.clientX = screenX;
+                mouse.clientY = screenY;
+            }
         },
         onEnd: () => { 
             if (typeof mobileAim !== 'undefined') { mobileAim.active = false; mobileAim.firing = false; }
+            crosshair.style.display = 'none';
         }
     });
 
@@ -157,20 +218,19 @@
         window.dispatchEvent(new KeyboardEvent('keyup', { key: keyName }));
     };
 
-    const btnE = document.getElementById('btn-e');
-    btnE.addEventListener('pointerdown', (e) => {
+    document.getElementById('btn-e').addEventListener('pointerdown', (e) => {
         simulateKey('e'); 
-        btnE.classList.toggle('active');
+        e.target.classList.toggle('active');
         e.preventDefault();
     });
 
-    const btnC = document.getElementById('btn-c');
-    btnC.addEventListener('pointerdown', (e) => {
+    document.getElementById('btn-c').addEventListener('pointerdown', (e) => {
         simulateKey('c'); 
-        btnC.classList.toggle('active');
+        e.target.classList.toggle('active');
         e.preventDefault();
     });
 
+    // Ability Button
     const abilityBtn = document.getElementById('ability-btn');
     const pressAbility = (e) => { 
         if (typeof mouse !== 'undefined') { mouse.repel = true; mouse.rightDown = true; }
