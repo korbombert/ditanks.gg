@@ -1056,11 +1056,9 @@
     
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px; font-weight: bold; color: #555;">Loading...</td></tr>';
     
-    // Primary Railway API with relative path fallback
     const PRIMARY_BASE = 'https://ditanksgg.up.railway.app/api/leaderboard';
     const RELATIVE_BASE = '/api/leaderboard';
 
-    // Automatically extracts arrays whether returned directly or wrapped in an object
     const unwrapArray = (json) => {
         if (Array.isArray(json)) return json;
         if (json && typeof json === 'object') {
@@ -1085,6 +1083,18 @@
         }
     };
 
+    // Helper function to safely extract a name string and username from either a string or an object
+    const parseEntity = (raw, fallbackUsername) => {
+        if (!raw) return { name: '', username: fallbackUsername || '' };
+        if (typeof raw === 'object' && raw !== null) {
+            return {
+                name: raw.name || raw.displayName || raw.scorer || raw.text || raw.username || '',
+                username: raw.username || raw.user || fallbackUsername || ''
+            };
+        }
+        return { name: String(raw), username: fallbackUsername || '' };
+    };
+
     try {
         let data = [];
 
@@ -1099,21 +1109,17 @@
             data = await safeFetch(`/${mode}`);
         }
 
-        // Fallback to integrated dataset if API fails or returns no entries
         if (!data || data.length === 0) {
             data = typeof integratedFallbackScores !== 'undefined' ? integratedFallbackScores : [];
         }
 
-        // Sort descending by score
         data.sort((a, b) => {
             const scoreA = typeof a.score === 'number' ? a.score : parseInt(String(a.score || a.Score || 0).replace(/,/g, '')) || 0;
             const scoreB = typeof b.score === 'number' ? b.score : parseInt(String(b.score || b.Score || 0).replace(/,/g, '')) || 0;
             return scoreB - scoreA;
         });
 
-        // Limit to Top 50
         data = data.slice(0, 50);
-
         tbody.innerHTML = '';
 
         if (data.length === 0) {
@@ -1129,14 +1135,17 @@
             else if (i === 1) tr.style.background = "#f5f5f5";
             else if (i === 2) tr.style.background = "#ffe0b2";
 
-            // Scorer formatting
-            const scorerName = escapeHtml(entry.scorer || entry.name || entry.Scorer || 'Unknown');
-            const scorerUsername = entry.username || entry.scorerUsername || entry.user;
-            const isScorerBot = Boolean(entry.isBot || entry.is_bot || entry.isScorerBot || entry.scorerBot);
-            const scorerColor = isScorerBot ? '#b45309' : '#333'; // Yellow/Gold for bot, dark text for player
+            // Parse Scorer (handles strings and objects)
+            const rawScorer = entry.scorer || entry.name || entry.Scorer;
+            const scorerInfo = parseEntity(rawScorer, entry.username || entry.scorerUsername || entry.user);
+            const scorerName = escapeHtml(scorerInfo.name || 'Unknown');
+            const scorerUsername = scorerInfo.username;
+            
+            const isScorerBot = Boolean(entry.isBot || entry.is_bot || entry.isScorerBot || entry.scorerBot || (typeof rawScorer === 'object' && rawScorer?.isBot));
+            const scorerColor = isScorerBot ? '#b45309' : '#333';
 
             let scorerHtml = `<div style="color: ${scorerColor}; font-weight: bold;">${scorerName}</div>`;
-            if (scorerUsername) {
+            if (scorerUsername && scorerUsername !== scorerName) {
                 scorerHtml += `<div style="font-size: 11px; color: #666; font-weight: normal;">(${escapeHtml(scorerUsername)})</div>`;
             }
 
@@ -1145,14 +1154,17 @@
             const formattedScore = typeof score === 'number' ? score.toLocaleString() : score;
             const tank = escapeHtml(entry.tank || entry.class || entry.Tank || 'Basic');
 
-            // Killer formatting
-            const killedByName = escapeHtml(entry.killedBy || entry.killed_by || entry['Killed By'] || 'N/A');
-            const killerUsername = entry.killerUsername || entry.killedByUsername;
-            const isKillerBot = Boolean(entry.isKillerBot || entry.is_killer_bot || entry.killedByBot || entry.killed_by_bot || entry.killerBot);
-            const killerColor = isKillerBot ? '#b45309' : '#d32f2f'; // Yellow/Gold for bot, red for player
+            // Parse Killer (handles strings and objects)
+            const rawKiller = entry.killedBy || entry.killed_by || entry['Killed By'];
+            const killerInfo = parseEntity(rawKiller, entry.killerUsername || entry.killedByUsername);
+            const killedByName = escapeHtml(killerInfo.name || 'N/A');
+            const killerUsername = killerInfo.username;
+
+            const isKillerBot = Boolean(entry.isKillerBot || entry.is_killer_bot || entry.killedByBot || entry.killed_by_bot || entry.killerBot || (typeof rawKiller === 'object' && rawKiller?.isBot));
+            const killerColor = isKillerBot ? '#b45309' : '#d32f2f';
 
             let killerHtml = `<div style="color: ${killerColor}; font-weight: bold;">${killedByName}</div>`;
-            if (killerUsername) {
+            if (killerUsername && killerUsername !== killedByName) {
                 killerHtml += `<div style="font-size: 11px; color: #666; font-weight: normal;">(${escapeHtml(killerUsername)})</div>`;
             }
 
