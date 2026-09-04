@@ -421,36 +421,33 @@
         }
         #score-bar { width: 100%; height: 100%; background: #40f252; transition: width 0.2s; }
         #score-text-overlay {
-    position: absolute;
-    top: 50%;
-    left: 0;
-    width: 100%;
-    transform: translateY(-50%); /* Perfectly centers the text vertically */
-    text-align: center;
-    color: white;
-    font-size: 10px;
-    font-weight: bold;
-    text-shadow: 1px 1px black;
-    pointer-events: none;        /* Prevents the text box from absorbing mouse clicks */
-    z-index: 2;                  /* Guarantees it renders on top of the green bar fill */
-}
+            position: absolute;
+            top: 50%;
+            left: 0;
+            width: 100%;
+            transform: translateY(-50%); /* Perfectly centers the text vertically */
+            text-align: center;
+            color: white;
+            font-size: 10px;
+            font-weight: bold;
+            text-shadow: 1px 1px black;
+            pointer-events: none;        /* Prevents the text box from absorbing mouse clicks */
+            z-index: 2;                  /* Guarantees it renders on top of the green bar fill */
+        }
         #level-text-overlay {
-    position: absolute;
-    top: 50%;
-    left: 0;
-    width: 100%;
-
-    transform: translateY(-50%);
-
-    text-align: center;
-    color: white;
-    font-size: 10px;
-    font-weight: bold;
-    text-shadow: 1px 1px black;
-
-    pointer-events: none;
-    z-index: 2;
-}
+            position: absolute;
+            top: 50%;
+            left: 0;
+            width: 100%;
+            transform: translateY(-50%);
+            text-align: center;
+            color: white;
+            font-size: 10px;
+            font-weight: bold;
+            text-shadow: 1px 1px black;
+            pointer-events: none;
+            z-index: 2;
+        }
         #xp-bar-container {
             width: 100%; height: 16px; background: #555;
             border: 3px solid #333; border-radius: 8px; overflow: hidden; position: relative;
@@ -503,7 +500,19 @@
             /* Semantic settings button */
         #settings-btn:active { transform: translateY(1px); }
 
-</style>
+        /* =============================================
+           GLOBAL LEADERBOARD BUTTON
+        ============================================= */
+        #global-leaderboard-btn {
+            position: absolute; bottom: 20px; left: 20px; z-index: 110;
+            transform: scale(var(--ui-scale));
+            transform-origin: bottom left;
+        }
+        #leaderboard-modal {
+            width: min(95%, 600px); max-height: min(90vh, 750px);
+        }
+
+    </style>
 </head>
 <body>
 
@@ -561,6 +570,18 @@
         </div>
         <button class="reset-btn" onclick="resetColors()">Reset to Default</button>
     </div>
+</div>
+
+<!-- =============================================
+     GLOBAL LEADERBOARD BUTTON
+============================================= -->
+<div id="global-leaderboard-btn">
+    <button class="auth-btn blue btn-3d" onclick="openLeaderboard()" style="padding: 12px 18px; border-radius: 8px;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 8px;">
+            <path d="M16 11V3H8v6H2v12h20V11h-6zm-6-6h4v14h-4V5zm-6 6h4v8H4v-8zm16 8h-4v-6h4v6z"/>
+        </svg>
+        Leaderboard
+    </button>
 </div>
 
 <!-- =============================================
@@ -739,6 +760,43 @@
     <div id="achievement-list"></div>
 </div>
 
+<!-- =============================================
+     LEADERBOARD MODAL
+============================================= -->
+<div id="leaderboard-modal" class="modal">
+    <div class="modal-header">
+        <h2>Global Leaderboard</h2>
+        <button class="close-btn" onclick="document.getElementById('leaderboard-modal').style.display='none'">✖</button>
+    </div>
+    
+    <div style="margin-bottom: 15px; display: flex; align-items: center; justify-content: space-between;">
+        <label for="leaderboard-mode" style="font-weight: bold;">Game Mode:</label>
+        <select id="leaderboard-mode" onchange="fetchLeaderboard(this.value)" style="width: 65%; margin: 0; padding: 8px 35px 8px 12px; font-size: 15px;">
+            <option value="all">All Modes</option>
+            <option value="FFA">FFA</option>
+            <option value="2TDM">2TDM</option>
+            <option value="4TDM">4TDM</option>
+        </select>
+    </div>
+
+    <div style="overflow-y: auto; max-height: 400px; border: 3px solid #ccc; border-radius: 8px; background: #fff;">
+        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+            <thead style="background: #333; color: white; position: sticky; top: 0; z-index: 10;">
+                <tr>
+                    <th style="padding: 10px; border-bottom: 3px solid #222;">Rank</th>
+                    <th style="padding: 10px; border-bottom: 3px solid #222;">Scorer</th>
+                    <th style="padding: 10px; border-bottom: 3px solid #222;">Score</th>
+                    <th style="padding: 10px; border-bottom: 3px solid #222;">Tank</th>
+                    <th style="padding: 10px; border-bottom: 3px solid #222;">Killed By</th>
+                </tr>
+            </thead>
+            <tbody id="leaderboard-tbody">
+                <!-- Filled by JS -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
 <!-- Achievement toast feed -->
 <div id="achievement-feed"></div>
 
@@ -784,6 +842,10 @@
             // narrow viewports the same as before.
             const cl = document.getElementById('changelog-panel');
             if (cl) cl.style.display = (isInGame() || vw < 800) ? 'none' : '';
+
+            // Hide global leaderboard button when in match to prevent UI overlap
+            const glbBtn = document.getElementById('global-leaderboard-btn');
+            if (glbBtn) glbBtn.style.display = isInGame() ? 'none' : '';
         }
 
         updateScale();
@@ -975,6 +1037,157 @@
         if (!token) return;
         window.location.href = `/app?token=${encodeURIComponent(token)}`;
     }
+
+    /* -----------------------------------------------
+       GLOBAL LEADERBOARD LOGIC
+    ----------------------------------------------- */
+    // Fallback data securely integrated inline if API calls fail or return empty
+    const integratedFallbackScores = [
+        {rank: 1, scorer: "270ms Fra", score: 600200, tank: "Overlord", killedBy: "Hugo"},
+        {rank: 2, scorer: "Magnus", score: 487120, tank: "Pentashot", killedBy: "Space"},
+        {rank: 3, scorer: "กิตติ", score: 482920, tank: "Railgun", killedBy: "Mage"},
+        {rank: 4, scorer: "270ms Fra", score: 478040, tank: "Overlord", killedBy: "Slayer"},
+        {rank: 5, scorer: "Hacker", score: 458040, tank: "Railgun", killedBy: "佐藤"},
+        {rank: 6, scorer: "Gabriel", score: 457160, tank: "Overlord", killedBy: "Agent27"},
+        {rank: 7, scorer: "战神", score: 456790, tank: "Railgun", killedBy: "Smok"},
+        {rank: 8, scorer: "БЛЯТЬ", score: 427000, tank: "Pentashot", killedBy: "Thiago"},
+        {rank: 9, scorer: "Silent", score: 412470, tank: "Railgun", killedBy: "Dragon"},
+        {rank: 10, scorer: "マナブ", score: 395040, tank: "Overlord", killedBy: "Иван"},
+        {rank: 11, scorer: "Guri", score: 385180, tank: "Overlord", killedBy: "战神"},
+        {rank: 12, scorer: "Hacker", score: 378160, tank: "Railgun", killedBy: "민지"},
+        {rank: 13, scorer: "محمد", score: 376070, tank: "Triplet", killedBy: "Rouge"},
+        {rank: 14, scorer: "Frero", score: 368550, tank: "Twin Flank", killedBy: "N/A"},
+        {rank: 15, scorer: "Khoa", score: 366970, tank: "Overlord", killedBy: "Luc"},
+        {rank: 16, scorer: "Ahmed", score: 360720, tank: "Overlord", killedBy: "Hết Nước Chấm"},
+        {rank: 17, scorer: "Kara", score: 360180, tank: "Pentashot", killedBy: "Tranquilo"},
+        {rank: 18, scorer: "Bruce", score: 356270, tank: "Pentashot", killedBy: "GamerPL"},
+        {rank: 19, scorer: "GreatBarrier", score: 351970, tank: "Octo Tank", killedBy: "Lee"},
+        {rank: 20, scorer: "电", score: 336930, tank: "Railgun", killedBy: "N/A"},
+        {rank: 21, scorer: "Phúc", score: 334910, tank: "Triplet", killedBy: "Никита"},
+        {rank: 22, scorer: "حبيبي", score: 334700, tank: "Overlord", killedBy: "加藤"},
+        {rank: 23, scorer: "Noob", score: 328650, tank: "Railgun", killedBy: "Eternal"},
+        {rank: 24, scorer: "Earth", score: 322330, tank: "Overlord", killedBy: "Fuego"},
+        {rank: 25, scorer: "Soldier", score: 312290, tank: "Triplet", killedBy: "No Lag"},
+        {rank: 26, scorer: "Palmeiras", score: 311780, tank: "Railgun", killedBy: "ADIOS MADURO"},
+        {rank: 27, scorer: "Sói", score: 311690, tank: "Triplet", killedBy: "Vatan"},
+        {rank: 28, scorer: "มานะ", score: 310230, tank: "Tri-angle", killedBy: "서현"},
+        {rank: 29, scorer: "Nube", score: 308670, tank: "Triplet", killedBy: "最強"},
+        {rank: 30, scorer: "Zbeub", score: 306200, tank: "Triplet", killedBy: "No Lag"},
+        {rank: 31, scorer: "Omar", score: 304930, tank: "Triplet", killedBy: "Besiktas"},
+        {rank: 32, scorer: "タケシ", score: 296260, tank: "Pentashot", killedBy: "ヤマモト"},
+        {rank: 33, scorer: "Ptdr", score: 290770, tank: "Railgun", killedBy: "xEneSx"},
+        {rank: 34, scorer: "何", score: 280980, tank: "Octo Tank", killedBy: "Mercy"},
+        {rank: 35, scorer: "Muerte", score: 280850, tank: "Predator", killedBy: "Joey_Alpha"},
+        {rank: 36, scorer: "Amir", score: 279160, tank: "Pentashot", killedBy: "Joey_Alpha"},
+        {rank: 37, scorer: "TURK", score: 278990, tank: "Triplet", killedBy: "Ghost"},
+        {rank: 38, scorer: "Twitch_Tv", score: 278780, tank: "Sprayer", killedBy: "N/A"},
+        {rank: 39, scorer: "鈴木", score: 274510, tank: "Overlord", killedBy: "Саша"},
+        {rank: 40, scorer: "TURK", score: 273080, tank: "Railgun", killedBy: "Phan"},
+        {rank: 41, scorer: "No Lag", score: 272780, tank: "Triplet", killedBy: "Mateo"},
+        {rank: 42, scorer: "Pro_VN", score: 270980, tank: "Triplet", killedBy: "TRMuqoAhmedC*"},
+        {rank: 43, scorer: "lucas", score: 269080, tank: "Sprayer", killedBy: "Lune"},
+        {rank: 44, scorer: "Артём", score: 269000, tank: "Predator", killedBy: "서진"},
+        {rank: 45, scorer: "渡辺", score: 268950, tank: "Twin Flank", killedBy: "andriel"},
+        {rank: 46, scorer: "Earth", score: 267320, tank: "Pentashot", killedBy: "Wilk"},
+        {rank: 47, scorer: "Michał", score: 267180, tank: "Octo Tank", killedBy: "โชคดี"},
+        {rank: 48, scorer: "虎", score: 267050, tank: "Triplet", killedBy: "Besiktas"},
+        {rank: 49, scorer: "Zurek", score: 265730, tank: "Overlord", killedBy: "Mexico"},
+        {rank: 50, scorer: "EZ", score: 260980, tank: "Pentashot", killedBy: "Robert"}
+    ];
+
+    function openLeaderboard() {
+        document.getElementById('leaderboard-modal').style.display = 'block';
+        fetchLeaderboard(document.getElementById('leaderboard-mode').value);
+    }
+
+    async function fetchLeaderboard(mode) {
+        const tbody = document.getElementById('leaderboard-tbody');
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px; font-weight: bold; color: #555;">Loading...</td></tr>';
+        
+        try {
+            let data = [];
+            const BASE_URL = 'https://ditanksgg.up.railway.app/api/leaderboard';
+
+            if (mode === 'all') {
+                // Fetch all endpoints concurrently for the "all modes" view
+                const [tdm2, ffa, tdm4] = await Promise.all([
+                    fetch(`${BASE_URL}/2TDM`).then(r => r.ok ? r.json() : []).catch(() => []),
+                    fetch(`${BASE_URL}/FFA`).then(r => r.ok ? r.json() : []).catch(() => []),
+                    fetch(`${BASE_URL}/4TDM`).then(r => r.ok ? r.json() : []).catch(() => [])
+                ]);
+                data = [...tdm2, ...ffa, ...tdm4];
+            } else {
+                const res = await fetch(`${BASE_URL}/${mode}`);
+                if (res.ok) data = await res.json();
+            }
+
+            // Fallback immediately if endpoints fail or return empty arrays
+            if (!data || data.length === 0) {
+                data = integratedFallbackScores;
+            }
+
+            // Standardize and sort the data descendingly
+            data.sort((a, b) => {
+                const scoreA = a.score || parseInt(String(a.Score).replace(/,/g, '')) || 0;
+                const scoreB = b.score || parseInt(String(b.Score).replace(/,/g, '')) || 0;
+                return scoreB - scoreA;
+            });
+
+            tbody.innerHTML = '';
+            
+            data.forEach((entry, i) => {
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = "1px solid #ddd";
+                
+                // Light visual distinction for Top 3
+                if (i === 0) tr.style.background = "#fff9c4";
+                else if (i === 1) tr.style.background = "#f5f5f5";
+                else if (i === 2) tr.style.background = "#ffe0b2";
+
+                const scorer = escapeHtml(entry.scorer || entry.name || entry.Scorer || 'Unknown');
+                const score = entry.score || entry.Score || 0;
+                const formattedScore = typeof score === 'number' ? score.toLocaleString() : score;
+                const tank = escapeHtml(entry.tank || entry.class || entry.Tank || 'Basic');
+                const killedBy = escapeHtml(entry.killedBy || entry.killed_by || entry['Killed By'] || 'N/A');
+
+                tr.innerHTML = `
+                    <td style="padding: 10px; font-weight: bold;">#${i + 1}</td>
+                    <td style="padding: 10px;">${scorer}</td>
+                    <td style="padding: 10px; font-weight: bold; color: #0085a8;">${formattedScore}</td>
+                    <td style="padding: 10px;">${tank}</td>
+                    <td style="padding: 10px; color: #d32f2f;">${killedBy}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+        } catch (err) {
+            console.error("Leaderboard fetch error:", err);
+            // Default to static integrated array on critical throw
+            fetchLeaderboardFallback(integratedFallbackScores);
+        }
+    }
+
+    function fetchLeaderboardFallback(data) {
+        const tbody = document.getElementById('leaderboard-tbody');
+        tbody.innerHTML = '';
+        data.forEach((entry, i) => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = "1px solid #ddd";
+            if (i === 0) tr.style.background = "#fff9c4";
+            else if (i === 1) tr.style.background = "#f5f5f5";
+            else if (i === 2) tr.style.background = "#ffe0b2";
+
+            tr.innerHTML = `
+                <td style="padding: 10px; font-weight: bold;">#${i + 1}</td>
+                <td style="padding: 10px;">${escapeHtml(entry.scorer)}</td>
+                <td style="padding: 10px; font-weight: bold; color: #0085a8;">${entry.score.toLocaleString()}</td>
+                <td style="padding: 10px;">${escapeHtml(entry.tank)}</td>
+                <td style="padding: 10px; color: #d32f2f;">${escapeHtml(entry.killedBy)}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
 </script>
     <!--<script src="/mobile.js"></script>-->
 </body>
