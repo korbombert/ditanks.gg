@@ -1043,56 +1043,6 @@
     ----------------------------------------------- */
     // Fallback data securely integrated inline if API calls fail or return empty
     const integratedFallbackScores = [
-        {rank: 1, scorer: "270ms Fra", score: 600200, tank: "Overlord", killedBy: "Hugo"},
-        {rank: 2, scorer: "Magnus", score: 487120, tank: "Pentashot", killedBy: "Space"},
-        {rank: 3, scorer: "กิตติ", score: 482920, tank: "Railgun", killedBy: "Mage"},
-        {rank: 4, scorer: "270ms Fra", score: 478040, tank: "Overlord", killedBy: "Slayer"},
-        {rank: 5, scorer: "Hacker", score: 458040, tank: "Railgun", killedBy: "佐藤"},
-        {rank: 6, scorer: "Gabriel", score: 457160, tank: "Overlord", killedBy: "Agent27"},
-        {rank: 7, scorer: "战神", score: 456790, tank: "Railgun", killedBy: "Smok"},
-        {rank: 8, scorer: "БЛЯТЬ", score: 427000, tank: "Pentashot", killedBy: "Thiago"},
-        {rank: 9, scorer: "Silent", score: 412470, tank: "Railgun", killedBy: "Dragon"},
-        {rank: 10, scorer: "マナブ", score: 395040, tank: "Overlord", killedBy: "Иван"},
-        {rank: 11, scorer: "Guri", score: 385180, tank: "Overlord", killedBy: "战神"},
-        {rank: 12, scorer: "Hacker", score: 378160, tank: "Railgun", killedBy: "민지"},
-        {rank: 13, scorer: "محمد", score: 376070, tank: "Triplet", killedBy: "Rouge"},
-        {rank: 14, scorer: "Frero", score: 368550, tank: "Twin Flank", killedBy: "N/A"},
-        {rank: 15, scorer: "Khoa", score: 366970, tank: "Overlord", killedBy: "Luc"},
-        {rank: 16, scorer: "Ahmed", score: 360720, tank: "Overlord", killedBy: "Hết Nước Chấm"},
-        {rank: 17, scorer: "Kara", score: 360180, tank: "Pentashot", killedBy: "Tranquilo"},
-        {rank: 18, scorer: "Bruce", score: 356270, tank: "Pentashot", killedBy: "GamerPL"},
-        {rank: 19, scorer: "GreatBarrier", score: 351970, tank: "Octo Tank", killedBy: "Lee"},
-        {rank: 20, scorer: "电", score: 336930, tank: "Railgun", killedBy: "N/A"},
-        {rank: 21, scorer: "Phúc", score: 334910, tank: "Triplet", killedBy: "Никита"},
-        {rank: 22, scorer: "حبيبي", score: 334700, tank: "Overlord", killedBy: "加藤"},
-        {rank: 23, scorer: "Noob", score: 328650, tank: "Railgun", killedBy: "Eternal"},
-        {rank: 24, scorer: "Earth", score: 322330, tank: "Overlord", killedBy: "Fuego"},
-        {rank: 25, scorer: "Soldier", score: 312290, tank: "Triplet", killedBy: "No Lag"},
-        {rank: 26, scorer: "Palmeiras", score: 311780, tank: "Railgun", killedBy: "ADIOS MADURO"},
-        {rank: 27, scorer: "Sói", score: 311690, tank: "Triplet", killedBy: "Vatan"},
-        {rank: 28, scorer: "มานะ", score: 310230, tank: "Tri-angle", killedBy: "서현"},
-        {rank: 29, scorer: "Nube", score: 308670, tank: "Triplet", killedBy: "最強"},
-        {rank: 30, scorer: "Zbeub", score: 306200, tank: "Triplet", killedBy: "No Lag"},
-        {rank: 31, scorer: "Omar", score: 304930, tank: "Triplet", killedBy: "Besiktas"},
-        {rank: 32, scorer: "タケシ", score: 296260, tank: "Pentashot", killedBy: "ヤマモト"},
-        {rank: 33, scorer: "Ptdr", score: 290770, tank: "Railgun", killedBy: "xEneSx"},
-        {rank: 34, scorer: "何", score: 280980, tank: "Octo Tank", killedBy: "Mercy"},
-        {rank: 35, scorer: "Muerte", score: 280850, tank: "Predator", killedBy: "Joey_Alpha"},
-        {rank: 36, scorer: "Amir", score: 279160, tank: "Pentashot", killedBy: "Joey_Alpha"},
-        {rank: 37, scorer: "TURK", score: 278990, tank: "Triplet", killedBy: "Ghost"},
-        {rank: 38, scorer: "Twitch_Tv", score: 278780, tank: "Sprayer", killedBy: "N/A"},
-        {rank: 39, scorer: "鈴木", score: 274510, tank: "Overlord", killedBy: "Саша"},
-        {rank: 40, scorer: "TURK", score: 273080, tank: "Railgun", killedBy: "Phan"},
-        {rank: 41, scorer: "No Lag", score: 272780, tank: "Triplet", killedBy: "Mateo"},
-        {rank: 42, scorer: "Pro_VN", score: 270980, tank: "Triplet", killedBy: "TRMuqoAhmedC*"},
-        {rank: 43, scorer: "lucas", score: 269080, tank: "Sprayer", killedBy: "Lune"},
-        {rank: 44, scorer: "Артём", score: 269000, tank: "Predator", killedBy: "서진"},
-        {rank: 45, scorer: "渡辺", score: 268950, tank: "Twin Flank", killedBy: "andriel"},
-        {rank: 46, scorer: "Earth", score: 267320, tank: "Pentashot", killedBy: "Wilk"},
-        {rank: 47, scorer: "Michał", score: 267180, tank: "Octo Tank", killedBy: "โชคดี"},
-        {rank: 48, scorer: "虎", score: 267050, tank: "Triplet", killedBy: "Besiktas"},
-        {rank: 49, scorer: "Zurek", score: 265730, tank: "Overlord", killedBy: "Mexico"},
-        {rank: 50, scorer: "EZ", score: 260980, tank: "Pentashot", killedBy: "Robert"}
     ];
 
     function openLeaderboard() {
@@ -1104,25 +1054,35 @@
     const tbody = document.getElementById('leaderboard-tbody');
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px; font-weight: bold; color: #555;">Loading...</td></tr>';
     
+    // Uses relative path to prevent cross-origin CORS errors
+    const BASE_URL = '/api/leaderboard';
+
+    const safeFetch = async (url) => {
+        try {
+            const res = await fetch(url);
+            if (!res.ok) return [];
+            return await res.json();
+        } catch (e) {
+            return [];
+        }
+    };
+
     try {
         let data = [];
-        const BASE_URL = 'https://ditanksgg.up.railway.app/api/leaderboard';
 
         if (mode === 'all') {
-            // Fetch all 3 modes concurrently and combine results
             const [tdm2, ffa, tdm4] = await Promise.all([
-                fetch(`${BASE_URL}/2TDM`).then(r => r.ok ? r.json() : []).catch(() => []),
-                fetch(`${BASE_URL}/FFA`).then(r => r.ok ? r.json() : []).catch(() => []),
-                fetch(`${BASE_URL}/4TDM`).then(r => r.ok ? r.json() : []).catch(() => [])
+                safeFetch(`${BASE_URL}/2TDM`),
+                safeFetch(`${BASE_URL}/FFA`),
+                safeFetch(`${BASE_URL}/4TDM`)
             ]);
-            data = [...tdm2, ...ffa, ...tdm4];
+            data = [...(Array.isArray(tdm2) ? tdm2 : []), ...(Array.isArray(ffa) ? ffa : []), ...(Array.isArray(tdm4) ? tdm4 : [])];
         } else {
-            // Fetch specific mode endpoint (/2TDM, /4TDM, /FFA)
-            const res = await fetch(`${BASE_URL}/${mode}`);
-            if (res.ok) data = await res.json();
+            const resData = await safeFetch(`${BASE_URL}/${mode}`);
+            data = Array.isArray(resData) ? resData : [];
         }
 
-        // Fallback if API fails or returns empty entries
+        // Fallback if backend API is unreachable or returns empty data
         if (!data || data.length === 0) {
             data = integratedFallbackScores;
         }
@@ -1143,32 +1103,28 @@
             const tr = document.createElement('tr');
             tr.style.borderBottom = "1px solid #ddd";
             
-            // Top 3 highlight rows
             if (i === 0) tr.style.background = "#fff9c4";
             else if (i === 1) tr.style.background = "#f5f5f5";
             else if (i === 2) tr.style.background = "#ffe0b2";
 
-            // Scorer formatting
             const scorerName = escapeHtml(entry.scorer || entry.name || entry.Scorer || 'Unknown');
             const scorerUsername = entry.username || entry.scorerUsername || entry.user;
             const isScorerBot = Boolean(entry.isBot || entry.is_bot || entry.isScorerBot || entry.scorerBot);
-            const scorerColor = isScorerBot ? '#d97706' : '#333'; // Gold/Yellow for bot, dark text for human
+            const scorerColor = isScorerBot ? '#d97706' : '#333';
 
             let scorerHtml = `<div style="color: ${scorerColor}; font-weight: bold;">${scorerName}</div>`;
             if (scorerUsername) {
                 scorerHtml += `<div style="font-size: 11px; color: #777;">(${escapeHtml(scorerUsername)})</div>`;
             }
 
-            // Score & Tank
             const score = entry.score || entry.Score || 0;
             const formattedScore = typeof score === 'number' ? score.toLocaleString() : score;
             const tank = escapeHtml(entry.tank || entry.class || entry.Tank || 'Basic');
 
-            // Killer formatting
             const killedByName = escapeHtml(entry.killedBy || entry.killed_by || entry['Killed By'] || 'N/A');
             const killerUsername = entry.killerUsername || entry.killedByUsername;
             const isKillerBot = Boolean(entry.isKillerBot || entry.is_killer_bot || entry.killedByBot || entry.killed_by_bot || entry.killerBot);
-            const killerColor = isKillerBot ? '#d97706' : '#d32f2f'; // Gold/Yellow for bot killer, Red for player killer
+            const killerColor = isKillerBot ? '#d97706' : '#d32f2f';
 
             let killerHtml = `<div style="color: ${killerColor}; font-weight: bold;">${killedByName}</div>`;
             if (killerUsername) {
@@ -1186,7 +1142,7 @@
         });
 
     } catch (err) {
-        console.error("Leaderboard fetch error:", err);
+        console.error("Leaderboard rendering error:", err);
         fetchLeaderboardFallback(integratedFallbackScores);
     }
 }
