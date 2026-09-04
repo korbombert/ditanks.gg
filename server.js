@@ -84,11 +84,43 @@ db.prepare(`
     )
 `).run();
 
+// Global highscore leaderboard: top scores are kept per game mode, capped at
+// LEADERBOARD_LIMIT entries per mode (see recordLeaderboardScore()).
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS leaderboard_scores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mode TEXT NOT NULL,
+        score INTEGER NOT NULL,
+        tank TEXT,
+        pos_x REAL,
+        pos_y REAL,
+        scorer_name TEXT,
+        scorer_is_bot INTEGER DEFAULT 0,
+        scorer_account_id TEXT,
+        scorer_account_name TEXT,
+        killer_name TEXT,
+        killer_is_bot INTEGER DEFAULT 0,
+        killer_account_id TEXT,
+        killer_account_name TEXT,
+        created_at INTEGER
+    )
+`).run();
+db.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_leaderboard_mode_score
+    ON leaderboard_scores(mode, score DESC)
+`).run();
+
 // Migrations must run after every CREATE TABLE above, since they ALTER
 // tables (e.g. changelogs) that need to already exist.
 const migrations = [
     `ALTER TABLE changelogs ADD COLUMN type TEXT DEFAULT 'changelog'`,
-    `ALTER TABLE changelogs ADD COLUMN estimated_end INTEGER`
+    `ALTER TABLE changelogs ADD COLUMN estimated_end INTEGER`,
+    // These two columns were already referenced by the death-handling code
+    // (high_score / kills tracking) but were never actually added to the
+    // table, which made every one of those UPDATE queries throw. Adding
+    // them here fixes that and lets per-user high score + kill tracking work.
+    `ALTER TABLE users ADD COLUMN high_score INTEGER DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN kills INTEGER DEFAULT 0`
 ];
 
 migrations.forEach(query => {
@@ -114,6 +146,23 @@ const MAX_LEVEL = 30;
 const TICK_RATE = 60; 
 const SERVER_LOCATION = process.env.SERVER_LOCATION;
 const LEVEL_REQUIREMENTS = [ 0, 0, 22, 100, 210, 355, 470, 600, 775, 930, 1100, 1300, 1525, 1650, 1780, 1900, 2500, 3200, 4100, 5000, 6100, 7000, 8000, 9000, 10000, 11100, 12200, 13300, 14400, 15600, 16800 ];
+
+// ===================== SANDBOX MODE =====================
+// When enabled, every bot and player is granted SANDBOX_SPAWN_SCORE xp the
+// moment they spawn, which (via addXP's normal leveling loop) puts them at
+// MAX_LEVEL immediately instead of having to grind for it. Persisted in
+// bot_config so it survives restarts, but read from this in-memory
+// variable on every spawn so toggling it takes effect immediately.
+const SANDBOX_SPAWN_SCORE = 24000;
+let sandboxMode = (() => {
+    const row = db.prepare("SELECT value FROM bot_config WHERE key = 'sandbox_mode'").get();
+    return row ? row.value === 'true' : false;
+})();
+function setSandboxMode(enabled) {
+    sandboxMode = !!enabled;
+    db.prepare("INSERT OR REPLACE INTO bot_config (key, value) VALUES ('sandbox_mode', ?)").run(String(sandboxMode));
+    return sandboxMode;
+}
 // ===================== GAME DATA =====================
 let BOT_NAMES = [];
 try {
@@ -652,7 +701,48 @@ app.delete('/api/admin/changelogs/:id', requireAdmin, (req, res) => {
 });
 app.get('/api/achievements', (req, res) => {
     res.json(ACHIEVEMENTS);
-});app.get('/api/me/achievements', (req, res) => {
+});
+
+// ===================== LEADERBOARD API =====================
+// Global highscore leaderboard: top 50 scores per game mode. Public/read-only,
+// like /api/changelogs and /api/achievements above.
+
+app.get('/api/leaderboard/modes', (req, res) => {
+    const rows = db.prepare(`SELECT DISTINCT mode FROM leaderboard_scores`).all();
+    res.json(rows.map(r => r.mode));
+});
+
+app.get('/api/leaderboard/:mode', (req, res) => {
+    const { mode } = req.params;
+    const rows = db.prepare(`
+        SELECT * FROM leaderboard_scores
+        WHERE mode = ?
+        ORDER BY score DESC
+        LIMIT ?
+    `).all(mode, LEADERBOARD_LIMIT);
+
+    res.json({
+        mode,
+        leaderboard: rows.map(formatLeaderboardRow)
+    });
+});
+
+app.get('/api/leaderboard', (req, res) => {
+    const modes = db.prepare(`SELECT DISTINCT mode FROM leaderboard_scores`).all().map(r => r.mode);
+    const result = {};
+    modes.forEach(mode => {
+        const rows = db.prepare(`
+            SELECT * FROM leaderboard_scores
+            WHERE mode = ?
+            ORDER BY score DESC
+            LIMIT ?
+        `).all(mode, LEADERBOARD_LIMIT);
+        result[mode] = rows.map(formatLeaderboardRow);
+    });
+    res.json(result);
+});
+
+app.get('/api/me/achievements', (req, res) => {
     try {
         const authHeader = req.headers.authorization;
         let token = authHeader?.split(' ')[1];
@@ -769,17 +859,21 @@ app.get('/api/admin/game-config', requireAdmin, (req, res) => {
         const row = db.prepare("SELECT value FROM bot_config WHERE key = ?").get(k);
         config[k] = row ? row.value : null;
     });
+    config.sandbox_mode = sandboxMode;
     res.json(config);
 });
 
 app.post('/api/admin/game-config', requireAdmin, (req, res) => {
-    const { maintenance_mode, motd, coin_multiplier, max_bots } = req.body;
+    const { maintenance_mode, motd, coin_multiplier, max_bots, sandbox_mode } = req.body;
     const entries = { maintenance_mode, motd, coin_multiplier, max_bots };
     const upsert = db.prepare("INSERT OR REPLACE INTO bot_config (key, value) VALUES (?, ?)");
     for (const [k, v] of Object.entries(entries)) {
         if (v !== undefined) upsert.run(k, String(v));
     }
-    res.json({ success: true });
+    if (sandbox_mode !== undefined) {
+        setSandboxMode(sandbox_mode === true || sandbox_mode === 'true');
+    }
+    res.json({ success: true, sandbox_mode: sandboxMode });
 });
 
 // ===================== ADMIN: BROADCAST =====================
@@ -1001,7 +1095,11 @@ this.entities.push(shape);
             by = Math.random() * WORLD_SIZE;
         }
         let bot = new Entity(this, bx, by, 'ai', "", team);
-        if (startScore > 0) bot.addXP(startScore); 
+        if (sandboxMode) {
+            bot.addXP(SANDBOX_SPAWN_SCORE);
+        } else if (startScore > 0) {
+            bot.addXP(startScore);
+        }
         this.entities.push(bot);
     }
 }
@@ -1134,6 +1232,111 @@ function unlockAchievement(userId, achievementId, ws = null) {
 
     return true;
 }
+
+// ===================== GLOBAL LEADERBOARD =====================
+const LEADERBOARD_LIMIT = 50;
+
+// Records a death's score against the global per-mode leaderboard, keeping
+// only the top LEADERBOARD_LIMIT entries for that mode. `entity` is whoever
+// just died (the scorer); `killer`/`killerClient` (both optional) describe
+// whoever landed the killing blow, resolved by the caller.
+function recordLeaderboardScore(mode, entity, killer, killerClient) {
+    if (!['tank', 'ai'].includes(entity.type)) return;
+    if (!Number.isFinite(entity.score) || entity.score <= 0) return;
+
+    // Cheap early-out: if the board is already full for this mode and this
+    // score wouldn't crack the top LEADERBOARD_LIMIT, skip the insert+prune
+    // entirely so low scores don't churn the table.
+    const currentCount = db.prepare(
+        `SELECT COUNT(*) as c FROM leaderboard_scores WHERE mode = ?`
+    ).get(mode).c;
+    if (currentCount >= LEADERBOARD_LIMIT) {
+        const lowest = db.prepare(
+            `SELECT score FROM leaderboard_scores WHERE mode = ? ORDER BY score ASC LIMIT 1`
+        ).get(mode);
+        if (lowest && entity.score <= lowest.score) return;
+    }
+
+    let scorerAccountId = null;
+    let scorerAccountName = null;
+    // This runs before the client's `.player` reference is cleared on death,
+    // so we can still look it up here to check for a linked account.
+    const scorerRoomClient = entity.room?.clients?.find(c => c.player === entity) || null;
+    if (scorerRoomClient?.dbId) {
+        const user = db.prepare("SELECT id, username FROM users WHERE id = ?").get(scorerRoomClient.dbId);
+        if (user) {
+            scorerAccountId = user.id;
+            scorerAccountName = user.username;
+        }
+    }
+
+    let killerAccountId = null;
+    let killerAccountName = null;
+    if (killerClient?.dbId) {
+        const user = db.prepare("SELECT id, username FROM users WHERE id = ?").get(killerClient.dbId);
+        if (user) {
+            killerAccountId = user.id;
+            killerAccountName = user.username;
+        }
+    }
+
+    db.prepare(`
+        INSERT INTO leaderboard_scores
+        (mode, score, tank, pos_x, pos_y, scorer_name, scorer_is_bot, scorer_account_id, scorer_account_name,
+         killer_name, killer_is_bot, killer_account_id, killer_account_name, created_at)
+        VALUES (@mode, @score, @tank, @pos_x, @pos_y, @scorer_name, @scorer_is_bot, @scorer_account_id, @scorer_account_name,
+                @killer_name, @killer_is_bot, @killer_account_id, @killer_account_name, @created_at)
+    `).run({
+        mode,
+        score: Math.floor(entity.score),
+        tank: entity.tankType || null,
+        pos_x: entity.x,
+        pos_y: entity.y,
+        scorer_name: entity.name || (entity.type === 'ai' ? 'Bot' : 'Unnamed'),
+        scorer_is_bot: entity.type === 'ai' ? 1 : 0,
+        scorer_account_id: scorerAccountId,
+        scorer_account_name: scorerAccountName,
+        killer_name: killer ? (killer.name || (killer.type === 'ai' ? 'Bot' : 'Unnamed')) : null,
+        killer_is_bot: killer ? (killer.type === 'ai' ? 1 : 0) : null,
+        killer_account_id: killerAccountId,
+        killer_account_name: killerAccountName,
+        created_at: Date.now()
+    });
+
+    // Prune back down to the top LEADERBOARD_LIMIT entries for this mode.
+    db.prepare(`
+        DELETE FROM leaderboard_scores
+        WHERE mode = ? AND id NOT IN (
+            SELECT id FROM leaderboard_scores WHERE mode = ? ORDER BY score DESC LIMIT ?
+        )
+    `).run(mode, mode, LEADERBOARD_LIMIT);
+}
+
+function formatLeaderboardRow(row, index) {
+    return {
+        rank: index + 1,
+        score: row.score,
+        tank: row.tank,
+        position: { x: row.pos_x, y: row.pos_y },
+        mode: row.mode,
+        scorer: {
+            name: row.scorer_name,
+            isBot: !!row.scorer_is_bot,
+            account: row.scorer_account_id
+                ? { id: row.scorer_account_id, username: row.scorer_account_name }
+                : null
+        },
+        killer: {
+            name: row.killer_name,
+            isBot: row.killer_is_bot === null ? null : !!row.killer_is_bot,
+            account: row.killer_account_id
+                ? { id: row.killer_account_id, username: row.killer_account_name }
+                : null
+        },
+        timestamp: row.created_at
+    };
+}
+
 class Entity {
     constructor(room, x, y, type, name = "", team = 0, isPlayer = false, ws = null) {
         this.room = room;
@@ -1172,6 +1375,18 @@ this.baseMaxHpBeforePowerup = null;
         this.aiTarget = null; 
         this.evadeVx = 0; 
         this.evadeVy = 0;
+        // Wander anchor: each idle bot patrols around its own point instead of
+        // every idle bot being pulled back toward the exact same map-center
+        // coordinate, which is what caused AI tanks to flock together and
+        // gather in the middle of the map. Re-rolled periodically so patrol
+        // routes keep drifting instead of getting stuck in one spot forever.
+        this.wanderAnchorX = x;
+        this.wanderAnchorY = y;
+        this.wanderAnchorTimer = 600 + Math.floor(Math.random() * 900); // ~10-25s @60fps
+        // Light separation nudge away from other nearby bots so idle AI
+        // spreads out instead of stacking on top of each other.
+        this.flockSeparationX = 0;
+        this.flockSeparationY = 0;
         // Manager invisibility
         this.opacity = 1;
         this.stillTicks = 0;
@@ -1432,6 +1647,26 @@ if (this.hp < effectiveMaxHp) {
                 this.targetId = this.aiTarget ? (this.aiTarget.id || null) : null;
                 
                 this.isFleeing = (this.hp / effectiveMaxHpForFlee) < 0.25;
+
+                // Separation: push away from other nearby tanks/bots so idle AI
+                // doesn't stack on top of each other while wandering/gathering.
+                let sepX = 0, sepY = 0, sepCount = 0;
+                const SEP_RADIUS = 220;
+                const SEP_RADIUS_SQ = SEP_RADIUS * SEP_RADIUS;
+                nearby.entities.forEach(e => {
+                    if (e === this || e.markedForDeletion) return;
+                    if (!['ai', 'tank'].includes(e.type)) return;
+                    let dx = this.x - e.x, dy = this.y - e.y;
+                    let distSq = dx * dx + dy * dy;
+                    if (distSq < SEP_RADIUS_SQ && distSq > 0) {
+                        let dist = Math.sqrt(distSq);
+                        sepX += (dx / dist) * (1 - dist / SEP_RADIUS);
+                        sepY += (dy / dist) * (1 - dist / SEP_RADIUS);
+                        sepCount++;
+                    }
+                });
+                this.flockSeparationX = sepCount > 0 ? sepX / sepCount : 0;
+                this.flockSeparationY = sepCount > 0 ? sepY / sepCount : 0;
             }
             this.vx += this.evadeVx;
             this.vy += this.evadeVy;
@@ -1555,8 +1790,16 @@ if (tooDeep) {
 }
                 // For TDM modes, bots should flee/wander toward their own base corner,
                 // not the world center which may sit inside enemy territory.
-                let wanderX = WORLD_SIZE / 2;
-                let wanderY = WORLD_SIZE / 2;
+                //
+                // For FFA (and any other non-TDM mode), bots used to always default to
+                // the exact world-center coordinate here. Since every idle bot shared
+                // that same destination, they'd all steer toward it and gather in one
+                // clump in the middle of the map. Each bot now patrols around its own
+                // wanderAnchor point instead, which is re-rolled to a new random spot
+                // every ~10-25s so bots keep circulating the whole map rather than
+                // funneling into the center.
+                let wanderX = this.wanderAnchorX;
+                let wanderY = this.wanderAnchorY;
                 if (this.room.mode === "2TDM" && this.team !== 0) {
                     // Wander point placed at 62% across the map toward the enemy side
                     wanderX = this.team === 1 ? WORLD_SIZE * 0.62 : WORLD_SIZE * 0.38;
@@ -1565,6 +1808,17 @@ if (tooDeep) {
                     // Push wander well past the halfway mark into the opposing quadrant
                     wanderX = (this.team === 1 || this.team === 4) ? WORLD_SIZE * 0.65 : WORLD_SIZE * 0.35;
                     wanderY = (this.team === 1 || this.team === 3) ? WORLD_SIZE * 0.65 : WORLD_SIZE * 0.35;
+                } else {
+                    // FFA / no-team bots: periodically re-roll the anchor so patrol
+                    // routes drift across the whole map over time.
+                    this.wanderAnchorTimer--;
+                    if (this.wanderAnchorTimer <= 0) {
+                        this.wanderAnchorX = Math.random() * WORLD_SIZE;
+                        this.wanderAnchorY = Math.random() * WORLD_SIZE;
+                        this.wanderAnchorTimer = 600 + Math.floor(Math.random() * 900);
+                        wanderX = this.wanderAnchorX;
+                        wanderY = this.wanderAnchorY;
+                    }
                 }
 
                 if (this.isFleeing) {
@@ -1593,6 +1847,10 @@ if (tooDeep) {
                     
                     this.vx += Math.cos(this.angle) * moveSpeed;
                     this.vy += Math.sin(this.angle) * moveSpeed;
+
+                    // Nudge away from other bots clumped nearby while wandering.
+                    this.vx += this.flockSeparationX * moveSpeed * 0.8;
+                    this.vy += this.flockSeparationY * moveSpeed * 0.8;
 
                     if (Math.random() < 0.03) {
                         isShooting = true;
@@ -2344,13 +2602,18 @@ function updateRoom(room) {
     let respawningBots = [];
     room.entities = room.entities.filter(e => {
         if(e.hp <= 0) {
+            // Resolve the killer once so both the achievement logic below and the
+            // global leaderboard recording (further down) can share it.
+            const killer = ['tank', 'ai'].includes(e.type)
+                ? room.entities.find(p => p.id === e.lastDamagedBy)
+                : null;
+            const killerClient = (killer && killer.isPlayer)
+                ? room.clients.find(c => c.player === killer)
+                : null;
+
             // Award kill achievements whenever a tank/bot dies (not just real players)
             if (['tank', 'ai'].includes(e.type)) {
-                const killer = room.entities.find(p => p.id === e.lastDamagedBy);
-
                 if (killer && killer.isPlayer) {
-                    const killerClient = room.clients.find(c => c.player === killer);
-
                     if (killerClient?.dbId) {
                         db.prepare(`
                             UPDATE users
@@ -2385,6 +2648,12 @@ function updateRoom(room) {
                         }
                     }
                 }
+
+                // Record this death's score on the global per-mode leaderboard.
+                // Covers both real players and bots (e.g. Overlord AI) so the
+                // top-50 board reflects any tank/ai that reached a high score,
+                // with an isBot flag on each side so consumers can tell them apart.
+                recordLeaderboardScore(room.mode, e, killer, killerClient);
             }
 
             if(e.isPlayer && e.ws) {
@@ -2561,6 +2830,9 @@ wss.on('connection', (ws, req) => {
             }
             
             client.player = new Entity(room, px, py, 'tank', data.name || "Unnamed", team, true, ws);
+            if (sandboxMode) {
+                client.player.addXP(SANDBOX_SPAWN_SCORE);
+            }
             client.spectatingId = null;
             if (client.dbId) {
                 let user = db.prepare("SELECT selected_color FROM users WHERE id = ?").get(client.dbId);
