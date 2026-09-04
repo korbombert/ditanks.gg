@@ -1101,71 +1101,95 @@
     }
 
     async function fetchLeaderboard(mode) {
-        const tbody = document.getElementById('leaderboard-tbody');
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px; font-weight: bold; color: #555;">Loading...</td></tr>';
-        
-        try {
-            let data = [];
-            const BASE_URL = 'https://ditanksgg.up.railway.app/api/leaderboard';
+    const tbody = document.getElementById('leaderboard-tbody');
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px; font-weight: bold; color: #555;">Loading...</td></tr>';
+    
+    try {
+        let data = [];
+        const BASE_URL = 'https://ditanksgg.up.railway.app/api/leaderboard';
 
-            if (mode === 'all') {
-                // Fetch all endpoints concurrently for the "all modes" view
-                const [tdm2, ffa, tdm4] = await Promise.all([
-                    fetch(`${BASE_URL}/2TDM`).then(r => r.ok ? r.json() : []).catch(() => []),
-                    fetch(`${BASE_URL}/FFA`).then(r => r.ok ? r.json() : []).catch(() => []),
-                    fetch(`${BASE_URL}/4TDM`).then(r => r.ok ? r.json() : []).catch(() => [])
-                ]);
-                data = [...tdm2, ...ffa, ...tdm4];
-            } else {
-                const res = await fetch(`${BASE_URL}/${mode}`);
-                if (res.ok) data = await res.json();
-            }
-
-            // Fallback immediately if endpoints fail or return empty arrays
-            if (!data || data.length === 0) {
-                data = integratedFallbackScores;
-            }
-
-            // Standardize and sort the data descendingly
-            data.sort((a, b) => {
-                const scoreA = a.score || parseInt(String(a.Score).replace(/,/g, '')) || 0;
-                const scoreB = b.score || parseInt(String(b.Score).replace(/,/g, '')) || 0;
-                return scoreB - scoreA;
-            });
-
-            tbody.innerHTML = '';
-            
-            data.forEach((entry, i) => {
-                const tr = document.createElement('tr');
-                tr.style.borderBottom = "1px solid #ddd";
-                
-                // Light visual distinction for Top 3
-                if (i === 0) tr.style.background = "#fff9c4";
-                else if (i === 1) tr.style.background = "#f5f5f5";
-                else if (i === 2) tr.style.background = "#ffe0b2";
-
-                const scorer = escapeHtml(entry.scorer || entry.name || entry.Scorer || 'Unknown');
-                const score = entry.score || entry.Score || 0;
-                const formattedScore = typeof score === 'number' ? score.toLocaleString() : score;
-                const tank = escapeHtml(entry.tank || entry.class || entry.Tank || 'Basic');
-                const killedBy = escapeHtml(entry.killedBy || entry.killed_by || entry['Killed By'] || 'N/A');
-
-                tr.innerHTML = `
-                    <td style="padding: 10px; font-weight: bold;">#${i + 1}</td>
-                    <td style="padding: 10px;">${scorer}</td>
-                    <td style="padding: 10px; font-weight: bold; color: #0085a8;">${formattedScore}</td>
-                    <td style="padding: 10px;">${tank}</td>
-                    <td style="padding: 10px; color: #d32f2f;">${killedBy}</td>
-                `;
-                tbody.appendChild(tr);
-            });
-
-        } catch (err) {
-            console.error("Leaderboard fetch error:", err);
-            // Default to static integrated array on critical throw
-            fetchLeaderboardFallback(integratedFallbackScores);
+        if (mode === 'all') {
+            // Fetch all 3 modes concurrently and combine results
+            const [tdm2, ffa, tdm4] = await Promise.all([
+                fetch(`${BASE_URL}/2TDM`).then(r => r.ok ? r.json() : []).catch(() => []),
+                fetch(`${BASE_URL}/FFA`).then(r => r.ok ? r.json() : []).catch(() => []),
+                fetch(`${BASE_URL}/4TDM`).then(r => r.ok ? r.json() : []).catch(() => [])
+            ]);
+            data = [...tdm2, ...ffa, ...tdm4];
+        } else {
+            // Fetch specific mode endpoint (/2TDM, /4TDM, /FFA)
+            const res = await fetch(`${BASE_URL}/${mode}`);
+            if (res.ok) data = await res.json();
         }
+
+        // Fallback if API fails or returns empty entries
+        if (!data || data.length === 0) {
+            data = integratedFallbackScores;
+        }
+
+        // Standardize and sort data by score descending
+        data.sort((a, b) => {
+            const scoreA = typeof a.score === 'number' ? a.score : parseInt(String(a.score || a.Score || 0).replace(/,/g, '')) || 0;
+            const scoreB = typeof b.score === 'number' ? b.score : parseInt(String(b.score || b.Score || 0).replace(/,/g, '')) || 0;
+            return scoreB - scoreA;
+        });
+
+        // Top 50 highest scores
+        data = data.slice(0, 50);
+
+        tbody.innerHTML = '';
+        
+        data.forEach((entry, i) => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = "1px solid #ddd";
+            
+            // Top 3 highlight rows
+            if (i === 0) tr.style.background = "#fff9c4";
+            else if (i === 1) tr.style.background = "#f5f5f5";
+            else if (i === 2) tr.style.background = "#ffe0b2";
+
+            // Scorer formatting
+            const scorerName = escapeHtml(entry.scorer || entry.name || entry.Scorer || 'Unknown');
+            const scorerUsername = entry.username || entry.scorerUsername || entry.user;
+            const isScorerBot = Boolean(entry.isBot || entry.is_bot || entry.isScorerBot || entry.scorerBot);
+            const scorerColor = isScorerBot ? '#d97706' : '#333'; // Gold/Yellow for bot, dark text for human
+
+            let scorerHtml = `<div style="color: ${scorerColor}; font-weight: bold;">${scorerName}</div>`;
+            if (scorerUsername) {
+                scorerHtml += `<div style="font-size: 11px; color: #777;">(${escapeHtml(scorerUsername)})</div>`;
+            }
+
+            // Score & Tank
+            const score = entry.score || entry.Score || 0;
+            const formattedScore = typeof score === 'number' ? score.toLocaleString() : score;
+            const tank = escapeHtml(entry.tank || entry.class || entry.Tank || 'Basic');
+
+            // Killer formatting
+            const killedByName = escapeHtml(entry.killedBy || entry.killed_by || entry['Killed By'] || 'N/A');
+            const killerUsername = entry.killerUsername || entry.killedByUsername;
+            const isKillerBot = Boolean(entry.isKillerBot || entry.is_killer_bot || entry.killedByBot || entry.killed_by_bot || entry.killerBot);
+            const killerColor = isKillerBot ? '#d97706' : '#d32f2f'; // Gold/Yellow for bot killer, Red for player killer
+
+            let killerHtml = `<div style="color: ${killerColor}; font-weight: bold;">${killedByName}</div>`;
+            if (killerUsername) {
+                killerHtml += `<div style="font-size: 11px; color: #777;">(${escapeHtml(killerUsername)})</div>`;
+            }
+
+            tr.innerHTML = `
+                <td style="padding: 10px; font-weight: bold;">#${i + 1}</td>
+                <td style="padding: 10px;">${scorerHtml}</td>
+                <td style="padding: 10px; font-weight: bold; color: #0085a8;">${formattedScore}</td>
+                <td style="padding: 10px;">${tank}</td>
+                <td style="padding: 10px;">${killerHtml}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+    } catch (err) {
+        console.error("Leaderboard fetch error:", err);
+        fetchLeaderboardFallback(integratedFallbackScores);
     }
+}
 
     function fetchLeaderboardFallback(data) {
         const tbody = document.getElementById('leaderboard-tbody');
