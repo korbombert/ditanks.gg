@@ -1052,16 +1052,34 @@
 
     async function fetchLeaderboard(mode) {
     const tbody = document.getElementById('leaderboard-tbody');
+    if (!tbody) return;
+    
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px; font-weight: bold; color: #555;">Loading...</td></tr>';
     
-    // Uses relative path to prevent cross-origin CORS errors
-    const BASE_URL = '/api/leaderboard';
+    // Primary Railway API with relative path fallback
+    const PRIMARY_BASE = 'https://ditanksgg.up.railway.app/api/leaderboard';
+    const RELATIVE_BASE = '/api/leaderboard';
 
-    const safeFetch = async (url) => {
+    // Automatically extracts arrays whether returned directly or wrapped in an object
+    const unwrapArray = (json) => {
+        if (Array.isArray(json)) return json;
+        if (json && typeof json === 'object') {
+            for (const key of ['data', 'leaderboard', 'scores', 'entries', 'top', 'results']) {
+                if (Array.isArray(json[key])) return json[key];
+            }
+        }
+        return [];
+    };
+
+    const safeFetch = async (endpoint) => {
         try {
-            const res = await fetch(url);
-            if (!res.ok) return [];
-            return await res.json();
+            let res = await fetch(`${PRIMARY_BASE}${endpoint}`).catch(() => null);
+            if (!res || !res.ok) {
+                res = await fetch(`${RELATIVE_BASE}${endpoint}`).catch(() => null);
+            }
+            if (!res || !res.ok) return [];
+            const json = await res.json();
+            return unwrapArray(json);
         } catch (e) {
             return [];
         }
@@ -1072,63 +1090,70 @@
 
         if (mode === 'all') {
             const [tdm2, ffa, tdm4] = await Promise.all([
-                safeFetch(`${BASE_URL}/2TDM`),
-                safeFetch(`${BASE_URL}/FFA`),
-                safeFetch(`${BASE_URL}/4TDM`)
+                safeFetch('/2TDM'),
+                safeFetch('/FFA'),
+                safeFetch('/4TDM')
             ]);
-            data = [...(Array.isArray(tdm2) ? tdm2 : []), ...(Array.isArray(ffa) ? ffa : []), ...(Array.isArray(tdm4) ? tdm4 : [])];
+            data = [...tdm2, ...ffa, ...tdm4];
         } else {
-            const resData = await safeFetch(`${BASE_URL}/${mode}`);
-            data = Array.isArray(resData) ? resData : [];
+            data = await safeFetch(`/${mode}`);
         }
 
-        // Fallback if backend API is unreachable or returns empty data
+        // Fallback to integrated dataset if API fails or returns no entries
         if (!data || data.length === 0) {
-            data = integratedFallbackScores;
+            data = typeof integratedFallbackScores !== 'undefined' ? integratedFallbackScores : [];
         }
 
-        // Standardize and sort data by score descending
+        // Sort descending by score
         data.sort((a, b) => {
             const scoreA = typeof a.score === 'number' ? a.score : parseInt(String(a.score || a.Score || 0).replace(/,/g, '')) || 0;
             const scoreB = typeof b.score === 'number' ? b.score : parseInt(String(b.score || b.Score || 0).replace(/,/g, '')) || 0;
             return scoreB - scoreA;
         });
 
-        // Top 50 highest scores
+        // Limit to Top 50
         data = data.slice(0, 50);
 
         tbody.innerHTML = '';
-        
+
+        if (data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px;">No scores found.</td></tr>';
+            return;
+        }
+
         data.forEach((entry, i) => {
             const tr = document.createElement('tr');
             tr.style.borderBottom = "1px solid #ddd";
-            
+
             if (i === 0) tr.style.background = "#fff9c4";
             else if (i === 1) tr.style.background = "#f5f5f5";
             else if (i === 2) tr.style.background = "#ffe0b2";
 
+            // Scorer formatting
             const scorerName = escapeHtml(entry.scorer || entry.name || entry.Scorer || 'Unknown');
             const scorerUsername = entry.username || entry.scorerUsername || entry.user;
             const isScorerBot = Boolean(entry.isBot || entry.is_bot || entry.isScorerBot || entry.scorerBot);
-            const scorerColor = isScorerBot ? '#d97706' : '#333';
+            const scorerColor = isScorerBot ? '#b45309' : '#333'; // Yellow/Gold for bot, dark text for player
 
             let scorerHtml = `<div style="color: ${scorerColor}; font-weight: bold;">${scorerName}</div>`;
             if (scorerUsername) {
-                scorerHtml += `<div style="font-size: 11px; color: #777;">(${escapeHtml(scorerUsername)})</div>`;
+                scorerHtml += `<div style="font-size: 11px; color: #666; font-weight: normal;">(${escapeHtml(scorerUsername)})</div>`;
             }
 
+            // Score & Tank
             const score = entry.score || entry.Score || 0;
             const formattedScore = typeof score === 'number' ? score.toLocaleString() : score;
             const tank = escapeHtml(entry.tank || entry.class || entry.Tank || 'Basic');
 
+            // Killer formatting
             const killedByName = escapeHtml(entry.killedBy || entry.killed_by || entry['Killed By'] || 'N/A');
             const killerUsername = entry.killerUsername || entry.killedByUsername;
             const isKillerBot = Boolean(entry.isKillerBot || entry.is_killer_bot || entry.killedByBot || entry.killed_by_bot || entry.killerBot);
-            const killerColor = isKillerBot ? '#d97706' : '#d32f2f';
+            const killerColor = isKillerBot ? '#b45309' : '#d32f2f'; // Yellow/Gold for bot, red for player
 
             let killerHtml = `<div style="color: ${killerColor}; font-weight: bold;">${killedByName}</div>`;
             if (killerUsername) {
-                killerHtml += `<div style="font-size: 11px; color: #777;">(${escapeHtml(killerUsername)})</div>`;
+                killerHtml += `<div style="font-size: 11px; color: #666; font-weight: normal;">(${escapeHtml(killerUsername)})</div>`;
             }
 
             tr.innerHTML = `
@@ -1142,11 +1167,12 @@
         });
 
     } catch (err) {
-        console.error("Leaderboard rendering error:", err);
-        fetchLeaderboardFallback(integratedFallbackScores);
+        console.error("Leaderboard render error:", err);
+        if (typeof fetchLeaderboardFallback === 'function' && typeof integratedFallbackScores !== 'undefined') {
+            fetchLeaderboardFallback(integratedFallbackScores);
+        }
     }
 }
-
     function fetchLeaderboardFallback(data) {
         const tbody = document.getElementById('leaderboard-tbody');
         tbody.innerHTML = '';
