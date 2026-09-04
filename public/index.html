@@ -1054,7 +1054,8 @@
     const tbody = document.getElementById('leaderboard-tbody');
     if (!tbody) return;
     
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px; font-weight: bold; color: #555;">Loading...</td></tr>';
+    // Updated colspan to 6 for the new Mode column
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 20px; font-weight: bold; color: #555;">Loading...</td></tr>';
     
     const PRIMARY_BASE = 'https://ditanksgg.up.railway.app/api/leaderboard';
     const RELATIVE_BASE = '/api/leaderboard';
@@ -1069,7 +1070,19 @@
         return [];
     };
 
-    const safeFetch = async (endpoint) => {
+    // Helper to safely convert strings/objects to raw text string without returning "[object Object]"
+    const extractString = (val) => {
+        if (!val) return '';
+        if (typeof val === 'string') return val;
+        if (typeof val === 'number') return String(val);
+        if (typeof val === 'object') {
+            const inner = val.username || val.name || val.user || val.handle || val.displayName || val.text || '';
+            return typeof inner === 'string' ? inner : '';
+        }
+        return '';
+    };
+
+    const safeFetch = async (endpoint, defaultMode) => {
         try {
             let res = await fetch(`${PRIMARY_BASE}${endpoint}`).catch(() => null);
             if (!res || !res.ok) {
@@ -1077,13 +1090,18 @@
             }
             if (!res || !res.ok) return [];
             const json = await res.json();
-            return unwrapArray(json);
+            const list = unwrapArray(json);
+
+            // Attach the mode to each entry
+            return list.map(item => ({
+                ...item,
+                mode: item.mode || item.gamemode || item.gameMode || item.type || defaultMode
+            }));
         } catch (e) {
             return [];
         }
     };
 
-    // Deep entity parser checking all possible naming variations
     const parseEntity = (entry, primaryKeys, usernameKeys) => {
         let name = '';
         let username = '';
@@ -1098,19 +1116,21 @@
         }
 
         if (typeof rawEntity === 'object' && rawEntity !== null) {
-            name = rawEntity.name || rawEntity.displayName || rawEntity.scorer || rawEntity.killer || rawEntity.text || rawEntity.title || rawEntity.username || '';
-            username = rawEntity.username || rawEntity.user || rawEntity.handle || rawEntity.account || rawEntity.tag || '';
+            name = extractString(rawEntity.name || rawEntity.displayName || rawEntity.scorer || rawEntity.killer || rawEntity.text || rawEntity.title || rawEntity.username);
+            username = extractString(rawEntity.username || rawEntity.user || rawEntity.handle || rawEntity.account || rawEntity.tag);
             isBot = Boolean(rawEntity.isBot || rawEntity.is_bot || rawEntity.bot);
         } else if (rawEntity !== null && rawEntity !== undefined) {
-            name = String(rawEntity);
+            name = extractString(rawEntity);
         }
 
-        // Check top-level entry for username if missing in nested object
         if (!username) {
             for (const key of usernameKeys) {
-                if (entry[key] && typeof entry[key] === 'string') {
-                    username = entry[key];
-                    break;
+                if (entry[key] !== undefined && entry[key] !== null && entry[key] !== '') {
+                    const found = extractString(entry[key]);
+                    if (found) {
+                        username = found;
+                        break;
+                    }
                 }
             }
         }
@@ -1123,13 +1143,13 @@
 
         if (mode === 'all') {
             const [tdm2, ffa, tdm4] = await Promise.all([
-                safeFetch('/2TDM'),
-                safeFetch('/FFA'),
-                safeFetch('/4TDM')
+                safeFetch('/2TDM', '2TDM'),
+                safeFetch('/FFA', 'FFA'),
+                safeFetch('/4TDM', '4TDM')
             ]);
             data = [...tdm2, ...ffa, ...tdm4];
         } else {
-            data = await safeFetch(`/${mode}`);
+            data = await safeFetch(`/${mode}`, mode.toUpperCase());
         }
 
         if (!data || data.length === 0) {
@@ -1146,7 +1166,7 @@
         tbody.innerHTML = '';
 
         if (data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px;">No scores found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 20px;">No scores found.</td></tr>';
             return;
         }
 
@@ -1158,7 +1178,7 @@
             else if (i === 1) tr.style.background = "#f5f5f5";
             else if (i === 2) tr.style.background = "#ffe0b2";
 
-            // Exhaustive Scorer parsing
+            // Scorer Parsing
             const scorerKeys = ['scorer', 'name', 'player', 'playerName', 'Scorer', 'Name', 'user'];
             const scorerUserKeys = ['username', 'scorerUsername', 'user', 'playerUsername', 'account', 'handle', 'scorer_username'];
             const scorerInfo = parseEntity(entry, scorerKeys, scorerUserKeys);
@@ -1173,12 +1193,13 @@
                 scorerHtml += `<div style="font-size: 11px; color: #666; font-weight: normal; margin-top: 2px;">(${escapeHtml(scorerUsername)})</div>`;
             }
 
-            // Score & Tank
+            // Score, Mode & Tank
             const score = entry.score || entry.Score || 0;
             const formattedScore = typeof score === 'number' ? score.toLocaleString() : score;
+            const entryMode = escapeHtml(entry.mode || entry.gamemode || entry.gameMode || 'N/A').toUpperCase();
             const tank = escapeHtml(entry.tank || entry.class || entry.Tank || 'Basic');
 
-            // Exhaustive Killer parsing
+            // Killer Parsing
             const killerKeys = ['killedBy', 'killed_by', 'killer', 'killerName', 'killedByName', 'Killed By', 'KilledBy', 'killed_by_name', 'killer_name', 'killed'];
             const killerUserKeys = ['killerUsername', 'killedByUsername', 'killer_username', 'killed_by_username', 'killerUser', 'killedByUser'];
             const killerInfo = parseEntity(entry, killerKeys, killerUserKeys);
@@ -1193,10 +1214,12 @@
                 killerHtml += `<div style="font-size: 11px; color: #666; font-weight: normal; margin-top: 2px;">(${escapeHtml(killerUsername)})</div>`;
             }
 
+            // Render table row with 6 columns
             tr.innerHTML = `
                 <td style="padding: 10px; font-weight: bold;">#${i + 1}</td>
                 <td style="padding: 10px;">${scorerHtml}</td>
                 <td style="padding: 10px; font-weight: bold; color: #0085a8;">${formattedScore}</td>
+                <td style="padding: 10px;"><span style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: #334155;">${entryMode}</span></td>
                 <td style="padding: 10px;">${tank}</td>
                 <td style="padding: 10px;">${killerHtml}</td>
             `;
