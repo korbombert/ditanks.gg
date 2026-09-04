@@ -154,15 +154,7 @@ const LEVEL_REQUIREMENTS = [ 0, 0, 22, 100, 210, 355, 470, 600, 775, 930, 1100, 
 // bot_config so it survives restarts, but read from this in-memory
 // variable on every spawn so toggling it takes effect immediately.
 const SANDBOX_SPAWN_SCORE = 24000;
-let sandboxMode = (() => {
-    const row = db.prepare("SELECT value FROM bot_config WHERE key = 'sandbox_mode'").get();
-    return row ? row.value === 'true' : false;
-})();
-function setSandboxMode(enabled) {
-    sandboxMode = !!enabled;
-    db.prepare("INSERT OR REPLACE INTO bot_config (key, value) VALUES ('sandbox_mode', ?)").run(String(sandboxMode));
-    return sandboxMode;
-}
+let sandboxMode = true;
 // ===================== GAME DATA =====================
 let BOT_NAMES = [];
 try {
