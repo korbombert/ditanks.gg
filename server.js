@@ -3516,7 +3516,7 @@ if (process.env.DISCORD_BOT_TOKEN) {
 
 // ===================== SERVER LISTEN =====================
 
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(8000, '0.0.0.0', () => {
     const protocol = process.env.RAILWAY_STATIC_URL ? 'wss' : 'ws';
     const httpProtocol = process.env.RAILWAY_STATIC_URL ? 'https' : 'http';
 
