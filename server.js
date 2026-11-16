@@ -1452,6 +1452,51 @@ getPowerupBulletSpeedMultiplier() {
 }
     }
 
+    // Target selection for a player's drones while in autopilot. Mirrors the bot
+    // AI's targeting (enemy drones > enemy tanks > shapes), minus powerups.
+    findDroneAutopilotTarget() {
+        const nearby = this.room.grid.getNearby(this.x, this.y, 1000);
+        let droneTarget = null, minDroneDistSq = Infinity;
+        let enemyTarget = null, minEnemyDistSq = Infinity;
+        let shapeTarget = null, minShapeDistSq = Infinity;
+        const tdm = this.room.mode.includes("TDM");
+
+        nearby.drones.forEach(d => {
+            if (d.owner === this || d.markedForDeletion) return;
+            if (isInProtectedBase(this.room, d, this.team)) return;
+            if (tdm && d.team === this.team && d.team !== 0) return;
+            const distSq = (this.x - d.x)**2 + (this.y - d.y)**2;
+            if (distSq < 90000 && distSq < minDroneDistSq) { minDroneDistSq = distSq; droneTarget = d; }
+        });
+
+        nearby.entities.forEach(e => {
+            if (e === this || e.markedForDeletion) return;
+            const isTank = ['tank', 'ai'].includes(e.type);
+            const isShape = ['square','triangle','pentagon','hexagon'].includes(e.type);
+            const isSameTeam = tdm && e.team === this.team && e.team !== 0;
+            const distSq = (this.x - e.x)**2 + (this.y - e.y)**2;
+
+            if (isTank) {
+                if (isSameTeam) return;
+                if (isInProtectedBase(this.room, e, this.team)) return;
+                if (e.tankType === 'Manager' && e.opacity < 0.15) return;
+                let detectionDist = 300 + (Math.min(e.score, 17000) / 17000) * 700;
+                if (this.tankType === 'Overlord') detectionDist *= 1.2;
+                if (distSq < detectionDist * detectionDist && distSq < minEnemyDistSq) {
+                    minEnemyDistSq = distSq; enemyTarget = e;
+                }
+            } else if (isShape) {
+                if (this.tankType === 'Overlord') return; // bot Overlords ignore shapes
+                if (isInEnemyBase(this.room, e, this.team)) return;
+                if (distSq < minShapeDistSq) { minShapeDistSq = distSq; shapeTarget = e; }
+            }
+        });
+
+        let target = droneTarget || enemyTarget || shapeTarget;
+        if (droneTarget && enemyTarget && minEnemyDistSq < 200 * 200) target = enemyTarget;
+        return target;
+    }
+
     update() {
         this.vx *= 0.85; this.vy *= 0.85;
         this.x += this.vx; this.y += this.vy;
@@ -1533,6 +1578,28 @@ if (this.hp < effectiveMaxHp) {
             }
             this.angle = this.inputs.angle;
             if(this.inputs.shooting) isShooting = true;
+
+            // Drone-class autopilot: while the player is NOT firing (and not repelling),
+            // keep spawning drones and let the drones run the same AI as bot Overlords.
+            // As soon as the player fires or repels again, manual control resumes.
+            if (specs && specs.isDroneSpawner) {
+                const manual = !!(this.inputs.shooting || this.inputs.repel);
+                this.droneAutopilot = !manual;
+                if (this.droneAutopilot) {
+                    isShooting = true; // keep spawning drones
+                    this.isFleeing = false;
+                    this.thinkTimer++;
+                    if (this.thinkTimer >= 9) {
+                        this.thinkTimer = 0;
+                        this.aiTarget = this.findDroneAutopilotTarget();
+                    }
+                    if (this.aiTarget && this.aiTarget.markedForDeletion) this.aiTarget = null;
+                } else {
+                    this.aiTarget = null;
+                }
+            } else {
+                this.droneAutopilot = false;
+            }
 
         } else if(this.type === 'ai') {
             this.thinkTimer++;
@@ -1997,7 +2064,7 @@ class Drone {
 
         let tx = this.x, ty = this.y, moving = false;
 
-        if (this.owner.isPlayer) {
+        if (this.owner.isPlayer && !this.owner.droneAutopilot) {
             tx = this.owner.inputs.mouseX; ty = this.owner.inputs.mouseY;
             moving = true;
             if(this.owner.inputs.repel) {
