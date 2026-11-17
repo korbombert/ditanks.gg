@@ -384,7 +384,8 @@ let baseFov = BASE_FOV;
 let fov = BASE_FOV;
 
 function updateVisualFov() {
-    fov = baseFov * (powerupActive(myStats, "fov") ? 1.3 : 1);
+    // World Mode is closer-in than the normal arena, but uses the same camera math.
+    fov = baseFov * (isWorldMode ? 0.74 : 1) * (powerupActive(myStats, "fov") ? 1.3 : 1);
 }
 
 function worldToScreenX(x) {
@@ -1969,6 +1970,7 @@ function readPlayerStats(dv, u8) {
     updateUI();
 
     checkUpgrades();
+    if (isWorldMode) updateWorldHud();
 
 }
 
@@ -2019,97 +2021,193 @@ function enterWorldMode(){
  pendingWorldJoin=true;worldSend('world_join');
 }
 function beginWorldMode(data){
- isWorldMode=true;worldState=data.world;worldView=data.view;gameMode='WORLD';myId=null;spectateId=null;
+ isWorldMode=true;worldState=data.world;worldView=data.view;gameMode='WORLD';
+ // World is an ordinary FFA Room. Keep the real server Entity id so the
+ // shared camera, tank renderer, minimap, aim and interpolation all target it.
+ myId=data.playerId??myId;myTeam=0;spectateId=null;isSpectating=false;
+ gameState={entities:[],bullets:[],drones:[]};renderEntities.clear();lastBullets.clear();lastDrones.clear();
+ myStats={...myStats,level:1,xp:0,score:0,statPoints:0,stats:[...(data.world?.stats||[0,0,0,0,0,0,0,0])],tankType:'Basic'};
+ updateVisualFov();updateUI();checkUpgrades();
  document.getElementById('menu-overlay').style.display='none';document.getElementById('account-panel').style.display='none';document.getElementById('changelog-panel').style.display='none';
- document.getElementById('game-ui').style.display='block';document.getElementById('exit-btn').style.display='flex';document.getElementById('world-hud').style.display='block';
+ document.getElementById('game-ui').style.display='block';document.getElementById('exit-btn').style.display='flex';document.getElementById('world-hud').style.display='grid';
  document.getElementById('death-screen').style.display='none';
- updateWorldHud(); if(!window.drawing){window.drawing=true;requestAnimationFrame(draw);}
+ const extent=worldView?.extent||50400, px=extent/2+(worldState?.x||180), py=extent/2+(worldState?.y||180);
+ camera.x=px-(canvas.width*fov)/2;camera.y=py-(canvas.height*fov)/2;
+ worldLastView=performance.now();updateWorldHud();if(!window.drawing){window.drawing=true;requestAnimationFrame(draw);}
 }
-function updateWorldHud(){if(!worldState)return;document.getElementById('world-session-coins').innerText=worldState.sessionCoins||0;document.getElementById('world-stat-points').innerText=worldState.statPoints||0;document.getElementById('world-coordinates').innerText=`Coordinates: ${Math.round(worldState.x)}, ${Math.round(worldState.y)}${worldState.inCar?' · Driving':''}`;}
+function updateWorldHud(){
+ if(!worldState)return;
+ const cash=document.getElementById('world-session-coins'),points=document.getElementById('world-stat-points'),coords=document.getElementById('world-coordinates');
+ if(cash)cash.innerText=numberWithCommas(worldState.sessionCoins||0);
+ if(points)points.innerText=myStats.statPoints||0;
+ const me=gameState.entities.find(e=>e.id===myId),extent=worldView?.extent||50400;
+ if(coords)coords.innerText=me?`X ${Math.round(me.x-extent/2)}  ·  Y ${Math.round(me.y-extent/2)}`:`X ${Math.round(worldState.x||0)}  ·  Y ${Math.round(worldState.y||0)}`;
+ ['compact','sedan','sport'].forEach(id=>{const b=document.getElementById('world-car-'+id);if(!b)return;const owned=worldState.car===id;b.disabled=!!worldState.car;b.style.opacity=owned?'1':(worldState.car?'0.42':'1');b.innerHTML=owned?`${id.toUpperCase()}<small>OWNED</small>`:`${id.toUpperCase()}<small>${id==='compact'?'2,500':id==='sedan'?'6,500':'18,000'}</small>`;});
+}
 function worldWork(job){worldSend('world_work',{job});}
-let worldInputLast=0;
-function sendWorldInput(){if(performance.now()-worldInputLast<50)return;worldInputLast=performance.now();worldSend('world_input',{up:!!(keys.w||keys.arrowup),down:!!(keys.s||keys.arrowdown),left:!!(keys.a||keys.arrowleft),right:!!(keys.d||keys.arrowright)});}
 function worldBank(){worldSend('world_bank');}
 function worldBuyCar(carId){worldSend('world_buy_car',{carId});}
 function worldBuyHouse(id){if(confirm('Purchase this property for the listed price?'))worldSend('world_buy_house',{houseId:id});}
-function worldUpgrade(index){worldSend('world_upgrade',{statIndex:index});}
-function drawWorld(){
- if(!worldState)return;
- const w=worldState,vw=canvas.width,vh=canvas.height,half=worldView?.extent?worldView.extent/2:25200;
- camera.x=(w.x+half)-(vw*fov)/2;camera.y=(w.y+half)-(vh*fov)/2;mouse.rx=screenToWorldX(mouse.x);mouse.ry=screenToWorldY(mouse.y);
- const sx=x=>x-w.x+vw/2, sy=y=>y-w.y+vh/2;
- ctx.save();ctx.fillStyle='#779d62';ctx.fillRect(0,0,vw,vh);
- // Ground texture: subtle grass grain and tiled terrain, kept deterministic per tile.
- if(worldView?.cells) for(const c of worldView.cells){
-  const x=(c.gx-60)*420,y=(c.gy-60)*420,px=sx(x),py=sy(y);
-  if(px>vw||py>vh||px+420<0||py+420<0)continue;
-  ctx.fillStyle=c.biome==='city'?'#777e80':c.biome==='suburb'?'#789d68':c.biome==='park'?'#568b51':'#b2a46b';ctx.fillRect(px,py,420,420);
-  ctx.globalAlpha=.12;ctx.strokeStyle=c.biome==='city'?'#d4d7d4':'#e3e6c4';ctx.lineWidth=1;
-  for(let k=0;k<12;k++){let tx=px+((c.gx*37+k*61)%400),ty=py+((c.gy*53+k*43)%400);ctx.beginPath();ctx.moveTo(tx,ty);ctx.lineTo(tx+7,ty-3);ctx.stroke();}ctx.globalAlpha=1;
-  if(c.biome==='farmland'){
-   ctx.fillStyle='#a28f4d';ctx.fillRect(px+8,py+8,404,404);ctx.strokeStyle='#d1bf75';ctx.lineWidth=5;
-   for(let q=20;q<410;q+=23){ctx.beginPath();ctx.moveTo(px+q,py+14);ctx.lineTo(px+q,py+406);ctx.stroke();}
-   ctx.strokeStyle='#7b713f';ctx.lineWidth=2;ctx.strokeRect(px+8,py+8,404,404);
-  }
-  // Pavements and wide asphalt roads with lane dividers, shoulders and crosswalks.
-  for(const r of(c.roads||[])){
-   const rx=sx(r.x),ry=sy(r.y),rw=r.w||72;
-   if(r.axis==='horizontal'){
-    ctx.fillStyle='#b9b8a9';ctx.fillRect(px,ry-rw/2-13,420,rw+26);ctx.fillStyle='#343a40';ctx.fillRect(px,ry-rw/2,420,rw);
-    ctx.strokeStyle='#e6dca7';ctx.lineWidth=3;ctx.setLineDash([24,18]);ctx.beginPath();ctx.moveTo(px,ry);ctx.lineTo(px+420,ry);ctx.stroke();ctx.setLineDash([]);
-    ctx.strokeStyle='#92999a';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(px,ry-rw/2+7);ctx.lineTo(px+420,ry-rw/2+7);ctx.moveTo(px,ry+rw/2-7);ctx.lineTo(px+420,ry+rw/2-7);ctx.stroke();
-   }else{
-    ctx.fillStyle='#b9b8a9';ctx.fillRect(rx-rw/2-13,py,rw+26,420);ctx.fillStyle='#343a40';ctx.fillRect(rx-rw/2,py,rw,420);
-    ctx.strokeStyle='#e6dca7';ctx.lineWidth=3;ctx.setLineDash([24,18]);ctx.beginPath();ctx.moveTo(rx,py);ctx.lineTo(rx,py+420);ctx.stroke();ctx.setLineDash([]);
-    ctx.strokeStyle='#92999a';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(rx-rw/2+7,py);ctx.lineTo(rx-rw/2+7,py+420);ctx.moveTo(rx+rw/2-7,py);ctx.lineTo(rx+rw/2-7,py+420);ctx.stroke();
-   }
-  }
-  for(const b of(c.buildings||[])){
-   const bx=sx(b.x),by=sy(b.y);if(bx>vw+250||by>vh+250||bx+b.w< -250||by+b.h< -250)continue;
-   if(b.kind==='tower'){
-    const shades=['#526878','#657b88','#596c79','#71828a'],base=shades[b.tone||0];
-    ctx.fillStyle='rgba(0,0,0,.25)';ctx.fillRect(bx+12,by+14,b.w,b.h);
-    ctx.fillStyle='#c5cbd0';ctx.fillRect(bx-5,by-5,b.w+10,8);ctx.fillStyle=base;ctx.fillRect(bx,by,b.w,b.h);
-    ctx.fillStyle='#344b5d';ctx.fillRect(bx+b.w-12,by,12,b.h);
-    const floors=b.floors||10,rows=Math.max(3,Math.floor(b.h/19)),cols=Math.max(3,Math.floor(b.w/19));
-    for(let yy=0;yy<rows;yy++)for(let xx=0;xx<cols;xx++){ctx.fillStyle=(xx+yy)%4===0?'#f6d98b':'#a8d0dc';ctx.fillRect(bx+8+xx*((b.w-20)/cols),by+10+yy*((b.h-18)/rows),Math.max(4,(b.w-26)/cols-5),Math.max(5,(b.h-22)/rows-5));}
-    ctx.fillStyle='#293b4a';ctx.fillRect(bx+4,by+b.h-15,b.w-20,15);ctx.fillStyle='#9fb4bf';ctx.fillRect(bx+8,by+b.h-12,b.w-28,8);
-    ctx.strokeStyle='rgba(255,255,255,.25)';ctx.strokeRect(bx+.5,by+.5,b.w-1,b.h-1);
-   }else if(b.kind==='house'){
-    ctx.fillStyle='rgba(0,0,0,.24)';ctx.fillRect(bx+7,by+9,b.w,b.h);
-    ctx.fillStyle='#d6c9ad';ctx.fillRect(bx,by+15,b.w,b.h-15);
-    const roofs=['#8b5142','#6d4c43','#9b654d','#53616d'];ctx.fillStyle=roofs[b.roof||0];ctx.beginPath();ctx.moveTo(bx-8,by+20);ctx.lineTo(bx+b.w*.5,by-23);ctx.lineTo(bx+b.w+8,by+20);ctx.closePath();ctx.fill();
-    ctx.fillStyle='#eee2c8';ctx.fillRect(bx+8,by+24,b.w-16,8);
-    ctx.fillStyle='#80b5c6';ctx.fillRect(bx+10,by+34,17,18);ctx.fillRect(bx+b.w-28,by+34,17,18);
-    ctx.strokeStyle='#4a555b';ctx.lineWidth=2;ctx.strokeRect(bx+10,by+34,17,18);ctx.strokeRect(bx+b.w-28,by+34,17,18);
-    ctx.fillStyle='#72513b';ctx.fillRect(bx+b.w/2-9,by+b.h-30,18,30);ctx.fillStyle='#d8b56c';ctx.fillRect(bx+b.w/2+4,by+b.h-17,3,3);
-    ctx.fillStyle='#4f8050';ctx.fillRect(bx-5,by+b.h-4,b.w+10,7);
-   }else if(b.kind==='field'){
-    ctx.fillStyle='#a78e49';ctx.fillRect(bx,by,b.w,b.h);ctx.strokeStyle='#d9c277';ctx.lineWidth=5;for(let q=12;q<b.w;q+=22){ctx.beginPath();ctx.moveTo(bx+q,by+4);ctx.lineTo(bx+q,by+b.h-4);ctx.stroke();}
-   }else if(b.kind==='trees'){
-    for(let i=0;i<6;i++){const tx=bx+(i%3)*45-45,ty=by+Math.floor(i/3)*48-30;ctx.fillStyle='rgba(0,0,0,.18)';ctx.beginPath();ctx.ellipse(tx+5,ty+10,23,12,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#654d36';ctx.fillRect(tx-3,ty+3,6,24);ctx.fillStyle=['#2f6d3c','#3e8248','#4c914e'][i%3];ctx.beginPath();ctx.arc(tx,ty,21,0,Math.PI*2);ctx.fill();ctx.fillStyle='rgba(255,255,255,.12)';ctx.beginPath();ctx.arc(tx-6,ty-7,8,0,Math.PI*2);ctx.fill();}
-   }else if(b.kind==='bench'){
-    ctx.fillStyle='#5a4431';ctx.fillRect(bx,by,b.w,b.h*.35);ctx.fillRect(bx+4,by+b.h*.35,5,b.h*.65);ctx.fillRect(bx+b.w-9,by+b.h*.35,5,b.h*.65);ctx.fillStyle='#94704a';ctx.fillRect(bx,by-5,b.w,5);
-   }
-  }
- }
- // Park furniture and decorative street lamps.
- if(worldView?.cells)for(const c of worldView.cells){if(!['park','suburb'].includes(c.biome))continue;const ox=(c.gx-60)*420,oy=(c.gy-60)*420;for(let i=0;i<2;i++){const lx=sx(ox+65+i*245),ly=sy(oy+95+i*180);if(lx>-30&&ly>-30&&lx<vw+30&&ly<vh+30){ctx.strokeStyle='#424b4b';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(lx,ly-30);ctx.stroke();ctx.fillStyle='#f7e6a5';ctx.beginPath();ctx.arc(lx,ly-33,6,0,Math.PI*2);ctx.fill();}}}
- // Bank landmark in the city centre.
- const bx=sx(-95),by=sy(-105);ctx.fillStyle='rgba(0,0,0,.24)';ctx.fillRect(bx+8,by+10,190,150);ctx.fillStyle='#d7d8d2';ctx.fillRect(bx,by,190,150);ctx.fillStyle='#345b77';ctx.fillRect(bx+10,by+10,170,42);ctx.fillStyle='#fff';ctx.font='bold 19px Ubuntu';ctx.fillText('BANK',bx+67,by+38);ctx.fillStyle='#b7b4a8';for(let i=0;i<4;i++){ctx.fillRect(bx+15+i*42,by+67,27,73);ctx.fillStyle='#e8e3d4';ctx.fillRect(bx+18+i*42,by+70,21,67);ctx.fillStyle='#b7b4a8';}ctx.fillStyle='#78573d';ctx.fillRect(bx+80,by+88,30,62);
- // Property plots are drawn as actual little house markers, not floating emoji dots.
- if(worldView?.houses)for(const h of worldView.houses){const x=sx(h.x),y=sy(h.y);if(x< -60||y< -60||x>vw+60||y>vh+60)continue;ctx.fillStyle=h.owner_id?'#777':'#ffe39a';ctx.fillRect(x-10,y-7,20,14);ctx.fillStyle='#8c5142';ctx.beginPath();ctx.moveTo(x-13,y-7);ctx.lineTo(x,y-18);ctx.lineTo(x+13,y-7);ctx.fill();if(!h.owner_id){ctx.fillStyle='#1e2b24';ctx.font='bold 11px Ubuntu';ctx.fillText(h.price.toLocaleString(),x+15,y+4);}}
- // Traffic cars: wheels, body panels, glazing, lights, bumpers and direction.
- if(worldView?.cars)for(const c of worldView.cars){const x=sx(c.x),y=sy(c.y);if(x< -50||y< -50||x>vw+50||y>vh+50)continue;ctx.save();ctx.translate(x,y);ctx.rotate(c.dir===1?0:Math.PI/2);ctx.fillStyle='rgba(0,0,0,.28)';ctx.fillRect(-23,-9,48,22);ctx.fillStyle='#171b20';ctx.fillRect(-18,-13,11,5);ctx.fillRect(9,-13,11,5);ctx.fillRect(-18,8,11,5);ctx.fillRect(9,8,11,5);ctx.fillStyle=c.color||'#d7dde2';ctx.beginPath();ctx.roundRect(-23,-10,46,20,5);ctx.fill();ctx.fillStyle='#29485b';ctx.beginPath();ctx.roundRect(-10,-8,21,16,4);ctx.fill();ctx.fillStyle='#a8d2df';ctx.fillRect(-7,-7,7,14);ctx.fillRect(2,-7,7,14);ctx.fillStyle='#fff0bd';ctx.fillRect(20,-7,3,5);ctx.fillRect(20,2,3,5);ctx.fillStyle='#c94c45';ctx.fillRect(-23,-7,3,5);ctx.fillRect(-23,2,3,5);ctx.restore();}
- // Pedestrians are tiny arena-like characters with heads, torsos and shadows.
- if(worldView?.citizens)for(const n of worldView.citizens){const x=sx(n.x),y=sy(n.y);if(x< -20||y< -20||x>vw+20||y>vh+20)continue;ctx.fillStyle='rgba(0,0,0,.22)';ctx.beginPath();ctx.ellipse(x,y+5,6,3,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#42576a';ctx.fillRect(x-4,y-1,8,9);ctx.fillStyle='#e4b995';ctx.beginPath();ctx.arc(x,y-5,4,0,Math.PI*2);ctx.fill();}
- // Use the exact same tank body/barrel renderer and game entities as ordinary arenas.
- const entities=gameState.entities||[];
- for(const e of entities){if(e.x==null||e.y==null)continue;const x=e.x-half,y=e.y-half,px=sx(x),py=sy(y);if(px< -100||py< -100||px>vw+100||py>vh+100)continue;ctx.save();ctx.translate(px,py);if(['tank','ai'].includes(e.type)){const tank={...e,radius:e.radius||20,angle:e.angle||0};drawEntityBody(ctx,tank);if(e.id===myId){ctx.strokeStyle='rgba(255,255,255,.35)';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(0,0,(e.radius||20)+7,0,Math.PI*2);ctx.stroke();}}else if(['square','triangle','pentagon','hexagon'].includes(e.type)){const sides=e.type==='square'?4:e.type==='triangle'?3:e.type==='pentagon'?5:6,r=scaleSize(e.radius||15),base=e.type==='square'?'#f8de4d':e.type==='triangle'?'#fc6868':e.type==='pentagon'?'#6d77fb':'#6df5f5';ctx.rotate(e.angle||0);const grad=ctx.createRadialGradient(-r*.3,-r*.35,1,r*.15,r*.15,r*1.35);grad.addColorStop(0,'#ffffff');grad.addColorStop(.22,base);grad.addColorStop(1,'#514b53');ctx.fillStyle=grad;ctx.strokeStyle='rgba(40,35,45,.9)';ctx.lineWidth=Math.max(1.5,2.5/fov);ctx.shadowColor='rgba(0,0,0,.28)';ctx.shadowBlur=5;ctx.beginPath();for(let i=0;i<sides;i++){const a=-Math.PI/2+i*Math.PI*2/sides,px=Math.cos(a)*r*1.2,py=Math.sin(a)*r*1.2;if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);}ctx.closePath();ctx.fill();ctx.stroke();ctx.shadowBlur=0;if(e.hp<e.maxHp){ctx.fillStyle='#292d30';ctx.fillRect(-r,-r-9,r*2,4);ctx.fillStyle='#62d26f';ctx.fillRect(-r,-r-9,r*2*Math.max(0,e.hp/e.maxHp),4);}ctx.restore();continue;}ctx.restore();}
- // Same server-fired projectiles as the regular arena.
- for(const b of(gameState.bullets||[])){const px=sx(b.x-half),py=sy(b.y-half),r=Math.max(2,b.r||6);if(px< -30||py< -30||px>vw+30||py>vh+30)continue;ctx.fillStyle='rgba(0,0,0,.2)';ctx.beginPath();ctx.arc(px+2,py+3,r,0,Math.PI*2);ctx.fill();ctx.fillStyle='#f4f0dc';ctx.strokeStyle='#8e8a7c';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(px,py,r,0,Math.PI*2);ctx.fill();ctx.stroke();}
- ctx.restore();
+function drawWorldEnvironment(){
+    if (!worldView?.cells) return;
+    const toX = x => worldToScreenX((worldView.extent || 50400)/2 + x);
+    const toY = y => worldToScreenY((worldView.extent || 50400)/2 + y);
+    const tile = worldView.tile || 420;
+    const visible = (x,y,w=0,h=0) => x < canvas.width+180 && y < canvas.height+180 && x+w > -180 && y+h > -180;
+    ctx.save();
+    // A restrained, game-like palette and crisp tile edges; no oversized UI-style blocks.
+    worldView.cells.forEach(cell => {
+        const ox=(cell.gx-60)*tile, oy=(cell.gy-60)*tile;
+        const x=toX(ox), y=toY(oy), size=scaleSize(tile);
+        if(!visible(x,y,size,size)) return;
+        const palette={city:'#858b8e',suburb:'#86a875',park:'#61925a',farmland:'#b5a064'};
+        ctx.fillStyle=palette[cell.biome]||palette.suburb;ctx.fillRect(x,y,size+1,size+1);
+        // subtle ground grain and parcel seams
+        ctx.strokeStyle='rgba(255,255,255,.075)';ctx.lineWidth=1;
+        for(let i=1;i<4;i++){ctx.beginPath();ctx.moveTo(x+size*i/4,y+3);ctx.lineTo(x+size*i/4,y+size-3);ctx.stroke();}
+        if(cell.biome==='farmland'){
+            ctx.fillStyle='#a98e4e';ctx.fillRect(x+scaleSize(12),y+scaleSize(12),size-scaleSize(24),size-scaleSize(24));
+            ctx.strokeStyle='rgba(235,213,139,.72)';ctx.lineWidth=Math.max(1,scaleSize(4));
+            for(let q=24;q<tile-12;q+=24){ctx.beginPath();ctx.moveTo(toX(ox+q),toY(oy+16));ctx.lineTo(toX(ox+q),toY(oy+tile-16));ctx.stroke();}
+        }
+        (cell.roads||[]).forEach(r=>{
+            const rw=r.w||88;
+            if(r.axis==='horizontal'){
+                const ry=toY(r.y), roadH=scaleSize(rw), shoulder=scaleSize(22);
+                ctx.fillStyle='#c5c2b6';ctx.fillRect(x,ry-roadH/2-shoulder,size,roadH+shoulder*2);
+                ctx.fillStyle='#343b40';ctx.fillRect(x,ry-roadH/2,size,roadH);
+                ctx.strokeStyle='#e7d9a1';ctx.lineWidth=Math.max(1,scaleSize(3));ctx.setLineDash([scaleSize(26),scaleSize(20)]);ctx.beginPath();ctx.moveTo(x,ry);ctx.lineTo(x+size,ry);ctx.stroke();ctx.setLineDash([]);
+                ctx.strokeStyle='rgba(255,255,255,.42)';ctx.lineWidth=Math.max(1,scaleSize(2));ctx.beginPath();ctx.moveTo(x,ry-roadH/2+scaleSize(8));ctx.lineTo(x+size,ry-roadH/2+scaleSize(8));ctx.moveTo(x,ry+roadH/2-scaleSize(8));ctx.lineTo(x+size,ry+roadH/2-scaleSize(8));ctx.stroke();
+            }else{
+                const rx=toX(r.x),roadW=scaleSize(rw),shoulder=scaleSize(22);
+                ctx.fillStyle='#c5c2b6';ctx.fillRect(rx-roadW/2-shoulder,y,roadW+shoulder*2,size);
+                ctx.fillStyle='#343b40';ctx.fillRect(rx-roadW/2,y,roadW,size);
+                ctx.strokeStyle='#e7d9a1';ctx.lineWidth=Math.max(1,scaleSize(3));ctx.setLineDash([scaleSize(26),scaleSize(20)]);ctx.beginPath();ctx.moveTo(rx,y);ctx.lineTo(rx,y+size);ctx.stroke();ctx.setLineDash([]);
+                ctx.strokeStyle='rgba(255,255,255,.42)';ctx.lineWidth=Math.max(1,scaleSize(2));ctx.beginPath();ctx.moveTo(rx-roadW/2+scaleSize(8),y);ctx.lineTo(rx-roadW/2+scaleSize(8),y+size);ctx.moveTo(rx+roadW/2-scaleSize(8),y);ctx.lineTo(rx+roadW/2-scaleSize(8),y+size);ctx.stroke();
+            }
+        });
+        (cell.buildings||[]).forEach(b=>{
+            const bx=toX(b.x),by=toY(b.y),bw=scaleSize(b.w),bh=scaleSize(b.h);
+            if(!visible(bx,by,bw,bh))return;
+            if(b.kind==='tower'){
+                // Layered city tower: cast shadow, side elevation, roof slab,
+                // facade panels, recessed window bays and rooftop machinery.
+                const d=scaleSize(18),tone=b.tone||0;
+                const walls=['#526978','#657d89','#596b80','#71838a','#4f6575','#687b86'];
+                const wall=walls[tone%walls.length],side=['#344955','#405663','#354958','#4a5b63'][tone%4];
+                ctx.fillStyle='rgba(8,16,22,.34)';ctx.beginPath();ctx.moveTo(bx+scaleSize(8),by+scaleSize(10));ctx.lineTo(bx+bw+d+scaleSize(10),by+scaleSize(10));ctx.lineTo(bx+bw+d+scaleSize(10),by+bh+d);ctx.lineTo(bx+scaleSize(8),by+bh+d);ctx.closePath();ctx.fill();
+                ctx.fillStyle=side;ctx.beginPath();ctx.moveTo(bx+bw,by);ctx.lineTo(bx+bw+d,by-scaleSize(8));ctx.lineTo(bx+bw+d,by+bh-scaleSize(8));ctx.lineTo(bx+bw,by+bh);ctx.closePath();ctx.fill();
+                ctx.fillStyle='#273c49';ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(bx+d,by-scaleSize(8));ctx.lineTo(bx+bw+d,by-scaleSize(8));ctx.lineTo(bx+bw,by);ctx.closePath();ctx.fill();
+                ctx.fillStyle=wall;ctx.fillRect(bx,by,bw,bh);
+                const floors=Math.max(5,b.floors||10),cols=Math.max(3,Math.floor(b.w/19)),fw=bw/cols,fh=bh/floors;
+                for(let row=0;row<floors;row++){
+                    ctx.fillStyle=row%4===0?'rgba(13,30,41,.18)':'rgba(255,255,255,.045)';ctx.fillRect(bx,by+row*fh,bw,fh);
+                    for(let col=0;col<cols;col++){
+                        const wx=bx+col*fw+fw*.18,wy=by+row*fh+fh*.19,ww=fw*.64,wh=fh*.58;
+                        ctx.fillStyle='#263f50';ctx.fillRect(wx-scaleSize(2),wy-scaleSize(2),ww+scaleSize(4),wh+scaleSize(4));
+                        ctx.fillStyle=((row*7+col+(b.seed||0))%13===0)?'#e9cb82':'#9fc6d4';ctx.fillRect(wx,wy,ww,wh);
+                        ctx.fillStyle='rgba(255,255,255,.28)';ctx.fillRect(wx,wy,Math.max(1,ww*.13),wh);
+                    }
+                }
+                ctx.fillStyle='#263a45';ctx.fillRect(bx-scaleSize(3),by+bh-scaleSize(8),bw+scaleSize(3),scaleSize(9));
+                ctx.fillStyle='#91a9b4';ctx.fillRect(bx+scaleSize(6),by+bh-scaleSize(5),bw-scaleSize(12),scaleSize(2));
+                // Rooftop plant room and mechanical vents.
+                ctx.fillStyle='#344b58';ctx.fillRect(bx+bw*.58,by-scaleSize(15),bw*.28,scaleSize(15));
+                ctx.fillStyle='#9eafb5';ctx.fillRect(bx+bw*.62,by-scaleSize(19),bw*.18,scaleSize(4));
+                for(let vent=0;vent<3;vent++){ctx.fillStyle='#243a46';ctx.fillRect(bx+scaleSize(9+vent*15),by+scaleSize(8),scaleSize(8),scaleSize(5));}
+                ctx.strokeStyle='rgba(15,27,34,.7)';ctx.lineWidth=Math.max(1,scaleSize(1.5));ctx.strokeRect(bx,by,bw,bh);
+            }else if(b.kind==='house'){
+                // Residential lot with lawn, driveway, front wall, roof planes,
+                // chimney, porch, garage and garden/fence details.
+                const roofPalette=['#8f5140','#6e4b42','#a56a4b','#566a78','#745a49','#8a6847'];
+                const wallPalette=['#e1d5bd','#d5c6a8','#d5d9d1','#e2cdb7','#c9d1d0'];
+                const roof=roofPalette[(b.roof||0)%roofPalette.length],wall=wallPalette[(b.style||0)%wallPalette.length];
+                ctx.fillStyle='rgba(0,0,0,.22)';ctx.beginPath();ctx.ellipse(bx+bw*.54,by+bh*.88,bw*.62,bh*.28,0,0,Math.PI*2);ctx.fill();
+                ctx.fillStyle='#668653';ctx.fillRect(bx-scaleSize(9),by+bh-scaleSize(8),bw+scaleSize(18),scaleSize(15));
+                // Yard path and driveway to the street-facing edge.
+                ctx.fillStyle='#b9b5a6';ctx.fillRect(bx+bw*.68,by+bh*.48,bw*.24,bh*.58);
+                ctx.fillStyle='#d1cbb9';ctx.fillRect(bx+bw*.70,by+bh*.5,bw*.2,bh*.54);
+                // Main wall and right-side shaded elevation.
+                ctx.fillStyle=wall;ctx.fillRect(bx+scaleSize(4),by+scaleSize(17),bw-scaleSize(8),bh-scaleSize(20));
+                ctx.fillStyle='rgba(55,48,42,.18)';ctx.beginPath();ctx.moveTo(bx+bw*.5,by+scaleSize(20));ctx.lineTo(bx+bw-scaleSize(4),by+scaleSize(20));ctx.lineTo(bx+bw-scaleSize(4),by+bh-scaleSize(4));ctx.lineTo(bx+bw*.5,by+bh-scaleSize(4));ctx.closePath();ctx.fill();
+                // Roof ridge and two roof planes.
+                ctx.fillStyle='#4b3a34';ctx.beginPath();ctx.moveTo(bx-scaleSize(8),by+scaleSize(23));ctx.lineTo(bx+bw*.5,by-scaleSize(13));ctx.lineTo(bx+bw+scaleSize(8),by+scaleSize(23));ctx.lineTo(bx+bw+scaleSize(3),by+scaleSize(31));ctx.lineTo(bx+bw*.5,by+scaleSize(1));ctx.lineTo(bx-scaleSize(3),by+scaleSize(31));ctx.closePath();ctx.fill();
+                ctx.fillStyle=roof;ctx.beginPath();ctx.moveTo(bx-scaleSize(7),by+scaleSize(22));ctx.lineTo(bx+bw*.5,by-scaleSize(12));ctx.lineTo(bx+bw*.5,by+scaleSize(4));ctx.lineTo(bx+scaleSize(1),by+scaleSize(30));ctx.closePath();ctx.fill();
+                ctx.fillStyle=roofPalette[((b.roof||0)+1)%roofPalette.length];ctx.beginPath();ctx.moveTo(bx+bw*.5,by-scaleSize(12));ctx.lineTo(bx+bw+scaleSize(7),by+scaleSize(22));ctx.lineTo(bx+bw-scaleSize(2),by+scaleSize(30));ctx.lineTo(bx+bw*.5,by+scaleSize(4));ctx.closePath();ctx.fill();
+                // Chimney and front windows.
+                ctx.fillStyle='#6b6258';ctx.fillRect(bx+bw*.72,by-scaleSize(9),scaleSize(9),scaleSize(21));ctx.fillStyle='#a99c8d';ctx.fillRect(bx+bw*.7,by-scaleSize(11),scaleSize(13),scaleSize(4));
+                [bx+scaleSize(10),bx+bw-scaleSize(28)].forEach(wx=>{
+                    ctx.fillStyle='#594b40';ctx.fillRect(wx,by+scaleSize(34),scaleSize(18),scaleSize(19));
+                    ctx.fillStyle='#8fc0d0';ctx.fillRect(wx+scaleSize(2),by+scaleSize(36),scaleSize(14),scaleSize(15));
+                    ctx.fillStyle='#dce5df';ctx.fillRect(wx+scaleSize(8),by+scaleSize(36),scaleSize(2),scaleSize(15));ctx.fillRect(wx+scaleSize(2),by+scaleSize(43),scaleSize(14),scaleSize(2));
+                });
+                // Porch, front door and garage.
+                if(b.porch){ctx.fillStyle='#d2c3a8';ctx.fillRect(bx+bw*.34,by+bh-scaleSize(24),bw*.34,scaleSize(8));ctx.fillStyle='#5d5044';ctx.fillRect(bx+bw*.36,by+bh-scaleSize(32),scaleSize(4),scaleSize(13));ctx.fillRect(bx+bw*.65,by+bh-scaleSize(32),scaleSize(4),scaleSize(13));}
+                ctx.fillStyle='#684a38';ctx.fillRect(bx+bw*.43,by+bh-scaleSize(31),scaleSize(17),scaleSize(31));ctx.fillStyle='#d8bd78';ctx.beginPath();ctx.arc(bx+bw*.43+scaleSize(12),by+bh-scaleSize(16),scaleSize(2),0,Math.PI*2);ctx.fill();
+                if(b.garage){ctx.fillStyle='#d7d8d2';ctx.fillRect(bx+bw-scaleSize(27),by+bh-scaleSize(31),scaleSize(23),scaleSize(25));ctx.strokeStyle='#7d8888';ctx.lineWidth=1;ctx.strokeRect(bx+bw-scaleSize(27),by+bh-scaleSize(31),scaleSize(23),scaleSize(25));for(let gy=0;gy<3;gy++){ctx.beginPath();ctx.moveTo(bx+bw-scaleSize(26),by+bh-scaleSize(25-gy*7));ctx.lineTo(bx+bw-scaleSize(5),by+bh-scaleSize(25-gy*7));ctx.stroke();}}
+                // Optional low garden fence and hedges.
+                ctx.fillStyle='#47734a';ctx.fillRect(bx-scaleSize(8),by+bh+scaleSize(5),bw+scaleSize(16),scaleSize(5));
+                if(b.fence){ctx.strokeStyle='#e5ddc9';ctx.lineWidth=Math.max(1,scaleSize(2));ctx.beginPath();ctx.moveTo(bx-scaleSize(10),by+bh+scaleSize(13));ctx.lineTo(bx+bw+scaleSize(10),by+bh+scaleSize(13));ctx.stroke();for(let fx=0;fx<=6;fx++){ctx.beginPath();ctx.moveTo(bx-scaleSize(10)+fx*bw/6,by+bh+scaleSize(8));ctx.lineTo(bx-scaleSize(10)+fx*bw/6,by+bh+scaleSize(17));ctx.stroke();}}
+            }else if(b.kind==='trees'){
+                for(let i=0;i<7;i++){const tx=bx+scaleSize((i%4)*42-35),ty=by+scaleSize(Math.floor(i/4)*48-24);ctx.fillStyle='rgba(0,0,0,.18)';ctx.beginPath();ctx.ellipse(tx+scaleSize(5),ty+scaleSize(13),scaleSize(22),scaleSize(11),0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#604a35';ctx.fillRect(tx-scaleSize(3),ty+scaleSize(2),scaleSize(6),scaleSize(23));ctx.fillStyle=['#2e6d3e','#3c8048','#4b914f'][i%3];ctx.beginPath();ctx.arc(tx,ty,scaleSize(21),0,Math.PI*2);ctx.fill();ctx.fillStyle='rgba(255,255,255,.13)';ctx.beginPath();ctx.arc(tx-scaleSize(6),ty-scaleSize(7),scaleSize(7),0,Math.PI*2);ctx.fill();}
+            }else if(b.kind==='bench'){
+                ctx.fillStyle='rgba(0,0,0,.22)';ctx.fillRect(bx+scaleSize(2),by+scaleSize(4),bw,bh);
+                ctx.fillStyle='#674b32';ctx.fillRect(bx,by,bw,bh);ctx.fillStyle='#a47b4f';ctx.fillRect(bx,by-scaleSize(5),bw,scaleSize(6));ctx.fillStyle='#44372b';ctx.fillRect(bx+scaleSize(5),by+bh-scaleSize(1),scaleSize(4),scaleSize(8));ctx.fillRect(bx+bw-scaleSize(9),by+bh-scaleSize(1),scaleSize(4),scaleSize(8));
+            }else if(b.kind==='field'){
+                ctx.fillStyle='#a98e4e';ctx.fillRect(bx,by,bw,bh);ctx.strokeStyle='#dfc87e';ctx.lineWidth=Math.max(1,scaleSize(4));for(let q=12;q<b.w;q+=22){ctx.beginPath();ctx.moveTo(bx+scaleSize(q),by+scaleSize(4));ctx.lineTo(bx+scaleSize(q),by+bh-scaleSize(4));ctx.stroke();}
+            }
+        });
+        // Lamp posts and roadside trees are deterministic decorative props.
+        if(cell.biome==='park'||cell.biome==='suburb')for(let i=0;i<2;i++){
+            const lx=toX(ox+70+i*245),ly=toY(oy+100+i*175);
+            if(!visible(lx-12,ly-40,24,45))continue;
+            ctx.strokeStyle='#384346';ctx.lineWidth=Math.max(1,scaleSize(4));ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(lx,ly-scaleSize(31));ctx.lineTo(lx+scaleSize(8),ly-scaleSize(36));ctx.stroke();ctx.fillStyle='#f5dfa0';ctx.beginPath();ctx.arc(lx+scaleSize(8),ly-scaleSize(36),scaleSize(5),0,Math.PI*2);ctx.fill();
+        }
+    });
+    // Bank / city landmark is anchored in world coordinates, not screen coordinates.
+    const bx=toX(-95),by=toY(-105),bw=scaleSize(190),bh=scaleSize(150);
+    if(visible(bx,by,bw,bh)){
+        ctx.fillStyle='rgba(0,0,0,.25)';ctx.fillRect(bx+scaleSize(8),by+scaleSize(10),bw,bh);
+        ctx.fillStyle='#d6d9d5';ctx.fillRect(bx,by,bw,bh);ctx.fillStyle='#345b77';ctx.fillRect(bx+scaleSize(10),by+scaleSize(10),bw-scaleSize(20),scaleSize(42));
+        ctx.fillStyle='#fff';ctx.font=`bold ${Math.max(8,scaleSize(19))}px Ubuntu`;ctx.textAlign='center';ctx.fillText('BANK',bx+bw/2,by+scaleSize(38));
+        for(let i=0;i<4;i++){ctx.fillStyle='#9ac4d1';ctx.fillRect(bx+scaleSize(15+i*42),by+scaleSize(67),scaleSize(27),scaleSize(73));ctx.strokeStyle='#b7b4a8';ctx.strokeRect(bx+scaleSize(15+i*42),by+scaleSize(67),scaleSize(27),scaleSize(73));}
+        ctx.fillStyle='#78573d';ctx.fillRect(bx+bw/2-scaleSize(15),by+bh-scaleSize(62),scaleSize(30),scaleSize(62));
+    }
+    // Detailed top-down traffic vehicles: wheel arches, bumpers, hood, roof,
+    // glazing, mirrors, lamps and specular highlights. These are props only;
+    // they never replace or alter the player's arena tank entity.
+    (worldView.cars||[]).forEach(car=>{
+        const x=toX(car.x),y=toY(car.y);if(!visible(x-scaleSize(34),y-scaleSize(22),scaleSize(68),scaleSize(44)))return;
+        const sc=scaleSize;ctx.save();ctx.translate(x,y);ctx.rotate(car.dir===1?0:Math.PI/2);
+        ctx.fillStyle='rgba(0,0,0,.32)';ctx.beginPath();ctx.ellipse(sc(1),sc(3),sc(31),sc(17),0,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle='#11171c';[[-20,-16],[12,-16],[-20,10],[12,10]].forEach(([wx,wy])=>{ctx.beginPath();ctx.roundRect(sc(wx),sc(wy),sc(10),sc(7),sc(2));ctx.fill();});
+        ctx.fillStyle='#202a31';ctx.beginPath();ctx.roundRect(sc(-29),sc(-15),sc(58),sc(30),sc(9));ctx.fill();
+        ctx.fillStyle=car.color||'#c7d1d8';ctx.beginPath();ctx.roundRect(sc(-27),sc(-14),sc(54),sc(28),sc(8));ctx.fill();
+        ctx.fillStyle='rgba(255,255,255,.26)';ctx.beginPath();ctx.roundRect(sc(-23),sc(-12),sc(44),sc(4),sc(2));ctx.fill();
+        ctx.fillStyle='#263c4a';ctx.beginPath();ctx.roundRect(sc(-12),sc(-11),sc(25),sc(22),sc(5));ctx.fill();
+        ctx.fillStyle='#8bb7c9';ctx.beginPath();ctx.moveTo(sc(-9),sc(-9));ctx.lineTo(sc(-1),sc(-9));ctx.lineTo(sc(-1),sc(9));ctx.lineTo(sc(-9),sc(9));ctx.closePath();ctx.fill();
+        ctx.fillStyle='#a9d0dc';ctx.beginPath();ctx.moveTo(sc(2),sc(-9));ctx.lineTo(sc(10),sc(-8));ctx.lineTo(sc(10),sc(8));ctx.lineTo(sc(2),sc(9));ctx.closePath();ctx.fill();
+        ctx.strokeStyle='rgba(13,24,31,.65)';ctx.lineWidth=Math.max(1,sc(1.5));ctx.beginPath();ctx.moveTo(sc(0),sc(-10));ctx.lineTo(sc(0),sc(10));ctx.stroke();
+        ctx.fillStyle='#dce6e8';ctx.fillRect(sc(14),sc(-5),sc(8),sc(10));
+        ctx.fillStyle='#fff0bf';ctx.beginPath();ctx.roundRect(sc(25),sc(-10),sc(3),sc(6),sc(1));ctx.roundRect(sc(25),sc(4),sc(3),sc(6),sc(1));ctx.fill();
+        ctx.fillStyle='#d64d46';ctx.fillRect(sc(-28),sc(-10),sc(3),sc(6));ctx.fillRect(sc(-28),sc(4),sc(3),sc(6));
+        ctx.fillStyle='#26333a';ctx.fillRect(sc(-29),sc(-4),sc(3),sc(8));ctx.fillRect(sc(26),sc(-4),sc(3),sc(8));
+        ctx.restore();
+    });
+    (worldView.citizens||[]).forEach(n=>{
+        const x=toX(n.x),y=toY(n.y);if(!visible(x-10,y-10,20,20))return;
+        ctx.fillStyle='rgba(0,0,0,.2)';ctx.beginPath();ctx.ellipse(x,y+scaleSize(5),scaleSize(6),scaleSize(3),0,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle='#40586b';ctx.beginPath();ctx.roundRect(x-scaleSize(4),y-scaleSize(1),scaleSize(8),scaleSize(10),scaleSize(3));ctx.fill();ctx.fillStyle='#e4b995';ctx.beginPath();ctx.arc(x,y-scaleSize(5),scaleSize(4),0,Math.PI*2);ctx.fill();
+    });
+    // Unowned property markers are map props; the tank and all combat entities are drawn later by draw().
+    (worldView.houses||[]).forEach(h=>{
+        const x=toX(h.x),y=toY(h.y);if(!visible(x-20,y-20,40,40))return;
+        ctx.fillStyle=h.owner_id?'#778078':'#ffe39a';ctx.fillRect(x-scaleSize(10),y-scaleSize(6),scaleSize(20),scaleSize(12));
+        ctx.fillStyle='#8c5142';ctx.beginPath();ctx.moveTo(x-scaleSize(13),y-scaleSize(6));ctx.lineTo(x,y-scaleSize(18));ctx.lineTo(x+scaleSize(13),y-scaleSize(6));ctx.fill();
+    });
+    ctx.restore();
 }
+
 
 
 function connectWS(regionStr, modeStr) {
@@ -2149,7 +2247,7 @@ function connectWS(regionStr, modeStr) {
 
         window.inputInterval = setInterval(() => {
 
-    if (isWorldMode && performance.now()-worldLastView>5000) { worldLastView=performance.now(); worldSend('world_refresh'); }
+    if (isWorldMode && performance.now()-worldLastView>1400) { worldLastView=performance.now(); worldSend('world_refresh'); }
     if (myId) {
 
         let finalAngle = 0;
@@ -2285,7 +2383,7 @@ function connectWS(regionStr, modeStr) {
         if(data.type==='world_position'){worldState={...worldState,...data};updateWorldHud();return;}
         if(data.type==='world_view'){worldView=data.view;return;}
         if(data.type==='world_notice'){if(data.sessionCoins!==undefined)worldState.sessionCoins=data.sessionCoins;if(data.statPoints!==undefined)worldState.statPoints=data.statPoints;document.getElementById('world-message').innerText=data.message||'';updateWorldHud();return;}
-        if(data.type==='world_death'){worldState=data.world;worldView=data.view;document.getElementById('world-message').innerText=`${data.reason}. Back to level 0; upgrades saved.`;updateWorldHud();return;}
+        if(data.type==='world_death'){worldState=data.world;worldView=data.view;document.getElementById('world-message').innerText=`${data.reason}. Fresh FFA spawn; permanent stat upgrades kept.`;updateWorldHud();return;}
         if(data.type==='world_house_prompt'){if(confirm(`Available house plot: ${data.price.toLocaleString()} coins. Buy it?`))worldBuyHouse(data.houseId);return;}
         if(data.type==='world_error'){pendingWorldJoin=false;alert(data.message);return;}
 
@@ -2317,7 +2415,7 @@ function connectWS(regionStr, modeStr) {
 
         }
 
-        else if(data.type === 'playerStats') { myStats = data; myStats.powerups = data.powerups || myStats.powerups || {}; updateVisualFov(); updateUI(); checkUpgrades(); }
+        else if(data.type === 'playerStats') { myStats = data; myStats.powerups = data.powerups || myStats.powerups || {}; updateVisualFov(); updateUI(); checkUpgrades(); if(isWorldMode) updateWorldHud(); }
 
         else if(data.type === 'spectate_update') { spectateId = data.id; }
 
@@ -3147,8 +3245,6 @@ const escapeHTML = (str) => {
 let drawCounter = 0;
 
 function draw() {
-    if(isWorldMode){drawWorld();requestAnimationFrame(draw);return;}
-
     drawCounter++;
 
     let now = performance.now();
@@ -3181,9 +3277,10 @@ function draw() {
 
     // Camera targeting logic stays exactly the same...
 
-    let targetCamX = WORLD_SIZE/2 - (canvas.width * fov) / 2;
+    const activeWorldExtent = isWorldMode ? (worldView?.extent || 50400) : WORLD_SIZE;
+    let targetCamX = activeWorldExtent/2 - (canvas.width * fov) / 2;
 
-    let targetCamY = WORLD_SIZE/2 - (canvas.height * fov) / 2;
+    let targetCamY = activeWorldExtent/2 - (canvas.height * fov) / 2;
 
 
 
@@ -3213,7 +3310,14 @@ function draw() {
 
             }
 
+        } else if (isWorldMode && worldState) {
+            const wx=activeWorldExtent/2+(worldState.x||180),wy=activeWorldExtent/2+(worldState.y||180);
+            targetCamX=wx-(canvas.width*fov)/2;targetCamY=wy-(canvas.height*fov)/2;
         }
+
+    } else if (isWorldMode && worldState) {
+        const wx=activeWorldExtent/2+(worldState.x||180),wy=activeWorldExtent/2+(worldState.y||180);
+        targetCamX=wx-(canvas.width*fov)/2;targetCamY=wy-(canvas.height*fov)/2;
 
     } else if (spectateId) {
 
@@ -3235,9 +3339,10 @@ function draw() {
 
 
 
-    camera.x += (targetCamX - camera.x) * 0.1;
+    const cameraEase=isWorldMode?0.22:0.1;
+    camera.x += (targetCamX - camera.x) * cameraEase;
 
-    camera.y += (targetCamY - camera.y) * 0.1;
+    camera.y += (targetCamY - camera.y) * cameraEase;
 
 
 
@@ -3258,6 +3363,10 @@ ctx.translate(-((camera.x / fov) % scaledGridSize), -((camera.y / fov) % scaledG
     ctx.fillRect(-50, -50, canvas.width + 100, canvas.height + 100);
 
     ctx.restore();
+
+    // World geometry is only a backdrop layer. Arena entities and combat
+    // continue through the exact same shared renderer below.
+    if (isWorldMode) drawWorldEnvironment();
 
     // --- TDM BASE DRAWING ---
 
@@ -3333,6 +3442,7 @@ ctx.translate(-((camera.x / fov) % scaledGridSize), -((camera.y / fov) % scaledG
 
 
 
+    if (!isWorldMode) {
     ctx.fillStyle = "rgba(0,0,0,0.02)"; 
 
     ctx.fillRect(
@@ -3347,6 +3457,7 @@ ctx.translate(-((camera.x / fov) % scaledGridSize), -((camera.y / fov) % scaledG
 
 );
 
+    }
 
 
     // --- ENTITY (tank/ai/shape) DEATH DETECTION ---
@@ -4126,39 +4237,64 @@ if (e.square) {
     }
 
     mCtx.clearRect(0,0,150,150);
-
-    if(gameMode === "2TDM") {
-
-        mCtx.fillStyle = "rgba(0, 178, 225, 0.3)"; mCtx.fillRect(0, 0, (400/WORLD_SIZE)*150, 150);
-
-        mCtx.fillStyle = "rgba(241, 78, 84, 0.3)"; mCtx.fillRect(150-(400/WORLD_SIZE)*150, 0, (400/WORLD_SIZE)*150, 150);
-
-    } else if(gameMode === "4TDM") {
-
-        let bs = (BASE_SIZE/WORLD_SIZE)*150;
-
-        mCtx.fillStyle = "rgba(0, 178, 225, 0.3)"; mCtx.fillRect(0, 0, bs, bs);
-
-        mCtx.fillStyle = "rgba(190, 127, 245, 0.3)"; mCtx.fillRect(150-bs, 0, bs, bs);
-
-        mCtx.fillStyle = "rgba(0, 225, 110, 0.3)"; mCtx.fillRect(0, 150-bs, bs, bs);
-
-        mCtx.fillStyle = "rgba(241, 78, 84, 0.3)"; mCtx.fillRect(150-bs, 150-bs, bs, bs);
-
+    if (isWorldMode) {
+        const tile=worldView?.tile||420,cells=worldView?.cells||[],extent=worldView?.extent||50400;
+        mCtx.fillStyle='#202b31';mCtx.fillRect(0,0,150,150);
+        if(cells.length){
+            const minGX=Math.min(...cells.map(c=>c.gx)),maxGX=Math.max(...cells.map(c=>c.gx));
+            const minGY=Math.min(...cells.map(c=>c.gy)),maxGY=Math.max(...cells.map(c=>c.gy));
+            const cols=maxGX-minGX+1,rows=maxGY-minGY+1,cellW=150/cols,cellH=150/rows;
+            const point=(wx,wy)=>({x:((wx/tile+60)-minGX)*cellW,y:((wy/tile+60)-minGY)*cellH});
+            const biomeColors={city:'#59666f',suburb:'#73966c',park:'#3f794d',farmland:'#aa9255'};
+            cells.forEach(cell=>{
+                const x=(cell.gx-minGX)*cellW,y=(cell.gy-minGY)*cellH;
+                mCtx.fillStyle=biomeColors[cell.biome]||'#73966c';mCtx.fillRect(x,y,cellW+.4,cellH+.4);
+                (cell.roads||[]).forEach(r=>{
+                    mCtx.fillStyle='#313b42';
+                    if(r.axis==='horizontal'){
+                        const road=Math.max(1,(r.w||80)/tile*cellH),ry=((r.y/tile+60)-minGY)*cellH;
+                        mCtx.fillRect(x,ry-road*.5,cellW,road);
+                    }else{
+                        const road=Math.max(1,(r.w||80)/tile*cellW),rx=((r.x/tile+60)-minGX)*cellW;
+                        mCtx.fillRect(rx-road*.5,y,road,cellH);
+                    }
+                });
+            });
+            // Shape dots are the same server-side arena shapes that award score/XP.
+            gameState.entities.forEach(en=>{
+                if(!['square','triangle','pentagon','hexagon','powerup'].includes(en.type))return;
+                const q=point(en.x-extent/2,en.y-extent/2);if(q.x<0||q.y<0||q.x>150||q.y>150)return;
+                mCtx.fillStyle=en.type==='square'?'#f8de4d':en.type==='triangle'?'#fc6868':en.type==='pentagon'?'#7b83ff':en.type==='powerup'?'#f5a6ff':'#72eff4';
+                mCtx.beginPath();mCtx.arc(q.x,q.y,1.15,0,Math.PI*2);mCtx.fill();
+            });
+            (worldView.cars||[]).forEach(car=>{const q=point(car.x,car.y);if(q.x>=0&&q.y>=0&&q.x<=150&&q.y<=150){mCtx.fillStyle='#e8a15b';mCtx.fillRect(q.x-1,q.y-1,2,2);}});
+            (worldView.houses||[]).forEach(h=>{const q=point(h.x,h.y);if(q.x>=0&&q.y>=0&&q.x<=150&&q.y<=150){mCtx.fillStyle=h.owner_id?'#89958b':'#ffe19a';mCtx.fillRect(q.x-1.5,q.y-1.5,3,3);}});
+            const me=gameState.entities.find(en=>en.id===myId);
+            const px=me?me.x-extent/2:(worldState?.x||0),py=me?me.y-extent/2:(worldState?.y||0),q=point(px,py);
+            // Current camera footprint, clipped to the local minimap window.
+            const viewW=Math.min(150,canvas.width*fov/tile*cellW),viewH=Math.min(150,canvas.height*fov/tile*cellH);
+            mCtx.strokeStyle='rgba(255,255,255,.32)';mCtx.lineWidth=.8;mCtx.strokeRect(q.x-viewW/2,q.y-viewH/2,viewW,viewH);
+            mCtx.fillStyle='#fff';mCtx.strokeStyle='#142027';mCtx.lineWidth=1.6;mCtx.beginPath();mCtx.arc(q.x,q.y,3.5,0,Math.PI*2);mCtx.fill();mCtx.stroke();
+        }
+        mCtx.strokeStyle='rgba(255,255,255,.85)';mCtx.lineWidth=1;mCtx.strokeRect(.5,.5,149,149);
+    }else {
+        if(gameMode === "2TDM") {
+            mCtx.fillStyle = "rgba(0, 178, 225, 0.3)"; mCtx.fillRect(0, 0, (400/WORLD_SIZE)*150, 150);
+            mCtx.fillStyle = "rgba(241, 78, 84, 0.3)"; mCtx.fillRect(150-(400/WORLD_SIZE)*150, 0, (400/WORLD_SIZE)*150, 150);
+        } else if(gameMode === "4TDM") {
+            let bs = (BASE_SIZE/WORLD_SIZE)*150;
+            mCtx.fillStyle = "rgba(0, 178, 225, 0.3)"; mCtx.fillRect(0, 0, bs, bs);
+            mCtx.fillStyle = "rgba(190, 127, 245, 0.3)"; mCtx.fillRect(150-bs, 0, bs, bs);
+            mCtx.fillStyle = "rgba(0, 225, 110, 0.3)"; mCtx.fillRect(0, 150-bs, bs, bs);
+            mCtx.fillStyle = "rgba(241, 78, 84, 0.3)"; mCtx.fillRect(150-bs, 150-bs, bs, bs);
+        }
+        gameState.entities.forEach(en => {
+            if(!['tank','ai'].includes(en.type)) return;
+            mCtx.fillStyle = en.id === myId ? '#fff' : getTeamColor(en.team);
+            let z = en.id === myId ? 4 : 2;
+            mCtx.fillRect((en.x/WORLD_SIZE)*150-z/2,(en.y/WORLD_SIZE)*150-z/2,z,z);
+        });
     }
-
-    gameState.entities.forEach(en => {
-
-        if(!['tank','ai'].includes(en.type)) return;
-
-        mCtx.fillStyle = en.id === myId ? '#fff' : getTeamColor(en.team);
-
-        let s = en.id === myId ? 4 : 2;
-
-        mCtx.fillRect((en.x/WORLD_SIZE)*150 - s/2, (en.y/WORLD_SIZE)*150 - s/2, s, s);
-
-    });
-
 
 
     requestAnimationFrame(draw);
@@ -4227,7 +4363,7 @@ window.onkeydown = e => {
 
     // Toggles
 
-    if (key === 'e' && isWorldMode) { worldSend('world_enter_car'); return; }
+    if (key === 'g' && isWorldMode) { worldSend('world_enter_car'); return; }
     if (key === 'e') autoFire = !autoFire;
 
     if (key === 'c') autoSpin = !autoSpin;
