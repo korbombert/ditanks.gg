@@ -539,6 +539,7 @@
         <input type="text" id="nameInput" placeholder="This is the tale of..." maxlength="15" autocomplete="nickname" aria-label="Tank name"><br>
 
         <button class="btn" id="playBtn" onclick="spawnPlayer()" disabled aria-label="Play game">Connecting...</button>
+        <button class="btn" id="worldModeBtn" style="background:#287a43;border-bottom-color:#18532d;font-size:18px" onclick="enterWorldMode()">🌍 Enter World Mode</button>
 
         <div id="disconnect-reason">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -801,6 +802,23 @@
 <!-- Achievement toast feed -->
 <div id="achievement-feed"></div>
 
+<!-- Persistent World Mode HUD -->
+<div id="world-hud" style="display:none;position:fixed;z-index:150;top:16px;left:16px;width:260px;background:rgba(20,28,32,.92);color:#fff;border:2px solid #9eb7a4;border-radius:10px;padding:12px;font:14px Ubuntu,sans-serif;box-shadow:0 4px 16px #0008">
+ <div style="font-size:18px;font-weight:bold;margin-bottom:8px">🌍 Real World</div>
+ <div>Session earnings: 🪙 <b id="world-session-coins">0</b></div>
+ <div>Stat points: <b id="world-stat-points">0</b></div>
+ <div style="display:flex;flex-wrap:wrap;gap:3px;margin:5px 0"><button onclick="worldUpgrade(7)">+Speed</button><button onclick="worldUpgrade(1)">+Health</button><button onclick="worldUpgrade(0)">+Regen</button><button onclick="worldUpgrade(2)">+Damage</button></div>
+ <div id="world-coordinates" style="font-size:11px;color:#b9c9c0;margin:4px 0 8px">Coordinates: 0, 0</div>
+ <button class="shop-btn btn-buy" onclick="worldWork('delivery')">Delivery job (+35)</button>
+ <button class="shop-btn btn-buy" onclick="worldWork('farming')">Farm shift (+28)</button>
+ <button class="shop-btn btn-buy" onclick="worldWork('construction')">Construction (+45)</button>
+ <button class="shop-btn btn-equip" onclick="worldBank()">🏦 Deposit at bank</button>
+ <button class="shop-btn btn-equip" onclick="worldBuyCar('compact')">Buy compact (2,500)</button>
+ <button class="shop-btn btn-equip" onclick="worldBuyCar('sedan')">Buy sedan (6,500)</button>
+ <button class="shop-btn btn-equip" onclick="worldBuyCar('sport')">Buy sport (18,000)</button>
+ <div id="world-message" style="min-height:28px;color:#ffe08a;margin-top:7px"></div>
+ <div style="font-size:11px;color:#b9c9c0">WASD / arrows: move · E: enter/leave car · Walk to a plot to buy a house</div>
+</div>
 <!-- Game canvas -->
 <canvas id="gameCanvas"></canvas>
 
