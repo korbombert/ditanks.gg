@@ -1506,8 +1506,13 @@ getPowerupBulletSpeedMultiplier() {
     update() {
         this.vx *= 0.85; this.vy *= 0.85;
         this.x += this.vx; this.y += this.vy;
-        this.x = Math.max(0, Math.min(WORLD_SIZE, this.x));
-        this.y = Math.max(0, Math.min(WORLD_SIZE, this.y));
+        if (this.room.mode !== 'WORLD') {
+            this.x = Math.max(0, Math.min(WORLD_SIZE, this.x));
+            this.y = Math.max(0, Math.min(WORLD_SIZE, this.y));
+        } else {
+            this.x = Math.max(0, Math.min(this.room.worldExtent, this.x));
+            this.y = Math.max(0, Math.min(this.room.worldExtent, this.y));
+        }
         const now = Date.now();
 
 if (this.maxHealthPowerupActive &&
@@ -1567,7 +1572,7 @@ if (this.hp < effectiveMaxHp) {
     }
 }
         let moveSpeed =
-    ((0.5 * 0.998) + (this.stats[7] * (0.04 * 0.995))) *
+    ((this.room.mode === 'WORLD' && this.worldInCar ? (this.worldCarSpeed || 1.35) : 0.5) * 0.998 + (this.stats[7] * (0.04 * 0.995))) *
     this.getPowerupMoveMultiplier();
         let isShooting = false;
         const effectiveMaxHpForFlee = this.maxHp + (this.stats[1] * 20);
@@ -2667,6 +2672,17 @@ function updateRoom(room) {
     let respawningBots = [];
     room.entities = room.entities.filter(e => {
         if(e.hp <= 0) {
+            if (room.mode === 'WORLD' && e.isPlayer) {
+                const owner = room.clients.find(c => c.player === e);
+                if (owner && owner.world) {
+                    owner.world.x = 180; owner.world.y = 180; owner.world.sessionCoins = 0; owner.world.inCar = false; e.worldInCar = false;
+                    e.x = WORLD_HALF + 180; e.y = WORLD_HALF + 180; e.vx = 0; e.vy = 0; e.maxHp = 100; e.hp = 100; e.radius = 20; e.level = 1; e.score = 0; e.xp = 0; e.statPoints = 0; e.tankType = 'Basic'; e.barrelTimers = []; e.lastDamagedBy = null;
+                    e.invulnerableUntil = Date.now() + 4000; owner.world.invulnerableUntil = e.invulnerableUntil;
+                    sendWorld(owner, 'world_death', { reason: 'Your tank was destroyed', world: owner.world, view: getWorldView(180,180) });
+                    worldSave(owner);
+                }
+                return true;
+            }
             // Resolve the killer once so both the achievement logic below and the
             // global leaderboard recording (further down) can share it.
             const killer = ['tank', 'ai'].includes(e.type)
@@ -2752,6 +2768,7 @@ function updateRoom(room) {
                     client.spectatingId = e.lastDamagedBy;
                 }
             }
+            if (room.mode === 'WORLD' && ['square','triangle','pentagon','hexagon'].includes(e.type) && e.lastDamagedBy) { const shooter=room.entities.find(p=>p.id===e.lastDamagedBy&&p.isPlayer); const owner=shooter&&room.clients.find(c=>c.player===shooter); if(owner&&owner.world) { owner.world.sessionCoins=(owner.world.sessionCoins||0)+Math.max(1,Math.floor((e.xpVal||60)/20)); sendWorld(owner,'world_notice',{message:`+${Math.max(1,Math.floor((e.xpVal||60)/20))} coins`,sessionCoins:owner.world.sessionCoins}); } }
             if(e.type === 'ai') respawningBots.push(Math.min(e.score / 5, 6124));
 
             // Grant the powerup's effect to whoever landed the killing blow.
@@ -2773,7 +2790,7 @@ function updateRoom(room) {
     respawningBots.forEach(score => room.spawnBot(Math.floor(Math.random()*100), score));
 
     let shapes = room.entities.filter(e => !['ai','tank'].includes(e.type)).length;
-    if(shapes < 300) room.spawnShape();
+    if(shapes < 300 && room.mode !== 'WORLD') room.spawnShape();
 }
 
 // ===================== GAME TICK =====================
@@ -2785,10 +2802,15 @@ setInterval(() => {
 // ===================== PERSISTENT WORLD MODE =====================
 const WORLD_TILE = 420, WORLD_GRID = 120, WORLD_EXTENT = WORLD_TILE * WORLD_GRID;
 const WORLD_JOBS = { delivery: 35, farming: 28, construction: 45 };
+const WORLD_HALF = WORLD_EXTENT / 2;
+const worldRoom = new Room('WORLD', 'WORLD', { shapeCount: 0, botCount: 0, shapeRespawn: false });
+worldRoom.worldExtent = WORLD_EXTENT;
+worldRoom.grid = new SpatialGrid(WORLD_EXTENT, 250);
+rooms.WORLD = worldRoom;
 const WORLD_CARS = [
-    { id:'compact', name:'Compact', price:2500, speed:5.2, color:'#e4e7eb' },
-    { id:'sedan', name:'Sedan', price:6500, speed:6.2, color:'#2684d9' },
-    { id:'sport', name:'Sport', price:18000, speed:8.5, color:'#e84d4d' }
+    { id:'compact', name:'Compact', price:2500, speed:8.5, color:'#e4e7eb' },
+    { id:'sedan', name:'Sedan', price:6500, speed:10.5, color:'#2684d9' },
+    { id:'sport', name:'Sport', price:18000, speed:14, color:'#e84d4d' }
 ];
 function worldRand(seed, x, y) { let n = (seed ^ Math.imul(x+1, 374761393) ^ Math.imul(y+1, 668265263)) >>> 0; n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; }
 function ensureWorld() {
@@ -2807,12 +2829,16 @@ function generateWorldCell(seed,gx,gy) {
     const roads=[];
     // Manhattan-like streets near the centre, suburban avenues further out,
     // and long arterial roads crossing the countryside.
-    if (gx%5===0 || gy%5===0 || (gx%17===0) || (gy%19===0)) roads.push({x:(gx-WORLD_GRID/2)*WORLD_TILE,y:(gy-WORLD_GRID/2)*WORLD_TILE,w:(gx%17===0||gy%19===0)?46:24,h:WORLD_TILE*5+24,axis:(gx%5===0||gx%17===0)?'vertical':'horizontal'});
+    if (gx%5===0 || gy%5===0 || (gx%17===0) || (gy%19===0)) roads.push({x:(gx-WORLD_GRID/2)*WORLD_TILE,y:(gy-WORLD_GRID/2)*WORLD_TILE,w:(gx%17===0||gy%19===0)?112:72,h:WORLD_TILE*5+24,axis:(gx%5===0||gx%17===0)?'vertical':'horizontal'});
     const buildings=[];
-    if (biome==='city' && r>.12) buildings.push({kind:'tower',x:x+WORLD_TILE*(.2+worldRand(seed,gx+8,gy)*.55),y:y+WORLD_TILE*(.2+worldRand(seed,gx,gy+9)*.55),w:90+r*100,h:100+r*140});
-    else if (biome==='suburb' && r>.24) buildings.push({kind:'house',x:x+WORLD_TILE*.25,y:y+WORLD_TILE*.25,w:95,h:78});
-    else if (biome==='farmland' && r>.25) buildings.push({kind:'field',x:x+30,y:y+30,w:WORLD_TILE-60,h:WORLD_TILE-60});
-    else if (biome==='park') buildings.push({kind:'trees',x:x+WORLD_TILE*.5,y:y+WORLD_TILE*.5,w:120,h:120});
+    if (biome==='city' && r>.08) {
+        const count = 1 + Math.floor(r*3);
+        for(let i=0;i<count;i++) buildings.push({kind:'tower',x:x+35+worldRand(seed,gx+i+8,gy)*245,y:y+35+worldRand(seed,gx,gy+i+9)*245,w:88+worldRand(seed,gx+i,gy)*90,h:105+worldRand(seed,gx,gy+i)*190,floors:5+Math.floor(r*18),tone:Math.floor(worldRand(seed,gx+i+2,gy+4)*4)});
+    } else if (biome==='suburb' && r>.12) {
+        for(let i=0;i<2+(r>.65?1:0);i++) buildings.push({kind:'house',x:x+25+(i%2)*175+worldRand(seed,gx+i,gy)*18,y:y+25+Math.floor(i/2)*175+worldRand(seed,gx,gy+i)*18,w:76+worldRand(seed,gx+i+4,gy)*24,h:64+worldRand(seed,gx,gy+i+4)*22,roof:Math.floor(worldRand(seed,gx+i+6,gy)*4)});
+        if(r>.55) buildings.push({kind:'bench',x:x+WORLD_TILE*.72,y:y+WORLD_TILE*.72,w:38,h:15});
+    } else if (biome==='farmland' && r>.18) buildings.push({kind:'field',x:x+18,y:y+18,w:WORLD_TILE-36,h:WORLD_TILE-36});
+    else if (biome==='park') { buildings.push({kind:'trees',x:x+WORLD_TILE*.5,y:y+WORLD_TILE*.5,w:120,h:120}); buildings.push({kind:'bench',x:x+WORLD_TILE*.28,y:y+WORLD_TILE*.72,w:42,h:16}); }
     return {gx,gy,biome,roads,buildings};
 }
 function getWorldView(x,y) {
@@ -2822,22 +2848,43 @@ function getWorldView(x,y) {
     return {cells,houses,extent:WORLD_EXTENT,tile:WORLD_TILE,cars:worldTraffic.filter(c=>Math.abs(c.x-x)<2600&&Math.abs(c.y-y)<2600),citizens:worldCitizens.filter(c=>Math.abs(c.x-x)<2200&&Math.abs(c.y-y)<2200)};
 }
 let worldTraffic=[], worldCitizens=[];
-function seedWorldTraffic(){ if(worldTraffic.length)return; const seed=ensureWorld(); for(let i=0;i<90;i++){let lane=(i%18-9)*WORLD_TILE*5, horizontal=i%2===0; worldTraffic.push({id:'car'+i,x:horizontal?worldRand(seed,i,2)*WORLD_EXTENT-WORLD_EXTENT/2:lane,y:horizontal?lane:worldRand(seed,i,3)*WORLD_EXTENT-WORLD_EXTENT/2,dir:horizontal?1:2,speed:2.2+(i%4)*.7,kind:'traffic'});} for(let i=0;i<75;i++) worldCitizens.push({id:'npc'+i,x:worldRand(seed,i,4)*WORLD_EXTENT-WORLD_EXTENT/2,y:worldRand(seed,i,5)*WORLD_EXTENT-WORLD_EXTENT/2,angle:worldRand(seed,i,6)*Math.PI*2,speed:.45+worldRand(seed,i,7)*.35}); }
+function seedWorldTraffic(){ if(worldTraffic.length)return; const seed=ensureWorld(); for(let i=0;i<90;i++){let lane=(i%18-9)*WORLD_TILE*5, horizontal=i%2===0; worldTraffic.push({id:'car'+i,x:horizontal?worldRand(seed,i,2)*WORLD_EXTENT-WORLD_EXTENT/2:lane,y:horizontal?lane:worldRand(seed,i,3)*WORLD_EXTENT-WORLD_EXTENT/2,dir:horizontal?1:2,speed:2.2+(i%4)*.7,kind:'traffic',color:['#e2e7e9','#286da5','#b84e46','#d0ad58','#5c6975','#f1f0e9'][i%6]});} for(let i=0;i<75;i++) worldCitizens.push({id:'npc'+i,x:worldRand(seed,i,4)*WORLD_EXTENT-WORLD_EXTENT/2,y:worldRand(seed,i,5)*WORLD_EXTENT-WORLD_EXTENT/2,angle:worldRand(seed,i,6)*Math.PI*2,speed:.45+worldRand(seed,i,7)*.35}); }
 function sendWorld(client,type,extra={}){ if(client.ws.readyState===WebSocket.OPEN) client.ws.send(JSON.stringify({type,...extra})); }
-function worldSave(client){if(!client.dbId||!client.world)return;const now=Date.now();db.prepare(`INSERT INTO world_players(user_id,x,y,upgrades,updated_at,last_seen,owned_car,session_coins) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET x=excluded.x,y=excluded.y,upgrades=excluded.upgrades,updated_at=excluded.updated_at,last_seen=excluded.last_seen,owned_car=excluded.owned_car,session_coins=excluded.session_coins`).run(client.dbId,client.world.x,client.world.y,JSON.stringify(client.world.upgrades),now,now,client.world.car||null,Math.max(0,Math.floor(client.world.sessionCoins||0)));db.prepare('UPDATE world_houses SET last_seen=? WHERE owner_id=?').run(now,client.dbId);}
+function worldSave(client){if(!client.dbId||!client.world)return;const now=Date.now();if(client.player&&client.room===worldRoom){client.world.x=client.player.x-WORLD_HALF;client.world.y=client.player.y-WORLD_HALF;}db.prepare(`INSERT INTO world_players(user_id,x,y,upgrades,updated_at,last_seen,owned_car,session_coins) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET x=excluded.x,y=excluded.y,upgrades=excluded.upgrades,updated_at=excluded.updated_at,last_seen=excluded.last_seen,owned_car=excluded.owned_car,session_coins=excluded.session_coins`).run(client.dbId,client.world.x,client.world.y,JSON.stringify(client.world.upgrades),now,now,client.world.car||null,Math.max(0,Math.floor(client.world.sessionCoins||0)));db.prepare('UPDATE world_houses SET last_seen=? WHERE owner_id=?').run(now,client.dbId);}
 function worldDeath(client,reason){const w=client.world;if(!w)return;w.x=180;w.y=180;w.invulnerableUntil=Date.now()+4000;w.sessionCoins=0;w.inCar=false;sendWorld(client,'world_death',{reason,world:w,view:getWorldView(0,0)});worldSave(client);}
 function expireWorldHouses(){const cutoff=Date.now()-7*86400000;const expired=db.prepare('SELECT * FROM world_houses WHERE owner_id IS NOT NULL AND COALESCE(last_seen,purchased_at)< ?').all(cutoff);for(const h of expired){const refund=Math.floor(h.price/2);const tx=db.transaction(()=>{db.prepare('UPDATE users SET coins=coins+? WHERE id=?').run(refund,h.owner_id);db.prepare('UPDATE world_houses SET owner_id=NULL,purchased_at=NULL,last_seen=NULL WHERE id=?').run(h.id);});tx();}}
-setInterval(()=>{seedWorldTraffic();expireWorldHouses();for(const c of worldTraffic){if(c.dir===1){c.x+=c.speed;if(c.x>WORLD_EXTENT/2)c.x=-WORLD_EXTENT/2;}else{c.y+=c.speed;if(c.y>WORLD_EXTENT/2)c.y=-WORLD_EXTENT/2;}}for(const n of worldCitizens){n.x+=Math.cos(n.angle)*n.speed;n.y+=Math.sin(n.angle)*n.speed;if(Math.random()<.015)n.angle+=(Math.random()-.5)*1.5;}for(const c of worldClients){if(!c.world)continue;const w=c.world;const near=worldTraffic.some(v=>Math.hypot(v.x-w.x,v.y-w.y)<54);if(near&&!w.inCar&&Date.now()>(w.invulnerableUntil||0))worldDeath(c,'A passing vehicle hit you');else if(near&&w.inCar){}if(Date.now()-(w.lastSave||0)>5000){w.lastSave=Date.now();worldSave(c);}}},100);
+setInterval(()=>{seedWorldTraffic();expireWorldHouses();for(const c of worldTraffic){if(c.dir===1){c.x+=c.speed;if(c.x>WORLD_EXTENT/2)c.x=-WORLD_EXTENT/2;}else{c.y+=c.speed;if(c.y>WORLD_EXTENT/2)c.y=-WORLD_EXTENT/2;}}for(const n of worldCitizens){n.x+=Math.cos(n.angle)*n.speed;n.y+=Math.sin(n.angle)*n.speed;if(Math.random()<.015)n.angle+=(Math.random()-.5)*1.5;}for(const c of worldClients){if(!c.world)continue;const w=c.world;ensureWorldShapes(w.x,w.y);if(c.player&&c.room===worldRoom){w.x=c.player.x-WORLD_HALF;w.y=c.player.y-WORLD_HALF;}const near=worldTraffic.some(v=>Math.hypot(v.x-w.x,v.y-w.y)<72);if(near&&!w.inCar&&Date.now()>(w.invulnerableUntil||0)){c.player.hp=0;}else if(near&&w.inCar){}if(!w.inCar){const plot=db.prepare('SELECT id,price FROM world_houses WHERE owner_id IS NULL AND x BETWEEN ? AND ? AND y BETWEEN ? AND ? ORDER BY ((x-?)*(x-?)+(y-?)*(y-?)) LIMIT 1').get(w.x-90,w.x+90,w.y-90,w.y+90,w.x,w.x,w.y,w.y);if(plot&&w.promptedHouse!==plot.id){w.promptedHouse=plot.id;sendWorld(c,'world_house_prompt',{houseId:plot.id,price:plot.price});}else if(!plot)w.promptedHouse=null;}if(Date.now()-(w.lastSave||0)>5000){w.lastSave=Date.now();worldSave(c);}}},100);
 const worldClients=new Set();
-function worldJoin(client){if(!client.dbId){sendWorld(client,'world_error',{message:'Log in to play World Mode.'});return;}seedWorldTraffic();let saved=db.prepare('SELECT * FROM world_players WHERE user_id=?').get(client.dbId);let upgrades={};try{upgrades=JSON.parse(saved?.upgrades||'{}')}catch{};client.world={level:0,x:saved?.x??180,y:saved?.y??180,invulnerableUntil:Date.now()+4000,upgrades,statPoints:upgrades.statPoints||0,stats:upgrades.stats||[0,0,0,0,0,0,0,0],sessionCoins:saved?.session_coins||0,car:saved?.owned_car||null,inCar:false,lastJob:0};db.prepare('UPDATE world_houses SET last_seen=? WHERE owner_id=?').run(Date.now(),client.dbId);worldClients.add(client);sendWorld(client,'world_joined',{world:client.world,view:getWorldView(client.world.x,client.world.y),cars:WORLD_CARS,jobs:WORLD_JOBS});}
+function ensureWorldShapes(x,y){const distance=Math.hypot(x,y);if(distance<5200||distance>13500)return;const total=worldRoom.entities.filter(e=>['square','triangle','pentagon','hexagon'].includes(e.type)).length;if(total>1200)return;const count=worldRoom.entities.filter(e=>['square','triangle','pentagon','hexagon'].includes(e.type)&&Math.hypot(e.x-(WORLD_HALF+x),e.y-(WORLD_HALF+y))<2600).length;for(let i=count;i<90&&total+i-count<1200;i++){const a=Math.random()*Math.PI*2,d=250+Math.random()*2300,wx=WORLD_HALF+x+Math.cos(a)*d,wy=WORLD_HALF+y+Math.sin(a)*d;const type=Math.random()<.68?'square':(Math.random()<.7?'triangle':'pentagon');worldRoom.entities.push(new Entity(worldRoom,Math.max(0,Math.min(WORLD_EXTENT,wx)),Math.max(0,Math.min(WORLD_EXTENT,wy)),type));}}
+function worldJoin(client){
+ if(!client.dbId){sendWorld(client,'world_error',{message:'Log in to play World Mode.'});return;}
+ seedWorldTraffic();
+ if(client.room) client.room.clients=client.room.clients.filter(c=>c!==client);
+ if(client.player){client.player.markedForDeletion=true;client.player=null;}
+ let saved=db.prepare('SELECT * FROM world_players WHERE user_id=?').get(client.dbId), upgrades={};
+ try{upgrades=JSON.parse(saved?.upgrades||'{}')}catch{}
+ client.world={level:0,x:saved?.x??180,y:saved?.y??180,invulnerableUntil:Date.now()+4000,upgrades,statPoints:upgrades.statPoints||0,stats:upgrades.stats||[0,0,0,0,0,0,0,0],sessionCoins:saved?.session_coins||0,car:saved?.owned_car||null,inCar:false,lastJob:0};
+ client.room=worldRoom; worldRoom.clients.push(client); ensureWorldShapes(client.world.x,client.world.y);
+ const user=db.prepare('SELECT username,selected_color FROM users WHERE id=?').get(client.dbId);
+ const team=1;
+ client.player=new Entity(worldRoom,WORLD_HALF+client.world.x,WORLD_HALF+client.world.y,'tank',user?.username||'Player',team,true,client.ws);
+ client.player.level=1; client.player.score=0; client.player.xp=0; client.player.statPoints=0; client.player.stats=[...(client.world.stats||[0,0,0,0,0,0,0,0])];
+ client.player.nameColor=user?.selected_color||'#ffffff'; client.player.worldInCar=false; client.player.worldCarSpeed=(WORLD_CARS.find(v=>v.id===client.world.car)?.speed||8.5)/8.5*1.35;
+ worldRoom.entities.push(client.player);
+ db.prepare('UPDATE world_houses SET last_seen=? WHERE owner_id=?').run(Date.now(),client.dbId);
+ worldClients.add(client);
+ sendWorld(client,'world_joined',{world:client.world,view:getWorldView(client.world.x,client.world.y),cars:WORLD_CARS,jobs:WORLD_JOBS});
+ client.ws.send(JSON.stringify({type:'init',id:client.player.id,team:1,nc:client.player.nameColor,name1:client.player.name}));
+}
+
 function worldHandle(client,d){const w=client.world;if(!w||!client.dbId)return;
- if(d.type==='world_input'){let dx=(d.right?1:0)-(d.left?1:0),dy=(d.down?1:0)-(d.up?1:0),len=Math.hypot(dx,dy)||1;let speed=w.inCar?7:3.2*(1+Math.min(7,(w.stats||[])[7]||0)*.12);let nextX=Math.max(-WORLD_EXTENT/2,Math.min(WORLD_EXTENT/2,w.x+dx/len*speed)),nextY=Math.max(-WORLD_EXTENT/2,Math.min(WORLD_EXTENT/2,w.y+dy/len*speed));if(w.inCar&&!(Math.abs(nextX%2100)<90||Math.abs(nextY%2100)<90))return;w.x=nextX;w.y=nextY;if(!w.inCar){const plot=db.prepare('SELECT id,price FROM world_houses WHERE owner_id IS NULL AND x BETWEEN ? AND ? AND y BETWEEN ? AND ? ORDER BY ((x-?)*(x-?)+(y-?)*(y-?)) LIMIT 1').get(w.x-90,w.x+90,w.y-90,w.y+90,w.x,w.x,w.y,w.y);if(plot&&w.promptedHouse!==plot.id){w.promptedHouse=plot.id;sendWorld(client,'world_house_prompt',{houseId:plot.id,price:plot.price});}else if(!plot)w.promptedHouse=null;}if(!w.inCar&&Date.now()>(w.invulnerableUntil||0)&&worldTraffic.some(v=>Math.hypot(v.x-w.x,v.y-w.y)<54)){worldDeath(client,'A passing vehicle hit you');return;}sendWorld(client,'world_position',{x:w.x,y:w.y,sessionCoins:w.sessionCoins,inCar:w.inCar});}
+
  else if(d.type==='world_work'){const now=Date.now();if(Math.hypot(w.x,w.y)>6500){sendWorld(client,'world_notice',{message:'Jobs are available in the city centre.'});return;}if(now-w.lastJob<10000)return;const job=WORLD_JOBS[d.job];if(!job)return;w.lastJob=now;w.sessionCoins+=job;w.statPoints=(w.statPoints||0)+1;w.upgrades.statPoints=w.statPoints;w.upgrades.stats=w.stats||[0,0,0,0,0,0,0,0];worldSave(client);sendWorld(client,'world_notice',{message:`Shift complete: +${job} session coins · +1 stat point`,sessionCoins:w.sessionCoins,statPoints:w.statPoints});}
  else if(d.type==='world_bank'){if(Math.hypot(w.x,w.y)>6500){sendWorld(client,'world_notice',{message:'Visit the city-centre bank to deposit your session earnings.'});return;}const amount=Math.max(0,Math.floor(w.sessionCoins));if(amount){db.prepare('UPDATE users SET coins=coins+? WHERE id=?').run(amount,client.dbId);w.sessionCoins=0;worldSave(client);sendWorld(client,'profile_update',{profile:db.prepare('SELECT * FROM users WHERE id=?').get(client.dbId)});sendWorld(client,'world_notice',{message:`Deposited ${amount} coins into your account.`});}}
  else if(d.type==='world_buy_house'){const h=db.prepare('SELECT * FROM world_houses WHERE id=?').get(String(d.houseId));const u=db.prepare('SELECT coins FROM users WHERE id=?').get(client.dbId);if(!h||!u||h.owner_id||u.coins<h.price||Math.hypot(h.x-w.x,h.y-w.y)>260)return;const tx=db.transaction(()=>{const claimed=db.prepare('UPDATE world_houses SET owner_id=?,purchased_at=?,last_seen=? WHERE id=? AND owner_id IS NULL').run(client.dbId,Date.now(),Date.now(),h.id);if(!claimed.changes)return false;const debited=db.prepare('UPDATE users SET coins=coins-? WHERE id=? AND coins>=?').run(h.price,client.dbId,h.price);if(!debited.changes)throw new Error('Insufficient funds');return true;});try{if(!tx())return;}catch(err){return;}w.promptedHouse=null;sendWorld(client,'profile_update',{profile:db.prepare('SELECT * FROM users WHERE id=?').get(client.dbId)});sendWorld(client,'world_view',{view:getWorldView(w.x,w.y)});}
  else if(d.type==='world_buy_car'){if(Math.hypot(w.x,w.y)>6500){sendWorld(client,'world_notice',{message:'Visit a city-centre dealership to buy a car.'});return;}const car=WORLD_CARS.find(v=>v.id===d.carId),u=db.prepare('SELECT coins FROM users WHERE id=?').get(client.dbId);if(!car||!u||w.car||u.coins<car.price)return;db.prepare('UPDATE users SET coins=coins-? WHERE id=?').run(car.price,client.dbId);w.car=car.id;worldSave(client);sendWorld(client,'profile_update',{profile:db.prepare('SELECT * FROM users WHERE id=?').get(client.dbId)});sendWorld(client,'world_notice',{message:`Purchased ${car.name}. Press E near a road to drive.`});}
- else if(d.type==='world_enter_car'){if(!w.car)return;const onRoad=(Math.abs(w.x%2100)<90||Math.abs(w.y%2100)<90);if(!w.inCar&&!onRoad){sendWorld(client,'world_notice',{message:'Move onto a road before entering your car.'});return;}w.inCar=!w.inCar;sendWorld(client,'world_position',{x:w.x,y:w.y,sessionCoins:w.sessionCoins,inCar:w.inCar});}
- else if(d.type==='world_upgrade'){const i=Number(d.statIndex);if(!Number.isInteger(i)||i<0||i>7||w.statPoints<1)return;w.stats=w.stats||[0,0,0,0,0,0,0,0];if(w.stats[i]>=7)return;w.stats[i]++;w.statPoints--;w.upgrades.statPoints=w.statPoints;w.upgrades.stats=w.stats;worldSave(client);sendWorld(client,'world_notice',{message:'Permanent upgrade saved.',statPoints:w.statPoints,sessionCoins:w.sessionCoins});}
+ else if(d.type==='world_enter_car'){if(!w.car)return;const onRoad=(Math.abs(w.x%2100)<90||Math.abs(w.y%2100)<90);if(!w.inCar&&!onRoad){sendWorld(client,'world_notice',{message:'Move onto a road before entering your car.'});return;}w.inCar=!w.inCar;if(client.player){client.player.worldInCar=w.inCar;client.player.worldCarSpeed=(WORLD_CARS.find(v=>v.id===w.car)?.speed||8.5)/8.5*1.35;}sendWorld(client,'world_position',{x:w.x,y:w.y,sessionCoins:w.sessionCoins,inCar:w.inCar});}
+ else if(d.type==='world_upgrade'){const i=Number(d.statIndex);if(!Number.isInteger(i)||i<0||i>7||w.statPoints<1)return;w.stats=w.stats||[0,0,0,0,0,0,0,0];if(w.stats[i]>=7)return;w.stats[i]++;if(client.player)client.player.stats=[...w.stats];w.statPoints--;w.upgrades.statPoints=w.statPoints;w.upgrades.stats=w.stats;worldSave(client);sendWorld(client,'world_notice',{message:'Permanent upgrade saved.',statPoints:w.statPoints,sessionCoins:w.sessionCoins});}
  else if(d.type==='world_refresh'){sendWorld(client,'world_view',{view:getWorldView(w.x,w.y)});}
  else if(d.type==='world_leave'){worldSave(client);client.world=null;worldClients.delete(client);}
 }
