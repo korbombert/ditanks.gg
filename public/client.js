@@ -1685,9 +1685,11 @@ function updateSpectateLabel() {
 }
 
 function exitGame() {
-
-    if(confirm("Are you sure you want to disconnect and return to the menu?")) { location.reload(); }
-
+    if(confirm("Are you sure you want to disconnect and return to the menu?")) {
+        if(isWorldMode) worldSend('world_leave');
+        isWorldMode=false; worldState=null; worldView=null;
+        location.reload();
+    }
 }
 
 
@@ -2008,6 +2010,45 @@ function readBinaryMessage(ab) {
 
 // ===================== CONNECTION =====================
 
+// ===================== WORLD MODE CLIENT =====================
+let isWorldMode=false, pendingWorldJoin=false, worldState=null, worldView=null, worldLastView=0;
+function worldSend(type,extra={}){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type,...extra}));}
+function enterWorldMode(){
+ if(!sessionToken){alert('World Mode requires a logged-in Google or Discord account.');return;}
+ if(!ws||ws.readyState!==1){const region=document.getElementById('regionInput').value;const mode=document.getElementById('gameModeInput').value;pendingWorldJoin=true;connectWS(region,mode);return;}
+ pendingWorldJoin=true;worldSend('world_join');
+}
+function beginWorldMode(data){
+ isWorldMode=true;worldState=data.world;worldView=data.view;gameMode='WORLD';myId=null;spectateId=null;
+ document.getElementById('menu-overlay').style.display='none';document.getElementById('account-panel').style.display='none';document.getElementById('changelog-panel').style.display='none';
+ document.getElementById('game-ui').style.display='block';document.getElementById('exit-btn').style.display='flex';document.getElementById('world-hud').style.display='block';
+ document.getElementById('death-screen').style.display='none';
+ updateWorldHud(); if(!window.drawing){window.drawing=true;requestAnimationFrame(draw);}
+}
+function updateWorldHud(){if(!worldState)return;document.getElementById('world-session-coins').innerText=worldState.sessionCoins||0;document.getElementById('world-stat-points').innerText=worldState.statPoints||0;document.getElementById('world-coordinates').innerText=`Coordinates: ${Math.round(worldState.x)}, ${Math.round(worldState.y)}${worldState.inCar?' · Driving':''}`;}
+function worldWork(job){worldSend('world_work',{job});}
+let worldInputLast=0;
+function sendWorldInput(){if(performance.now()-worldInputLast<50)return;worldInputLast=performance.now();worldSend('world_input',{up:!!(keys.w||keys.arrowup),down:!!(keys.s||keys.arrowdown),left:!!(keys.a||keys.arrowleft),right:!!(keys.d||keys.arrowright)});}
+function worldBank(){worldSend('world_bank');}
+function worldBuyCar(carId){worldSend('world_buy_car',{carId});}
+function worldBuyHouse(id){if(confirm('Purchase this property for the listed price?'))worldSend('world_buy_house',{houseId:id});}
+function worldUpgrade(index){worldSend('world_upgrade',{statIndex:index});}
+function drawWorld(){
+ if(!worldState)return;const w=worldState, vw=canvas.width,vh=canvas.height,camX=w.x,camY=w.y;
+ ctx.fillStyle='#9bbd82';ctx.fillRect(0,0,vw,vh);
+ const sx=x=>x-camX+vw/2, sy=y=>y-camY+vh/2;
+ if(worldView?.cells) for(const c of worldView.cells){const x=(c.gx-60)*420,y=(c.gy-60)*420,px=sx(x),py=sy(y);ctx.fillStyle=c.biome==='city'?'#a7aaa8':c.biome==='suburb'?'#9dbb86':c.biome==='park'?'#78a96d':'#b9b27b';ctx.fillRect(px,py,420,420);
+  if(c.biome==='farmland'){ctx.strokeStyle='#a59b5f';ctx.lineWidth=2;for(let q=25;q<420;q+=28){ctx.beginPath();ctx.moveTo(px+q,py+12);ctx.lineTo(px+q,py+408);ctx.stroke();}}
+  for(const r of (c.roads||[])){const rx=sx(r.x),ry=sy(r.y),width=r.w||24;ctx.fillStyle='#55595b';if(r.axis==='horizontal'){ctx.fillRect(px,ry-width/2,420,width);ctx.fillStyle='#d8d2a4';ctx.fillRect(px,ry-1,420,2);}else{ctx.fillRect(rx-width/2,py,width,420);ctx.fillStyle='#d8d2a4';ctx.fillRect(rx-1,py,2,420);}}
+  for(const b of (c.buildings||[])){const bx=sx(b.x),by=sy(b.y);if(b.kind==='tower'){ctx.fillStyle='#697c88';ctx.fillRect(bx,by,b.w,b.h);ctx.fillStyle='#a9c4d0';for(let xx=bx+8;xx<bx+b.w-5;xx+=18)for(let yy=by+10;yy<by+b.h-5;yy+=20)ctx.fillRect(xx,yy,8,9);}else if(b.kind==='house'){ctx.fillStyle='#e6d8bc';ctx.fillRect(bx,by,b.w,b.h);ctx.fillStyle='#8a5547';ctx.beginPath();ctx.moveTo(bx-8,by);ctx.lineTo(bx+b.w/2,by-35);ctx.lineTo(bx+b.w+8,by);ctx.fill();}else if(b.kind==='field'){ctx.fillStyle='#b3a65f';ctx.fillRect(bx,by,b.w,b.h);}else{ctx.fillStyle='#397b43';ctx.beginPath();ctx.arc(bx,by,42,0,Math.PI*2);ctx.fill();}}
+ }
+ {const bx=sx(-95),by=sy(-105);ctx.fillStyle='#e9e3d4';ctx.fillRect(bx,by,190,150);ctx.fillStyle='#315b78';ctx.fillRect(bx+12,by+12,166,42);ctx.fillStyle='#fff';ctx.font='bold 18px Ubuntu';ctx.fillText('BANK',bx+65,by+40);ctx.fillStyle='#806c52';ctx.fillRect(bx+78,by+75,34,75);}
+ if(worldView?.houses)for(const h of worldView.houses){const x=sx(h.x),y=sy(h.y);if(x<0||y<0||x>vw||y>vh)continue;ctx.fillStyle=h.owner_id?'#777':'#ffe28a';ctx.beginPath();ctx.arc(x,y,9,0,Math.PI*2);ctx.fill();if(!h.owner_id){ctx.fillStyle='#222';ctx.font='12px Ubuntu';ctx.fillText(`🏠 ${h.price.toLocaleString()}`,x+12,y);}}
+ if(worldView?.cars)for(const c of worldView.cars){ctx.save();ctx.translate(sx(c.x),sy(c.y));ctx.fillStyle='#e6e9ed';ctx.fillRect(-17,-8,34,16);ctx.fillStyle='#3b5669';ctx.fillRect(-7,-6,13,12);ctx.restore();}
+ if(worldView?.citizens)for(const n of worldView.citizens){ctx.fillStyle='#3f4a54';ctx.beginPath();ctx.arc(sx(n.x),sy(n.y),5,0,Math.PI*2);ctx.fill();}
+ ctx.save();ctx.translate(vw/2,vh/2);ctx.fillStyle=w.inCar?'#e74c3c':'#2875d0';ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();if(w.inCar)ctx.rect(-15,-9,30,18);else{ctx.arc(0,0,12,0,Math.PI*2);}ctx.fill();ctx.stroke();ctx.restore();
+}
+
 function connectWS(regionStr, modeStr) {
 
     const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
@@ -2035,10 +2076,9 @@ function connectWS(regionStr, modeStr) {
         document.getElementById('playBtn').disabled = false;
 
         if (sessionToken) {
-
             ws.send(JSON.stringify({ type: 'auth_login', token: sessionToken }));
-
         }
+        if (pendingWorldJoin) { pendingWorldJoin=false; ws.send(JSON.stringify({type:'world_join'})); }
 
         sendPing();
 
@@ -2046,6 +2086,11 @@ function connectWS(regionStr, modeStr) {
 
         window.inputInterval = setInterval(() => {
 
+    if (isWorldMode) {
+        sendWorldInput();
+        if(performance.now()-worldLastView>5000){worldLastView=performance.now();worldSend('world_refresh');}
+        return;
+    }
     if (myId) {
 
         let finalAngle = 0;
@@ -2177,6 +2222,13 @@ function connectWS(regionStr, modeStr) {
     ws.onmessage = (e) => {
 
         const data = JSON.parse(e.data);
+        if(data.type==='world_joined'){beginWorldMode(data);return;}
+        if(data.type==='world_position'){worldState={...worldState,...data};updateWorldHud();return;}
+        if(data.type==='world_view'){worldView=data.view;return;}
+        if(data.type==='world_notice'){if(data.sessionCoins!==undefined)worldState.sessionCoins=data.sessionCoins;if(data.statPoints!==undefined)worldState.statPoints=data.statPoints;document.getElementById('world-message').innerText=data.message||'';updateWorldHud();return;}
+        if(data.type==='world_death'){worldState=data.world;worldView=data.view;document.getElementById('world-message').innerText=`${data.reason}. Back to level 0; upgrades saved.`;updateWorldHud();return;}
+        if(data.type==='world_house_prompt'){if(confirm(`Available house plot: ${data.price.toLocaleString()} coins. Buy it?`))worldBuyHouse(data.houseId);return;}
+        if(data.type==='world_error'){pendingWorldJoin=false;alert(data.message);return;}
 
         if(data.type === 'init') { myId = data.id; myTeam = data.team; spectateId = null; myNameColor = data.nc; myName = data.name1}
 
@@ -3036,6 +3088,7 @@ const escapeHTML = (str) => {
 let drawCounter = 0;
 
 function draw() {
+    if(isWorldMode){drawWorld();requestAnimationFrame(draw);return;}
 
     drawCounter++;
 
@@ -4115,6 +4168,7 @@ window.onkeydown = e => {
 
     // Toggles
 
+    if (key === 'e' && isWorldMode) { worldSend('world_enter_car'); return; }
     if (key === 'e') autoFire = !autoFire;
 
     if (key === 'c') autoSpin = !autoSpin;
