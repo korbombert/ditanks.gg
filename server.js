@@ -36,6 +36,12 @@ db.prepare(`
     )
 `).run();
 
+// Persistent World Mode data. The terrain seed is generated once and is only
+// replaced by the Discord administrator regeneration command.
+db.prepare(`CREATE TABLE IF NOT EXISTS world_meta (id INTEGER PRIMARY KEY CHECK(id=1), seed INTEGER NOT NULL, created_at INTEGER NOT NULL)`).run();
+db.prepare(`CREATE TABLE IF NOT EXISTS world_players (user_id TEXT PRIMARY KEY, x REAL NOT NULL DEFAULT 0, y REAL NOT NULL DEFAULT 0, upgrades TEXT NOT NULL DEFAULT '{}', updated_at INTEGER NOT NULL DEFAULT 0, last_seen INTEGER NOT NULL DEFAULT 0, owned_car TEXT, session_coins INTEGER NOT NULL DEFAULT 0)`).run();
+try { db.prepare('ALTER TABLE world_players ADD COLUMN session_coins INTEGER NOT NULL DEFAULT 0').run(); } catch (err) { if (!String(err.message).includes('duplicate column')) throw err; }
+db.prepare(`CREATE TABLE IF NOT EXISTS world_houses (id TEXT PRIMARY KEY, owner_id TEXT, price INTEGER NOT NULL, x REAL NOT NULL, y REAL NOT NULL, purchased_at INTEGER, last_seen INTEGER)`).run();
 db.prepare(`
     CREATE TABLE IF NOT EXISTS bot_config (
         key TEXT PRIMARY KEY,
@@ -2776,6 +2782,66 @@ setInterval(() => {
     Object.values(rooms).forEach(updateRoom); 
 }, 1000 / (TICK_RATE * GAME_SPEED));
 
+// ===================== PERSISTENT WORLD MODE =====================
+const WORLD_TILE = 420, WORLD_GRID = 120, WORLD_EXTENT = WORLD_TILE * WORLD_GRID;
+const WORLD_JOBS = { delivery: 35, farming: 28, construction: 45 };
+const WORLD_CARS = [
+    { id:'compact', name:'Compact', price:2500, speed:5.2, color:'#e4e7eb' },
+    { id:'sedan', name:'Sedan', price:6500, speed:6.2, color:'#2684d9' },
+    { id:'sport', name:'Sport', price:18000, speed:8.5, color:'#e84d4d' }
+];
+function worldRand(seed, x, y) { let n = (seed ^ Math.imul(x+1, 374761393) ^ Math.imul(y+1, 668265263)) >>> 0; n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; }
+function ensureWorld() {
+    let row = db.prepare('SELECT seed FROM world_meta WHERE id=1').get();
+    if (!row) { const seed = crypto.randomInt(1, 0x7fffffff); db.prepare('INSERT INTO world_meta(id,seed,created_at) VALUES(1,?,?)').run(seed,Date.now()); row={seed};
+        const addHouse=db.prepare('INSERT OR IGNORE INTO world_houses(id,owner_id,price,x,y) VALUES(?,NULL,?,?,?)');
+        for(let i=0;i<260;i++){const gx=5+Math.floor(worldRand(seed,i,9)*110),gy=5+Math.floor(worldRand(seed,i,10)*110);const x=(gx-WORLD_GRID/2)*WORLD_TILE+130,y=(gy-WORLD_GRID/2)*WORLD_TILE+130;const price=Math.hypot(x,y)<5200?45000:Math.hypot(x,y)<13500?12000:3500;addHouse.run('plot-'+i,price,x,y);}
+    }
+    return row.seed;
+}
+function generateWorldCell(seed,gx,gy) {
+    const x=(gx-WORLD_GRID/2)*WORLD_TILE, y=(gy-WORLD_GRID/2)*WORLD_TILE;
+    const d=Math.hypot(x,y), r=worldRand(seed,gx,gy);
+    let biome = d<5200?'city':d<13500?'suburb':(r<0.22?'farmland':r<0.34?'park':'suburb');
+    if (d>17000 && r<0.68) biome='farmland';
+    const roads=[];
+    // Manhattan-like streets near the centre, suburban avenues further out,
+    // and long arterial roads crossing the countryside.
+    if (gx%5===0 || gy%5===0 || (gx%17===0) || (gy%19===0)) roads.push({x:(gx-WORLD_GRID/2)*WORLD_TILE,y:(gy-WORLD_GRID/2)*WORLD_TILE,w:(gx%17===0||gy%19===0)?46:24,h:WORLD_TILE*5+24,axis:(gx%5===0||gx%17===0)?'vertical':'horizontal'});
+    const buildings=[];
+    if (biome==='city' && r>.12) buildings.push({kind:'tower',x:x+WORLD_TILE*(.2+worldRand(seed,gx+8,gy)*.55),y:y+WORLD_TILE*(.2+worldRand(seed,gx,gy+9)*.55),w:90+r*100,h:100+r*140});
+    else if (biome==='suburb' && r>.24) buildings.push({kind:'house',x:x+WORLD_TILE*.25,y:y+WORLD_TILE*.25,w:95,h:78});
+    else if (biome==='farmland' && r>.25) buildings.push({kind:'field',x:x+30,y:y+30,w:WORLD_TILE-60,h:WORLD_TILE-60});
+    else if (biome==='park') buildings.push({kind:'trees',x:x+WORLD_TILE*.5,y:y+WORLD_TILE*.5,w:120,h:120});
+    return {gx,gy,biome,roads,buildings};
+}
+function getWorldView(x,y) {
+    const seed=ensureWorld(), cells=[]; const cx=Math.floor(x/WORLD_TILE+WORLD_GRID/2), cy=Math.floor(y/WORLD_TILE+WORLD_GRID/2);
+    for(let gy=cy-5;gy<=cy+5;gy++) for(let gx=cx-5;gx<=cx+5;gx++) if(gx>=0&&gy>=0&&gx<WORLD_GRID&&gy<WORLD_GRID) cells.push(generateWorldCell(seed,gx,gy));
+    const houses=db.prepare('SELECT id,owner_id,price,x,y FROM world_houses WHERE x BETWEEN ? AND ? AND y BETWEEN ? AND ?').all(x-2400,x+2400,y-2400,y+2400);
+    return {cells,houses,extent:WORLD_EXTENT,tile:WORLD_TILE,cars:worldTraffic.filter(c=>Math.abs(c.x-x)<2600&&Math.abs(c.y-y)<2600),citizens:worldCitizens.filter(c=>Math.abs(c.x-x)<2200&&Math.abs(c.y-y)<2200)};
+}
+let worldTraffic=[], worldCitizens=[];
+function seedWorldTraffic(){ if(worldTraffic.length)return; const seed=ensureWorld(); for(let i=0;i<90;i++){let lane=(i%18-9)*WORLD_TILE*5, horizontal=i%2===0; worldTraffic.push({id:'car'+i,x:horizontal?worldRand(seed,i,2)*WORLD_EXTENT-WORLD_EXTENT/2:lane,y:horizontal?lane:worldRand(seed,i,3)*WORLD_EXTENT-WORLD_EXTENT/2,dir:horizontal?1:2,speed:2.2+(i%4)*.7,kind:'traffic'});} for(let i=0;i<75;i++) worldCitizens.push({id:'npc'+i,x:worldRand(seed,i,4)*WORLD_EXTENT-WORLD_EXTENT/2,y:worldRand(seed,i,5)*WORLD_EXTENT-WORLD_EXTENT/2,angle:worldRand(seed,i,6)*Math.PI*2,speed:.45+worldRand(seed,i,7)*.35}); }
+function sendWorld(client,type,extra={}){ if(client.ws.readyState===WebSocket.OPEN) client.ws.send(JSON.stringify({type,...extra})); }
+function worldSave(client){if(!client.dbId||!client.world)return;const now=Date.now();db.prepare(`INSERT INTO world_players(user_id,x,y,upgrades,updated_at,last_seen,owned_car,session_coins) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET x=excluded.x,y=excluded.y,upgrades=excluded.upgrades,updated_at=excluded.updated_at,last_seen=excluded.last_seen,owned_car=excluded.owned_car,session_coins=excluded.session_coins`).run(client.dbId,client.world.x,client.world.y,JSON.stringify(client.world.upgrades),now,now,client.world.car||null,Math.max(0,Math.floor(client.world.sessionCoins||0)));db.prepare('UPDATE world_houses SET last_seen=? WHERE owner_id=?').run(now,client.dbId);}
+function worldDeath(client,reason){const w=client.world;if(!w)return;w.x=180;w.y=180;w.invulnerableUntil=Date.now()+4000;w.sessionCoins=0;w.inCar=false;sendWorld(client,'world_death',{reason,world:w,view:getWorldView(0,0)});worldSave(client);}
+function expireWorldHouses(){const cutoff=Date.now()-7*86400000;const expired=db.prepare('SELECT * FROM world_houses WHERE owner_id IS NOT NULL AND COALESCE(last_seen,purchased_at)< ?').all(cutoff);for(const h of expired){const refund=Math.floor(h.price/2);const tx=db.transaction(()=>{db.prepare('UPDATE users SET coins=coins+? WHERE id=?').run(refund,h.owner_id);db.prepare('UPDATE world_houses SET owner_id=NULL,purchased_at=NULL,last_seen=NULL WHERE id=?').run(h.id);});tx();}}
+setInterval(()=>{seedWorldTraffic();expireWorldHouses();for(const c of worldTraffic){if(c.dir===1){c.x+=c.speed;if(c.x>WORLD_EXTENT/2)c.x=-WORLD_EXTENT/2;}else{c.y+=c.speed;if(c.y>WORLD_EXTENT/2)c.y=-WORLD_EXTENT/2;}}for(const n of worldCitizens){n.x+=Math.cos(n.angle)*n.speed;n.y+=Math.sin(n.angle)*n.speed;if(Math.random()<.015)n.angle+=(Math.random()-.5)*1.5;}for(const c of worldClients){if(!c.world)continue;const w=c.world;const near=worldTraffic.some(v=>Math.hypot(v.x-w.x,v.y-w.y)<54);if(near&&!w.inCar&&Date.now()>(w.invulnerableUntil||0))worldDeath(c,'A passing vehicle hit you');else if(near&&w.inCar){}if(Date.now()-(w.lastSave||0)>5000){w.lastSave=Date.now();worldSave(c);}}},100);
+const worldClients=new Set();
+function worldJoin(client){if(!client.dbId){sendWorld(client,'world_error',{message:'Log in to play World Mode.'});return;}seedWorldTraffic();let saved=db.prepare('SELECT * FROM world_players WHERE user_id=?').get(client.dbId);let upgrades={};try{upgrades=JSON.parse(saved?.upgrades||'{}')}catch{};client.world={level:0,x:saved?.x??180,y:saved?.y??180,invulnerableUntil:Date.now()+4000,upgrades,statPoints:upgrades.statPoints||0,stats:upgrades.stats||[0,0,0,0,0,0,0,0],sessionCoins:saved?.session_coins||0,car:saved?.owned_car||null,inCar:false,lastJob:0};db.prepare('UPDATE world_houses SET last_seen=? WHERE owner_id=?').run(Date.now(),client.dbId);worldClients.add(client);sendWorld(client,'world_joined',{world:client.world,view:getWorldView(client.world.x,client.world.y),cars:WORLD_CARS,jobs:WORLD_JOBS});}
+function worldHandle(client,d){const w=client.world;if(!w||!client.dbId)return;
+ if(d.type==='world_input'){let dx=(d.right?1:0)-(d.left?1:0),dy=(d.down?1:0)-(d.up?1:0),len=Math.hypot(dx,dy)||1;let speed=w.inCar?7:3.2*(1+Math.min(7,(w.stats||[])[7]||0)*.12);let nextX=Math.max(-WORLD_EXTENT/2,Math.min(WORLD_EXTENT/2,w.x+dx/len*speed)),nextY=Math.max(-WORLD_EXTENT/2,Math.min(WORLD_EXTENT/2,w.y+dy/len*speed));if(w.inCar&&!(Math.abs(nextX%2100)<90||Math.abs(nextY%2100)<90))return;w.x=nextX;w.y=nextY;if(!w.inCar){const plot=db.prepare('SELECT id,price FROM world_houses WHERE owner_id IS NULL AND x BETWEEN ? AND ? AND y BETWEEN ? AND ? ORDER BY ((x-?)*(x-?)+(y-?)*(y-?)) LIMIT 1').get(w.x-90,w.x+90,w.y-90,w.y+90,w.x,w.x,w.y,w.y);if(plot&&w.promptedHouse!==plot.id){w.promptedHouse=plot.id;sendWorld(client,'world_house_prompt',{houseId:plot.id,price:plot.price});}else if(!plot)w.promptedHouse=null;}if(!w.inCar&&Date.now()>(w.invulnerableUntil||0)&&worldTraffic.some(v=>Math.hypot(v.x-w.x,v.y-w.y)<54)){worldDeath(client,'A passing vehicle hit you');return;}sendWorld(client,'world_position',{x:w.x,y:w.y,sessionCoins:w.sessionCoins,inCar:w.inCar});}
+ else if(d.type==='world_work'){const now=Date.now();if(Math.hypot(w.x,w.y)>6500){sendWorld(client,'world_notice',{message:'Jobs are available in the city centre.'});return;}if(now-w.lastJob<10000)return;const job=WORLD_JOBS[d.job];if(!job)return;w.lastJob=now;w.sessionCoins+=job;w.statPoints=(w.statPoints||0)+1;w.upgrades.statPoints=w.statPoints;w.upgrades.stats=w.stats||[0,0,0,0,0,0,0,0];worldSave(client);sendWorld(client,'world_notice',{message:`Shift complete: +${job} session coins · +1 stat point`,sessionCoins:w.sessionCoins,statPoints:w.statPoints});}
+ else if(d.type==='world_bank'){if(Math.hypot(w.x,w.y)>6500){sendWorld(client,'world_notice',{message:'Visit the city-centre bank to deposit your session earnings.'});return;}const amount=Math.max(0,Math.floor(w.sessionCoins));if(amount){db.prepare('UPDATE users SET coins=coins+? WHERE id=?').run(amount,client.dbId);w.sessionCoins=0;worldSave(client);sendWorld(client,'profile_update',{profile:db.prepare('SELECT * FROM users WHERE id=?').get(client.dbId)});sendWorld(client,'world_notice',{message:`Deposited ${amount} coins into your account.`});}}
+ else if(d.type==='world_buy_house'){const h=db.prepare('SELECT * FROM world_houses WHERE id=?').get(String(d.houseId));const u=db.prepare('SELECT coins FROM users WHERE id=?').get(client.dbId);if(!h||!u||h.owner_id||u.coins<h.price||Math.hypot(h.x-w.x,h.y-w.y)>260)return;const tx=db.transaction(()=>{const claimed=db.prepare('UPDATE world_houses SET owner_id=?,purchased_at=?,last_seen=? WHERE id=? AND owner_id IS NULL').run(client.dbId,Date.now(),Date.now(),h.id);if(!claimed.changes)return false;const debited=db.prepare('UPDATE users SET coins=coins-? WHERE id=? AND coins>=?').run(h.price,client.dbId,h.price);if(!debited.changes)throw new Error('Insufficient funds');return true;});try{if(!tx())return;}catch(err){return;}w.promptedHouse=null;sendWorld(client,'profile_update',{profile:db.prepare('SELECT * FROM users WHERE id=?').get(client.dbId)});sendWorld(client,'world_view',{view:getWorldView(w.x,w.y)});}
+ else if(d.type==='world_buy_car'){if(Math.hypot(w.x,w.y)>6500){sendWorld(client,'world_notice',{message:'Visit a city-centre dealership to buy a car.'});return;}const car=WORLD_CARS.find(v=>v.id===d.carId),u=db.prepare('SELECT coins FROM users WHERE id=?').get(client.dbId);if(!car||!u||w.car||u.coins<car.price)return;db.prepare('UPDATE users SET coins=coins-? WHERE id=?').run(car.price,client.dbId);w.car=car.id;worldSave(client);sendWorld(client,'profile_update',{profile:db.prepare('SELECT * FROM users WHERE id=?').get(client.dbId)});sendWorld(client,'world_notice',{message:`Purchased ${car.name}. Press E near a road to drive.`});}
+ else if(d.type==='world_enter_car'){if(!w.car)return;const onRoad=(Math.abs(w.x%2100)<90||Math.abs(w.y%2100)<90);if(!w.inCar&&!onRoad){sendWorld(client,'world_notice',{message:'Move onto a road before entering your car.'});return;}w.inCar=!w.inCar;sendWorld(client,'world_position',{x:w.x,y:w.y,sessionCoins:w.sessionCoins,inCar:w.inCar});}
+ else if(d.type==='world_upgrade'){const i=Number(d.statIndex);if(!Number.isInteger(i)||i<0||i>7||w.statPoints<1)return;w.stats=w.stats||[0,0,0,0,0,0,0,0];if(w.stats[i]>=7)return;w.stats[i]++;w.statPoints--;w.upgrades.statPoints=w.statPoints;w.upgrades.stats=w.stats;worldSave(client);sendWorld(client,'world_notice',{message:'Permanent upgrade saved.',statPoints:w.statPoints,sessionCoins:w.sessionCoins});}
+ else if(d.type==='world_refresh'){sendWorld(client,'world_view',{view:getWorldView(w.x,w.y)});}
+ else if(d.type==='world_leave'){worldSave(client);client.world=null;worldClients.delete(client);}
+}
+
 // ===================== WEBSOCKET CONNECTION HANDLER =====================
 
 wss.on('connection', (ws, req) => {
@@ -2849,6 +2915,8 @@ wss.on('connection', (ws, req) => {
     if (!data) return;
 
 
+        if (data.type === 'world_join') { worldJoin(client); return; }
+        if (data.type && data.type.startsWith('world_') && data.type !== 'world_join') { worldHandle(client,data); return; }
         if(data.type === 'ping') {
             ws.send(JSON.stringify({ type: 'pong', time: data.time, locationl: SERVER_LOCATION }));
             client.lastPingTime = data.time;
@@ -2962,6 +3030,7 @@ wss.on('connection', (ws, req) => {
     });
 
     ws.on('close', () => {
+        if (client.world) { worldSave(client); worldClients.delete(client); client.world=null; }
         if (client.player) {
             // Immediately remove the player entity from the room so it leaves no hitbox
             // and doesn't appear in broadcasts or the room-players API
@@ -3139,6 +3208,7 @@ const commands = [
         name: 'lobbies',
         description: 'View active game servers and their live leaderboards',
     },
+    { name: 'world-regenerate', description: 'ADMIN: regenerate the persistent World Mode terrain' },
     {
         name: 'z-importbackup',
         description: 'Restore the database from a backup zip',
@@ -3287,6 +3357,15 @@ discordClient.once('clientReady', async () => {
 
 discordClient.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
+
+    if (interaction.commandName === 'world-regenerate') {
+        const allowed=(process.env.ADMIN_DISCORD_IDS||'').split(',').map(v=>v.trim()).filter(Boolean);
+        if (!allowed.includes(interaction.user.id)) return interaction.reply({content:'Not authorized.',ephemeral:true});
+        db.prepare('DELETE FROM world_meta WHERE id=1').run();
+        db.prepare('DELETE FROM world_houses').run();
+        worldTraffic=[]; worldCitizens=[]; ensureWorld();
+        return interaction.reply({content:'World terrain seed regenerated. Existing player progress and balances were preserved; all unowned/owned house plots were cleared.',ephemeral:true});
+    }
 
     // ======================
     // ACCOUNT COMMAND
