@@ -458,7 +458,7 @@ app.get('/auth/discord/callback', async (req, res) => {
                 client_secret: process.env.DISCORD_CLIENT_SECRET,
                 code: code,
                 grant_type: 'authorization_code',
-                redirect_uri: `https://ditanksgg.up.railway.app/auth/discord/callback`
+                redirect_uri: `https://ditanks.up.railway.app/auth/discord/callback`
             })
         });
 
