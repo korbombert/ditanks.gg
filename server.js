@@ -441,7 +441,7 @@ app.get('/auth/google/callback', async (req, res) => {
 });
 
 app.get('/auth/discord', (req, res) => {
-    const url = `https://discord.com/oauth2/authorize?client_id=1487399148566089828&response_type=code&redirect_uri=https%3A%2F%2Fditanksgg.up.railway.app%2Fauth%2Fdiscord%2Fcallback&scope=identify`;
+    const url = `https://discord.com/oauth2/authorize?client_id=1487399148566089828&response_type=code&redirect_uri=https%3A%2F%2Fditanks.up.railway.app%2Fauth%2Fdiscord%2Fcallback&scope=identify`;
     res.redirect(url);
 });
 
@@ -458,7 +458,7 @@ app.get('/auth/discord/callback', async (req, res) => {
                 client_secret: process.env.DISCORD_CLIENT_SECRET,
                 code: code,
                 grant_type: 'authorization_code',
-                redirect_uri: `https://ditanksgg.up.railway.app/auth/discord/callback`
+                redirect_uri: `https://ditanks.up.railway.app/auth/discord/callback`
             })
         });
 
