@@ -802,38 +802,40 @@
 <!-- Achievement toast feed -->
 <div id="achievement-feed"></div>
 
-<!-- Persistent World Mode HUD -->
-<div id="world-hud" style="display:none;position:fixed;z-index:150;top:16px;right:16px;width:min(330px,calc(100vw - 32px));box-sizing:border-box;background:linear-gradient(155deg,rgba(24,34,42,.97),rgba(10,17,23,.97));color:#f4f7fa;border:1px solid rgba(180,205,220,.28);border-radius:14px;padding:14px;font:13px Ubuntu,sans-serif;box-shadow:0 12px 36px rgba(0,0,0,.42);gap:10px;backdrop-filter:blur(12px);max-height:calc(100vh - 32px);overflow:auto">
- <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:10px">
-  <div><div style="font-size:17px;font-weight:800;letter-spacing:.09em">WORLD DISTRICT</div><div style="font-size:10px;color:#9fb4c1;margin-top:3px">FREE ROAM · FFA TANK PHYSICS</div></div>
-  <div style="text-align:right"><div style="font-size:10px;color:#9fb4c1">UNBANKED</div><b style="font-size:20px;color:#ffd477">🪙 <span id="world-session-coins">0</span></b></div>
- </div>
- <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-  <div style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);border-radius:9px;padding:9px"><div style="font-size:10px;color:#9fb4c1">STAT POINTS</div><b id="world-stat-points" style="font-size:19px">0</b></div>
-  <div style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);border-radius:9px;padding:9px"><div style="font-size:10px;color:#9fb4c1">POSITION</div><b id="world-coordinates" style="font-size:11px;display:block;margin-top:5px">X 0 · Y 0</b></div>
- </div>
- <div style="font-size:10px;font-weight:700;letter-spacing:.08em;color:#9fb4c1">CITY SERVICES</div>
- <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
-  <button class="world-action" onclick="worldWork('delivery')">📦 Delivery <small>+35 cash</small></button>
-  <button class="world-action" onclick="worldWork('farming')">🌾 Farm shift <small>+28 cash</small></button>
-  <button class="world-action" onclick="worldWork('construction')">🏗 Construction <small>+45 cash</small></button>
-  <button class="world-action world-action-primary" onclick="worldBank()">🏦 Bank cash</button>
- </div>
- <div style="font-size:10px;font-weight:700;letter-spacing:.08em;color:#9fb4c1;margin-top:2px">DEALERSHIP</div>
- <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px">
-  <button id="world-car-compact" class="world-car" onclick="worldBuyCar('compact')">COMPACT<small>2,500</small></button>
-  <button id="world-car-sedan" class="world-car" onclick="worldBuyCar('sedan')">SEDAN<small>6,500</small></button>
-  <button id="world-car-sport" class="world-car" onclick="worldBuyCar('sport')">SPORT<small>18,000</small></button>
- </div>
- <div id="world-message" style="min-height:22px;color:#ffdb8a;font-size:11px;padding:4px 2px"></div>
- <div style="border-top:1px solid rgba(255,255,255,.1);padding-top:9px;color:#9fb4c1;font-size:10px;line-height:1.55">WASD / Arrows move · Mouse aim · Click shoot · Shift repel · E auto-fire · G vehicle · M upgrades<br>Shapes award score and stat points exactly like arena FFA.</div>
-</div>
+<!-- World Mode UI: compact status chip (top-left), toasts, task bar and the interaction bubble that is
+     anchored to buildings / cars in the world (bank, dealership, doors...). Stat points use the normal in-game stats panel. -->
+<div id="world-chip"></div>
+<div id="world-toast"></div>
+<div id="world-task"><span>Working…</span><div class="wt-bar"><i></i></div></div>
+<div id="world-prompt"></div>
 <style>
-#world-hud .world-action,#world-hud .world-car{appearance:none;border:1px solid rgba(164,195,211,.22);border-radius:8px;background:linear-gradient(180deg,rgba(68,89,103,.72),rgba(35,51,62,.88));color:#f5f8fa;padding:9px 7px;font:700 11px Ubuntu,sans-serif;text-align:left;cursor:pointer;min-width:0;transition:transform .12s,border-color .12s,filter .12s}
-#world-hud .world-action:hover,#world-hud .world-car:hover{transform:translateY(-1px);border-color:rgba(180,220,240,.65);filter:brightness(1.12)}
-#world-hud .world-action small,#world-hud .world-car small{display:block;color:#a9c0cc;font-size:9px;font-weight:500;margin-top:4px}
-#world-hud .world-action-primary{background:linear-gradient(180deg,#3d846b,#245b4b);border-color:rgba(128,220,177,.35)}
-#world-hud .world-car{text-align:center;font-size:9px;letter-spacing:.05em;background:linear-gradient(180deg,rgba(86,100,112,.85),rgba(37,47,57,.95))}
+#world-chip{display:none;position:fixed;z-index:140;top:14px;left:20px;gap:8px;flex-wrap:wrap;max-width:min(440px,calc(100vw - 90px));pointer-events:none;font-family:'Ubuntu',sans-serif}
+#world-chip .wc-row{display:flex;align-items:center;gap:9px;background:rgba(14,20,26,.74);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.13);border-radius:11px;padding:6px 12px 6px 10px;color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.28)}
+#world-chip .wc-ico{font-size:18px}
+#world-chip small{display:block;font-size:9px;letter-spacing:.09em;color:#9fb4c1;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#world-chip b{display:block;font-size:14px;color:#ffd477;line-height:1.15}
+#world-chip .wc-warn{border-color:rgba(255,120,100,.7);animation:wcPulse .9s ease-in-out infinite alternate}
+#world-chip .wc-warn b{color:#ff9a86}
+@keyframes wcPulse{from{box-shadow:0 0 0 rgba(255,100,80,0)}to{box-shadow:0 0 14px rgba(255,100,80,.6)}}
+#world-toast{position:fixed;z-index:160;top:18px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none;width:min(560px,calc(100vw - 30px));font-family:'Ubuntu',sans-serif}
+#world-toast .wt{background:rgba(14,20,26,.9);border:1px solid rgba(255,255,255,.16);color:#f3f6f8;border-radius:10px;padding:8px 14px;font-size:13px;text-align:center;box-shadow:0 6px 18px rgba(0,0,0,.35);transition:opacity .5s}
+#world-toast .wt.good{border-color:rgba(120,220,160,.55);color:#c8f5d9}
+#world-toast .wt.bad{border-color:rgba(255,120,110,.65);color:#ffc6bf}
+#world-toast .wt.warn{border-color:rgba(255,200,90,.65);color:#ffe3a6}
+#world-task{display:none;position:fixed;z-index:140;bottom:96px;left:50%;transform:translateX(-50%);width:260px;background:rgba(14,20,26,.85);border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:8px 12px;color:#fff;font:13px 'Ubuntu',sans-serif;text-align:center}
+#world-task .wt-bar{height:8px;border-radius:5px;background:rgba(255,255,255,.12);margin-top:6px;overflow:hidden}
+#world-task .wt-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#4cc98a,#9be86a);transition:width .25s linear}
+#world-prompt{display:none;position:fixed;z-index:145;left:0;top:0;min-width:210px;max-width:290px;box-sizing:border-box;background:rgba(15,22,29,.92);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);border:1px solid rgba(160,200,225,.35);border-radius:13px;padding:10px 12px 11px;color:#eaf1f5;font-family:'Ubuntu',sans-serif;box-shadow:0 10px 28px rgba(0,0,0,.45);will-change:transform}
+#world-prompt::after{content:'';position:absolute;left:50%;bottom:-7px;width:12px;height:12px;background:rgba(15,22,29,.92);border-right:1px solid rgba(160,200,225,.35);border-bottom:1px solid rgba(160,200,225,.35);transform:translateX(-50%) rotate(45deg)}
+#world-prompt .wp-title{font-weight:700;font-size:15px;color:#fff;margin-bottom:3px;text-align:center}
+#world-prompt .wp-line{font-size:11.5px;color:#a9c0cc;text-align:center;line-height:1.35}
+#world-prompt .wp-actions{display:flex;flex-direction:column;gap:6px;margin-top:9px}
+#world-prompt .wp-btn{appearance:none;display:flex;align-items:center;justify-content:center;gap:8px;border:1px solid rgba(128,220,177,.4);border-radius:9px;background:linear-gradient(180deg,#3d846b,#245b4b);color:#fff;font:600 12.5px 'Ubuntu',sans-serif;padding:7px 10px;cursor:pointer;transition:filter .12s,transform .12s}
+#world-prompt .wp-btn:hover:not(:disabled){filter:brightness(1.15);transform:translateY(-1px)}
+#world-prompt .wp-btn:disabled{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.12);color:#7b8c96;cursor:not-allowed}
+#world-prompt kbd{background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.35);border-radius:5px;padding:0 6px;font:700 11px 'Ubuntu',sans-serif}
+#world-prompt.mini{min-width:150px;padding:7px 10px 8px}
+#world-prompt.mini .wp-title{font-size:13px}
 </style>
 <!-- Game canvas -->
 <canvas id="gameCanvas"></canvas>
