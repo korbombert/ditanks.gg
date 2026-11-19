@@ -385,7 +385,8 @@ let fov = BASE_FOV;
 
 function updateVisualFov() {
     // World Mode is closer-in than the normal arena, but uses the same camera math.
-    fov = baseFov * (isWorldMode ? 0.74 : 1) * (powerupActive(myStats, "fov") ? 1.3 : 1);
+    fovTarget = baseFov * (isWorldMode ? 0.74 * worldFovMultiplier() : 1) * (powerupActive(myStats, "fov") ? 1.3 : 1);
+    if (!isWorldMode) fov = fovTarget;        // World Mode eases toward the target in draw()
 }
 
 function worldToScreenX(x) {
@@ -1688,7 +1689,7 @@ function updateSpectateLabel() {
 function exitGame() {
     if(confirm("Are you sure you want to disconnect and return to the menu?")) {
         if(isWorldMode) worldSend('world_leave');
-        isWorldMode=false; worldState=null; worldView=null;
+        isWorldMode=false;
         location.reload();
     }
 }
@@ -2013,202 +2014,650 @@ function readBinaryMessage(ab) {
 // ===================== CONNECTION =====================
 
 // ===================== WORLD MODE CLIENT =====================
-let isWorldMode=false, pendingWorldJoin=false, worldState=null, worldView=null, worldLastView=0;
-function worldSend(type,extra={}){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type,...extra}));}
-function enterWorldMode(){
- if(!sessionToken){alert('World Mode requires a logged-in Google or Discord account.');return;}
- if(!ws||ws.readyState!==1){const region=document.getElementById('regionInput').value;const mode=document.getElementById('gameModeInput').value;pendingWorldJoin=true;connectWS(region,mode);return;}
- pendingWorldJoin=true;worldSend('world_join');
-}
-function beginWorldMode(data){
- isWorldMode=true;worldState=data.world;worldView=data.view;gameMode='WORLD';
- // World is an ordinary FFA Room. Keep the real server Entity id so the
- // shared camera, tank renderer, minimap, aim and interpolation all target it.
- myId=data.playerId??myId;myTeam=0;spectateId=null;isSpectating=false;
- gameState={entities:[],bullets:[],drones:[]};renderEntities.clear();lastBullets.clear();lastDrones.clear();
- myStats={...myStats,level:1,xp:0,score:0,statPoints:0,stats:[...(data.world?.stats||[0,0,0,0,0,0,0,0])],tankType:'Basic'};
- updateVisualFov();updateUI();checkUpgrades();
- document.getElementById('menu-overlay').style.display='none';document.getElementById('account-panel').style.display='none';document.getElementById('changelog-panel').style.display='none';
- document.getElementById('game-ui').style.display='block';document.getElementById('exit-btn').style.display='flex';document.getElementById('world-hud').style.display='grid';
- document.getElementById('death-screen').style.display='none';
- const extent=worldView?.extent||50400, px=extent/2+(worldState?.x||180), py=extent/2+(worldState?.y||180);
- camera.x=px-(canvas.width*fov)/2;camera.y=py-(canvas.height*fov)/2;
- worldLastView=performance.now();updateWorldHud();if(!window.drawing){window.drawing=true;requestAnimationFrame(draw);}
-}
-function updateWorldHud(){
- if(!worldState)return;
- const cash=document.getElementById('world-session-coins'),points=document.getElementById('world-stat-points'),coords=document.getElementById('world-coordinates');
- if(cash)cash.innerText=numberWithCommas(worldState.sessionCoins||0);
- if(points)points.innerText=myStats.statPoints||0;
- const me=gameState.entities.find(e=>e.id===myId),extent=worldView?.extent||50400;
- if(coords)coords.innerText=me?`X ${Math.round(me.x-extent/2)}  ·  Y ${Math.round(me.y-extent/2)}`:`X ${Math.round(worldState.x||0)}  ·  Y ${Math.round(worldState.y||0)}`;
- ['compact','sedan','sport'].forEach(id=>{const b=document.getElementById('world-car-'+id);if(!b)return;const owned=worldState.car===id;b.disabled=!!worldState.car;b.style.opacity=owned?'1':(worldState.car?'0.42':'1');b.innerHTML=owned?`${id.toUpperCase()}<small>OWNED</small>`:`${id.toUpperCase()}<small>${id==='compact'?'2,500':id==='sedan'?'6,500':'18,000'}</small>`;});
-}
-function worldWork(job){worldSend('world_work',{job});}
-function worldBank(){worldSend('world_bank');}
-function worldBuyCar(carId){worldSend('world_buy_car',{carId});}
-function worldBuyHouse(id){if(confirm('Purchase this property for the listed price?'))worldSend('world_buy_house',{houseId:id});}
-function drawWorldEnvironment(){
-    if (!worldView?.cells) return;
-    const toX = x => worldToScreenX((worldView.extent || 50400)/2 + x);
-    const toY = y => worldToScreenY((worldView.extent || 50400)/2 + y);
-    const tile = worldView.tile || 420;
-    const visible = (x,y,w=0,h=0) => x < canvas.width+180 && y < canvas.height+180 && x+w > -180 && y+h > -180;
-    ctx.save();
-    // A restrained, game-like palette and crisp tile edges; no oversized UI-style blocks.
-    worldView.cells.forEach(cell => {
-        const ox=(cell.gx-60)*tile, oy=(cell.gy-60)*tile;
-        const x=toX(ox), y=toY(oy), size=scaleSize(tile);
-        if(!visible(x,y,size,size)) return;
-        const palette={city:'#858b8e',suburb:'#86a875',park:'#61925a',farmland:'#b5a064'};
-        ctx.fillStyle=palette[cell.biome]||palette.suburb;ctx.fillRect(x,y,size+1,size+1);
-        // subtle ground grain and parcel seams
-        ctx.strokeStyle='rgba(255,255,255,.075)';ctx.lineWidth=1;
-        for(let i=1;i<4;i++){ctx.beginPath();ctx.moveTo(x+size*i/4,y+3);ctx.lineTo(x+size*i/4,y+size-3);ctx.stroke();}
-        if(cell.biome==='farmland'){
-            ctx.fillStyle='#a98e4e';ctx.fillRect(x+scaleSize(12),y+scaleSize(12),size-scaleSize(24),size-scaleSize(24));
-            ctx.strokeStyle='rgba(235,213,139,.72)';ctx.lineWidth=Math.max(1,scaleSize(4));
-            for(let q=24;q<tile-12;q+=24){ctx.beginPath();ctx.moveTo(toX(ox+q),toY(oy+16));ctx.lineTo(toX(ox+q),toY(oy+tile-16));ctx.stroke();}
-        }
-        (cell.roads||[]).forEach(r=>{
-            const rw=r.w||88;
-            if(r.axis==='horizontal'){
-                const ry=toY(r.y), roadH=scaleSize(rw), shoulder=scaleSize(22);
-                ctx.fillStyle='#c5c2b6';ctx.fillRect(x,ry-roadH/2-shoulder,size,roadH+shoulder*2);
-                ctx.fillStyle='#343b40';ctx.fillRect(x,ry-roadH/2,size,roadH);
-                ctx.strokeStyle='#e7d9a1';ctx.lineWidth=Math.max(1,scaleSize(3));ctx.setLineDash([scaleSize(26),scaleSize(20)]);ctx.beginPath();ctx.moveTo(x,ry);ctx.lineTo(x+size,ry);ctx.stroke();ctx.setLineDash([]);
-                ctx.strokeStyle='rgba(255,255,255,.42)';ctx.lineWidth=Math.max(1,scaleSize(2));ctx.beginPath();ctx.moveTo(x,ry-roadH/2+scaleSize(8));ctx.lineTo(x+size,ry-roadH/2+scaleSize(8));ctx.moveTo(x,ry+roadH/2-scaleSize(8));ctx.lineTo(x+size,ry+roadH/2-scaleSize(8));ctx.stroke();
-            }else{
-                const rx=toX(r.x),roadW=scaleSize(rw),shoulder=scaleSize(22);
-                ctx.fillStyle='#c5c2b6';ctx.fillRect(rx-roadW/2-shoulder,y,roadW+shoulder*2,size);
-                ctx.fillStyle='#343b40';ctx.fillRect(rx-roadW/2,y,roadW,size);
-                ctx.strokeStyle='#e7d9a1';ctx.lineWidth=Math.max(1,scaleSize(3));ctx.setLineDash([scaleSize(26),scaleSize(20)]);ctx.beginPath();ctx.moveTo(rx,y);ctx.lineTo(rx,y+size);ctx.stroke();ctx.setLineDash([]);
-                ctx.strokeStyle='rgba(255,255,255,.42)';ctx.lineWidth=Math.max(1,scaleSize(2));ctx.beginPath();ctx.moveTo(rx-roadW/2+scaleSize(8),y);ctx.lineTo(rx-roadW/2+scaleSize(8),y+size);ctx.moveTo(rx+roadW/2-scaleSize(8),y);ctx.lineTo(rx+roadW/2-scaleSize(8),y+size);ctx.stroke();
-            }
-        });
-        (cell.buildings||[]).forEach(b=>{
-            const bx=toX(b.x),by=toY(b.y),bw=scaleSize(b.w),bh=scaleSize(b.h);
-            if(!visible(bx,by,bw,bh))return;
-            if(b.kind==='tower'){
-                // Layered city tower: cast shadow, side elevation, roof slab,
-                // facade panels, recessed window bays and rooftop machinery.
-                const d=scaleSize(18),tone=b.tone||0;
-                const walls=['#526978','#657d89','#596b80','#71838a','#4f6575','#687b86'];
-                const wall=walls[tone%walls.length],side=['#344955','#405663','#354958','#4a5b63'][tone%4];
-                ctx.fillStyle='rgba(8,16,22,.34)';ctx.beginPath();ctx.moveTo(bx+scaleSize(8),by+scaleSize(10));ctx.lineTo(bx+bw+d+scaleSize(10),by+scaleSize(10));ctx.lineTo(bx+bw+d+scaleSize(10),by+bh+d);ctx.lineTo(bx+scaleSize(8),by+bh+d);ctx.closePath();ctx.fill();
-                ctx.fillStyle=side;ctx.beginPath();ctx.moveTo(bx+bw,by);ctx.lineTo(bx+bw+d,by-scaleSize(8));ctx.lineTo(bx+bw+d,by+bh-scaleSize(8));ctx.lineTo(bx+bw,by+bh);ctx.closePath();ctx.fill();
-                ctx.fillStyle='#273c49';ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(bx+d,by-scaleSize(8));ctx.lineTo(bx+bw+d,by-scaleSize(8));ctx.lineTo(bx+bw,by);ctx.closePath();ctx.fill();
-                ctx.fillStyle=wall;ctx.fillRect(bx,by,bw,bh);
-                const floors=Math.max(5,b.floors||10),cols=Math.max(3,Math.floor(b.w/19)),fw=bw/cols,fh=bh/floors;
-                for(let row=0;row<floors;row++){
-                    ctx.fillStyle=row%4===0?'rgba(13,30,41,.18)':'rgba(255,255,255,.045)';ctx.fillRect(bx,by+row*fh,bw,fh);
-                    for(let col=0;col<cols;col++){
-                        const wx=bx+col*fw+fw*.18,wy=by+row*fh+fh*.19,ww=fw*.64,wh=fh*.58;
-                        ctx.fillStyle='#263f50';ctx.fillRect(wx-scaleSize(2),wy-scaleSize(2),ww+scaleSize(4),wh+scaleSize(4));
-                        ctx.fillStyle=((row*7+col+(b.seed||0))%13===0)?'#e9cb82':'#9fc6d4';ctx.fillRect(wx,wy,ww,wh);
-                        ctx.fillStyle='rgba(255,255,255,.28)';ctx.fillRect(wx,wy,Math.max(1,ww*.13),wh);
-                    }
-                }
-                ctx.fillStyle='#263a45';ctx.fillRect(bx-scaleSize(3),by+bh-scaleSize(8),bw+scaleSize(3),scaleSize(9));
-                ctx.fillStyle='#91a9b4';ctx.fillRect(bx+scaleSize(6),by+bh-scaleSize(5),bw-scaleSize(12),scaleSize(2));
-                // Rooftop plant room and mechanical vents.
-                ctx.fillStyle='#344b58';ctx.fillRect(bx+bw*.58,by-scaleSize(15),bw*.28,scaleSize(15));
-                ctx.fillStyle='#9eafb5';ctx.fillRect(bx+bw*.62,by-scaleSize(19),bw*.18,scaleSize(4));
-                for(let vent=0;vent<3;vent++){ctx.fillStyle='#243a46';ctx.fillRect(bx+scaleSize(9+vent*15),by+scaleSize(8),scaleSize(8),scaleSize(5));}
-                ctx.strokeStyle='rgba(15,27,34,.7)';ctx.lineWidth=Math.max(1,scaleSize(1.5));ctx.strokeRect(bx,by,bw,bh);
-            }else if(b.kind==='house'){
-                // Residential lot with lawn, driveway, front wall, roof planes,
-                // chimney, porch, garage and garden/fence details.
-                const roofPalette=['#8f5140','#6e4b42','#a56a4b','#566a78','#745a49','#8a6847'];
-                const wallPalette=['#e1d5bd','#d5c6a8','#d5d9d1','#e2cdb7','#c9d1d0'];
-                const roof=roofPalette[(b.roof||0)%roofPalette.length],wall=wallPalette[(b.style||0)%wallPalette.length];
-                ctx.fillStyle='rgba(0,0,0,.22)';ctx.beginPath();ctx.ellipse(bx+bw*.54,by+bh*.88,bw*.62,bh*.28,0,0,Math.PI*2);ctx.fill();
-                ctx.fillStyle='#668653';ctx.fillRect(bx-scaleSize(9),by+bh-scaleSize(8),bw+scaleSize(18),scaleSize(15));
-                // Yard path and driveway to the street-facing edge.
-                ctx.fillStyle='#b9b5a6';ctx.fillRect(bx+bw*.68,by+bh*.48,bw*.24,bh*.58);
-                ctx.fillStyle='#d1cbb9';ctx.fillRect(bx+bw*.70,by+bh*.5,bw*.2,bh*.54);
-                // Main wall and right-side shaded elevation.
-                ctx.fillStyle=wall;ctx.fillRect(bx+scaleSize(4),by+scaleSize(17),bw-scaleSize(8),bh-scaleSize(20));
-                ctx.fillStyle='rgba(55,48,42,.18)';ctx.beginPath();ctx.moveTo(bx+bw*.5,by+scaleSize(20));ctx.lineTo(bx+bw-scaleSize(4),by+scaleSize(20));ctx.lineTo(bx+bw-scaleSize(4),by+bh-scaleSize(4));ctx.lineTo(bx+bw*.5,by+bh-scaleSize(4));ctx.closePath();ctx.fill();
-                // Roof ridge and two roof planes.
-                ctx.fillStyle='#4b3a34';ctx.beginPath();ctx.moveTo(bx-scaleSize(8),by+scaleSize(23));ctx.lineTo(bx+bw*.5,by-scaleSize(13));ctx.lineTo(bx+bw+scaleSize(8),by+scaleSize(23));ctx.lineTo(bx+bw+scaleSize(3),by+scaleSize(31));ctx.lineTo(bx+bw*.5,by+scaleSize(1));ctx.lineTo(bx-scaleSize(3),by+scaleSize(31));ctx.closePath();ctx.fill();
-                ctx.fillStyle=roof;ctx.beginPath();ctx.moveTo(bx-scaleSize(7),by+scaleSize(22));ctx.lineTo(bx+bw*.5,by-scaleSize(12));ctx.lineTo(bx+bw*.5,by+scaleSize(4));ctx.lineTo(bx+scaleSize(1),by+scaleSize(30));ctx.closePath();ctx.fill();
-                ctx.fillStyle=roofPalette[((b.roof||0)+1)%roofPalette.length];ctx.beginPath();ctx.moveTo(bx+bw*.5,by-scaleSize(12));ctx.lineTo(bx+bw+scaleSize(7),by+scaleSize(22));ctx.lineTo(bx+bw-scaleSize(2),by+scaleSize(30));ctx.lineTo(bx+bw*.5,by+scaleSize(4));ctx.closePath();ctx.fill();
-                // Chimney and front windows.
-                ctx.fillStyle='#6b6258';ctx.fillRect(bx+bw*.72,by-scaleSize(9),scaleSize(9),scaleSize(21));ctx.fillStyle='#a99c8d';ctx.fillRect(bx+bw*.7,by-scaleSize(11),scaleSize(13),scaleSize(4));
-                [bx+scaleSize(10),bx+bw-scaleSize(28)].forEach(wx=>{
-                    ctx.fillStyle='#594b40';ctx.fillRect(wx,by+scaleSize(34),scaleSize(18),scaleSize(19));
-                    ctx.fillStyle='#8fc0d0';ctx.fillRect(wx+scaleSize(2),by+scaleSize(36),scaleSize(14),scaleSize(15));
-                    ctx.fillStyle='#dce5df';ctx.fillRect(wx+scaleSize(8),by+scaleSize(36),scaleSize(2),scaleSize(15));ctx.fillRect(wx+scaleSize(2),by+scaleSize(43),scaleSize(14),scaleSize(2));
-                });
-                // Porch, front door and garage.
-                if(b.porch){ctx.fillStyle='#d2c3a8';ctx.fillRect(bx+bw*.34,by+bh-scaleSize(24),bw*.34,scaleSize(8));ctx.fillStyle='#5d5044';ctx.fillRect(bx+bw*.36,by+bh-scaleSize(32),scaleSize(4),scaleSize(13));ctx.fillRect(bx+bw*.65,by+bh-scaleSize(32),scaleSize(4),scaleSize(13));}
-                ctx.fillStyle='#684a38';ctx.fillRect(bx+bw*.43,by+bh-scaleSize(31),scaleSize(17),scaleSize(31));ctx.fillStyle='#d8bd78';ctx.beginPath();ctx.arc(bx+bw*.43+scaleSize(12),by+bh-scaleSize(16),scaleSize(2),0,Math.PI*2);ctx.fill();
-                if(b.garage){ctx.fillStyle='#d7d8d2';ctx.fillRect(bx+bw-scaleSize(27),by+bh-scaleSize(31),scaleSize(23),scaleSize(25));ctx.strokeStyle='#7d8888';ctx.lineWidth=1;ctx.strokeRect(bx+bw-scaleSize(27),by+bh-scaleSize(31),scaleSize(23),scaleSize(25));for(let gy=0;gy<3;gy++){ctx.beginPath();ctx.moveTo(bx+bw-scaleSize(26),by+bh-scaleSize(25-gy*7));ctx.lineTo(bx+bw-scaleSize(5),by+bh-scaleSize(25-gy*7));ctx.stroke();}}
-                // Optional low garden fence and hedges.
-                ctx.fillStyle='#47734a';ctx.fillRect(bx-scaleSize(8),by+bh+scaleSize(5),bw+scaleSize(16),scaleSize(5));
-                if(b.fence){ctx.strokeStyle='#e5ddc9';ctx.lineWidth=Math.max(1,scaleSize(2));ctx.beginPath();ctx.moveTo(bx-scaleSize(10),by+bh+scaleSize(13));ctx.lineTo(bx+bw+scaleSize(10),by+bh+scaleSize(13));ctx.stroke();for(let fx=0;fx<=6;fx++){ctx.beginPath();ctx.moveTo(bx-scaleSize(10)+fx*bw/6,by+bh+scaleSize(8));ctx.lineTo(bx-scaleSize(10)+fx*bw/6,by+bh+scaleSize(17));ctx.stroke();}}
-            }else if(b.kind==='trees'){
-                for(let i=0;i<7;i++){const tx=bx+scaleSize((i%4)*42-35),ty=by+scaleSize(Math.floor(i/4)*48-24);ctx.fillStyle='rgba(0,0,0,.18)';ctx.beginPath();ctx.ellipse(tx+scaleSize(5),ty+scaleSize(13),scaleSize(22),scaleSize(11),0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#604a35';ctx.fillRect(tx-scaleSize(3),ty+scaleSize(2),scaleSize(6),scaleSize(23));ctx.fillStyle=['#2e6d3e','#3c8048','#4b914f'][i%3];ctx.beginPath();ctx.arc(tx,ty,scaleSize(21),0,Math.PI*2);ctx.fill();ctx.fillStyle='rgba(255,255,255,.13)';ctx.beginPath();ctx.arc(tx-scaleSize(6),ty-scaleSize(7),scaleSize(7),0,Math.PI*2);ctx.fill();}
-            }else if(b.kind==='bench'){
-                ctx.fillStyle='rgba(0,0,0,.22)';ctx.fillRect(bx+scaleSize(2),by+scaleSize(4),bw,bh);
-                ctx.fillStyle='#674b32';ctx.fillRect(bx,by,bw,bh);ctx.fillStyle='#a47b4f';ctx.fillRect(bx,by-scaleSize(5),bw,scaleSize(6));ctx.fillStyle='#44372b';ctx.fillRect(bx+scaleSize(5),by+bh-scaleSize(1),scaleSize(4),scaleSize(8));ctx.fillRect(bx+bw-scaleSize(9),by+bh-scaleSize(1),scaleSize(4),scaleSize(8));
-            }else if(b.kind==='field'){
-                ctx.fillStyle='#a98e4e';ctx.fillRect(bx,by,bw,bh);ctx.strokeStyle='#dfc87e';ctx.lineWidth=Math.max(1,scaleSize(4));for(let q=12;q<b.w;q+=22){ctx.beginPath();ctx.moveTo(bx+scaleSize(q),by+scaleSize(4));ctx.lineTo(bx+scaleSize(q),by+bh-scaleSize(4));ctx.stroke();}
-            }
-        });
-        // Lamp posts and roadside trees are deterministic decorative props.
-        if(cell.biome==='park'||cell.biome==='suburb')for(let i=0;i<2;i++){
-            const lx=toX(ox+70+i*245),ly=toY(oy+100+i*175);
-            if(!visible(lx-12,ly-40,24,45))continue;
-            ctx.strokeStyle='#384346';ctx.lineWidth=Math.max(1,scaleSize(4));ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(lx,ly-scaleSize(31));ctx.lineTo(lx+scaleSize(8),ly-scaleSize(36));ctx.stroke();ctx.fillStyle='#f5dfa0';ctx.beginPath();ctx.arc(lx+scaleSize(8),ly-scaleSize(36),scaleSize(5),0,Math.PI*2);ctx.fill();
-        }
-    });
-    // Bank / city landmark is anchored in world coordinates, not screen coordinates.
-    const bx=toX(-95),by=toY(-105),bw=scaleSize(190),bh=scaleSize(150);
-    if(visible(bx,by,bw,bh)){
-        ctx.fillStyle='rgba(0,0,0,.25)';ctx.fillRect(bx+scaleSize(8),by+scaleSize(10),bw,bh);
-        ctx.fillStyle='#d6d9d5';ctx.fillRect(bx,by,bw,bh);ctx.fillStyle='#345b77';ctx.fillRect(bx+scaleSize(10),by+scaleSize(10),bw-scaleSize(20),scaleSize(42));
-        ctx.fillStyle='#fff';ctx.font=`bold ${Math.max(8,scaleSize(19))}px Ubuntu`;ctx.textAlign='center';ctx.fillText('BANK',bx+bw/2,by+scaleSize(38));
-        for(let i=0;i<4;i++){ctx.fillStyle='#9ac4d1';ctx.fillRect(bx+scaleSize(15+i*42),by+scaleSize(67),scaleSize(27),scaleSize(73));ctx.strokeStyle='#b7b4a8';ctx.strokeRect(bx+scaleSize(15+i*42),by+scaleSize(67),scaleSize(27),scaleSize(73));}
-        ctx.fillStyle='#78573d';ctx.fillRect(bx+bw/2-scaleSize(15),by+bh-scaleSize(62),scaleSize(30),scaleSize(62));
+// The server owns the world (layout, houses, cars, jobs, interiors). The client only streams the static
+// layout in chunks, draws it, and sends inputs / "interact" requests.
+let isWorldMode = false, pendingWorldJoin = false;
+let worldState = { sessionCoins: 0, bank: 0, job: null, car: null, house: null, scene: 'ext' };
+const WC = {
+    center: 25200, extent: 50400, chunk: 1800, nch: 28, roads: [], cars: [], carColors: [], companies: [], spawn: null, bank: null, dealer: null,
+    fireMs: 900000, taskMs: 8000, chunks: new Map(), houses: new Map(), dyn: new Map(), scene: 'ext', interior: null, intKey: null,
+    prompt: null, task: -1, pos: { x: 0, y: 0 }, allBld: new Map(), shapeDots: []
+};
+// Car-park bay layout: identical to the server's lotBays() so painted bays match where cars really park.
+function lotBays(lot) {
+    const BW = 54, BD = 96, pad = 8, out = [];
+    const cols = Math.max(1, Math.floor((lot.w - 2 * pad) / BW));
+    const x0 = lot.x + (lot.w - cols * BW) / 2;
+    const rows = [];
+    if (lot.h >= BD + 2 * pad) rows.push({ y: lot.y + pad, a: -Math.PI / 2 });
+    if (lot.h >= BD * 2 + 40) rows.push({ y: lot.y + lot.h - pad - BD, a: Math.PI / 2 });
+    if (lot.h >= BD * 4 + 160) {
+        rows.push({ y: lot.y + lot.h / 2 - BD, a: -Math.PI / 2 });
+        rows.push({ y: lot.y + lot.h / 2, a: Math.PI / 2 });
     }
-    // Detailed top-down traffic vehicles: wheel arches, bumpers, hood, roof,
-    // glazing, mirrors, lamps and specular highlights. These are props only;
-    // they never replace or alter the player's arena tank entity.
-    (worldView.cars||[]).forEach(car=>{
-        const x=toX(car.x),y=toY(car.y);if(!visible(x-scaleSize(34),y-scaleSize(22),scaleSize(68),scaleSize(44)))return;
-        const sc=scaleSize;ctx.save();ctx.translate(x,y);ctx.rotate(car.dir===1?0:Math.PI/2);
-        ctx.fillStyle='rgba(0,0,0,.32)';ctx.beginPath();ctx.ellipse(sc(1),sc(3),sc(31),sc(17),0,0,Math.PI*2);ctx.fill();
-        ctx.fillStyle='#11171c';[[-20,-16],[12,-16],[-20,10],[12,10]].forEach(([wx,wy])=>{ctx.beginPath();ctx.roundRect(sc(wx),sc(wy),sc(10),sc(7),sc(2));ctx.fill();});
-        ctx.fillStyle='#202a31';ctx.beginPath();ctx.roundRect(sc(-29),sc(-15),sc(58),sc(30),sc(9));ctx.fill();
-        ctx.fillStyle=car.color||'#c7d1d8';ctx.beginPath();ctx.roundRect(sc(-27),sc(-14),sc(54),sc(28),sc(8));ctx.fill();
-        ctx.fillStyle='rgba(255,255,255,.26)';ctx.beginPath();ctx.roundRect(sc(-23),sc(-12),sc(44),sc(4),sc(2));ctx.fill();
-        ctx.fillStyle='#263c4a';ctx.beginPath();ctx.roundRect(sc(-12),sc(-11),sc(25),sc(22),sc(5));ctx.fill();
-        ctx.fillStyle='#8bb7c9';ctx.beginPath();ctx.moveTo(sc(-9),sc(-9));ctx.lineTo(sc(-1),sc(-9));ctx.lineTo(sc(-1),sc(9));ctx.lineTo(sc(-9),sc(9));ctx.closePath();ctx.fill();
-        ctx.fillStyle='#a9d0dc';ctx.beginPath();ctx.moveTo(sc(2),sc(-9));ctx.lineTo(sc(10),sc(-8));ctx.lineTo(sc(10),sc(8));ctx.lineTo(sc(2),sc(9));ctx.closePath();ctx.fill();
-        ctx.strokeStyle='rgba(13,24,31,.65)';ctx.lineWidth=Math.max(1,sc(1.5));ctx.beginPath();ctx.moveTo(sc(0),sc(-10));ctx.lineTo(sc(0),sc(10));ctx.stroke();
-        ctx.fillStyle='#dce6e8';ctx.fillRect(sc(14),sc(-5),sc(8),sc(10));
-        ctx.fillStyle='#fff0bf';ctx.beginPath();ctx.roundRect(sc(25),sc(-10),sc(3),sc(6),sc(1));ctx.roundRect(sc(25),sc(4),sc(3),sc(6),sc(1));ctx.fill();
-        ctx.fillStyle='#d64d46';ctx.fillRect(sc(-28),sc(-10),sc(3),sc(6));ctx.fillRect(sc(-28),sc(4),sc(3),sc(6));
-        ctx.fillStyle='#26333a';ctx.fillRect(sc(-29),sc(-4),sc(3),sc(8));ctx.fillRect(sc(26),sc(-4),sc(3),sc(8));
-        ctx.restore();
-    });
-    (worldView.citizens||[]).forEach(n=>{
-        const x=toX(n.x),y=toY(n.y);if(!visible(x-10,y-10,20,20))return;
-        ctx.fillStyle='rgba(0,0,0,.2)';ctx.beginPath();ctx.ellipse(x,y+scaleSize(5),scaleSize(6),scaleSize(3),0,0,Math.PI*2);ctx.fill();
-        ctx.fillStyle='#40586b';ctx.beginPath();ctx.roundRect(x-scaleSize(4),y-scaleSize(1),scaleSize(8),scaleSize(10),scaleSize(3));ctx.fill();ctx.fillStyle='#e4b995';ctx.beginPath();ctx.arc(x,y-scaleSize(5),scaleSize(4),0,Math.PI*2);ctx.fill();
-    });
-    // Unowned property markers are map props; the tank and all combat entities are drawn later by draw().
-    (worldView.houses||[]).forEach(h=>{
-        const x=toX(h.x),y=toY(h.y);if(!visible(x-20,y-20,40,40))return;
-        ctx.fillStyle=h.owner_id?'#778078':'#ffe39a';ctx.fillRect(x-scaleSize(10),y-scaleSize(6),scaleSize(20),scaleSize(12));
-        ctx.fillStyle='#8c5142';ctx.beginPath();ctx.moveTo(x-scaleSize(13),y-scaleSize(6));ctx.lineTo(x,y-scaleSize(18));ctx.lineTo(x+scaleSize(13),y-scaleSize(6));ctx.fill();
-    });
-    ctx.restore();
+    for (const r of rows) for (let c = 0; c < cols; c++) out.push({ x: x0 + BW * (c + 0.5), y: r.y + BD / 2, a: r.a });
+    return out;
+}
+const WC_PAD = 40;                       // sprite padding (shadows, porches, awnings)
+function worldSend(type, extra = {}) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type, ...extra })); }
+function enterWorldMode() {
+    if (!sessionToken) { alert('World Mode requires a logged-in Google or Discord account.'); return; }
+    if (!ws || ws.readyState !== 1) { const region = document.getElementById('regionInput').value; const mode = document.getElementById('gameModeInput').value; pendingWorldJoin = true; connectWS(region, mode); return; }
+    pendingWorldJoin = true; worldSend('world_join');
+}
+function wcExtent() { return WC.scene === 'ext' ? WC.extent : (WC.interior?.ext || 1800); }
+function beginWorldMode() {
+    isWorldMode = true; gameMode = 'WORLD'; pendingWorldJoin = false;
+    myTeam = 0; spectateId = null; isSpectating = false;
+    gameState = { entities: [], bullets: [], drones: [] }; renderEntities.clear(); lastBullets.clear(); lastDrones.clear();
+    WC.chunks.clear(); WC.allBld.clear(); WC.dyn.clear(); wcSpriteCache.clear();
+    document.getElementById('menu-overlay').style.display = 'none'; document.getElementById('account-panel').style.display = 'none'; document.getElementById('changelog-panel').style.display = 'none';
+    document.getElementById('game-ui').style.display = 'block'; document.getElementById('exit-btn').style.display = 'flex';
+    document.getElementById('death-screen').style.display = 'none';
+    const chip = document.getElementById('world-chip'); if (chip) chip.style.display = 'flex';
+    initUI(); updateVisualFov(); fov = fovTarget; updateWorldHud();
+    if (!window.drawing) { window.drawing = true; requestAnimationFrame(draw); }
+}
+function handleWorldMessage(d) {
+    switch (d.type) {
+        case 'world_static':
+            Object.assign(WC, { center: d.center, extent: d.extent, chunk: d.chunk, nch: d.nch, roads: d.roads, cars: d.cars, carColors: d.carColors, companies: d.companies, spawn: d.spawn, bank: d.bank, dealer: d.dealer, fireMs: d.fireMs, taskMs: d.taskMs });
+            beginWorldMode(); return true;
+        case 'world_houses': WC.houses = new Map(d.list.map(([h, o, m]) => [h, { o, m }])); return true;
+        case 'world_house': if (d.o) WC.houses.set(d.hid, { o: d.o, m: d.m }); else WC.houses.delete(d.hid); wcSpriteCache.delete('hs' + d.hid); return true;
+        case 'world_chunk': wcIngestChunk(d.c); return true;
+        case 'world_scene': {
+            WC.scene = d.scene; WC.intKey = d.key; WC.interior = d.interior; WC.pos = { x: d.x, y: d.y }; wcIntCache = null; WC.prompt = null; wcRenderPrompt(); WC.task = -1; wcRenderTask();
+            gameState = { entities: [], bullets: [], drones: [] }; renderEntities.clear(); lastBullets.clear(); lastDrones.clear(); dyingEntities = [];
+            myId = null; camera.x = d.x - (canvas.width * fov) / 2; camera.y = d.y - (canvas.height * fov) / 2; return true;
+        }
+        case 'world_state': worldState = { ...worldState, ...d }; updateWorldHud(); return true;
+        case 'world_notice':
+            if (d.sessionCoins !== undefined) worldState.sessionCoins = d.sessionCoins;
+            if (d.message) wcToast(d.message, d.level); updateWorldHud(); return true;
+        case 'world_death': wcToast(d.reason || 'You died.', 'bad'); return true;
+        case 'world_prompt': WC.prompt = d.p; wcRenderPrompt(); return true;
+        case 'world_task': WC.task = d.p; wcRenderTask(); return true;
+        case 'world_dyn': wcIngestDyn(d); return true;
+        case 'world_reload': location.reload(); return true;
+        case 'world_error': pendingWorldJoin = false; alert(d.message); return true;
+    }
+    return false;
+}
+function wcIngestChunk(c) {
+    WC.chunks.set(c.cx + c.cy * WC.nch, c);
+    for (const b of c.buildings) if (!WC.allBld.has(b.id)) WC.allBld.set(b.id, b);
+}
+function wcIngestDyn(d) {
+    const seen = new Set();
+    for (const c of d.cars) {
+        const id = 'c' + c[0]; seen.add(id); let o = WC.dyn.get(id);
+        if (!o) { o = { x: c[1], y: c[2], a: c[3], rx: c[1], ry: c[2], ra: c[3] }; WC.dyn.set(id, o); }
+        o.x = c[1]; o.y = c[2]; o.a = c[3]; o.c = c[4]; o.t = c[5]; o.kind = 'car';
+    }
+    for (const p of d.peds) {
+        const id = 'p' + p[0]; seen.add(id); let o = WC.dyn.get(id);
+        if (!o) { o = { x: p[1], y: p[2], a: 0, rx: p[1], ry: p[2], ra: 0 }; WC.dyn.set(id, o); }
+        o.x = p[1]; o.y = p[2]; o.skin = p[3]; o.kind = 'ped';
+    }
+    for (const k of [...WC.dyn.keys()]) if (!seen.has(k)) WC.dyn.delete(k);
 }
 
+// ---- HUD: compact status chip (top-left), toasts, task bar, anchored interaction bubble ----------
+function wcFmtMs(ms) { ms = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(ms / 60) + ':' + String(ms % 60).padStart(2, '0'); }
+let wcJobBase = { t: 0, left: 0 };
+function updateWorldHud() {
+    const chip = document.getElementById('world-chip'); if (!chip || !isWorldMode) return;
+    const j = worldState.job;
+    if (j) wcJobBase = { t: performance.now(), left: j.left };
+    wcRenderChip();
+}
+function wcRenderChip() {
+    const chip = document.getElementById('world-chip'); if (!chip) return;
+    const j = worldState.job, left = j ? Math.max(0, wcJobBase.left - (performance.now() - wcJobBase.t)) : 0;
+    let html = `<div class="wc-row"><span class="wc-ico">🪙</span><span><small>UNBANKED</small><b>${numberWithCommas(Math.floor(worldState.sessionCoins || 0))}</b></span></div>`;
+    if (j) html += `<div class="wc-row${left < 180000 ? ' wc-warn' : ''}"><span class="wc-ico">💼</span><span><small>${escapeHTML(j.name)}</small><b>Shift due ${wcFmtMs(left)}</b></span></div>`;
+    if (worldState.car) html += `<div class="wc-row"><span class="wc-ico">🚗</span><span><small>CAR</small><b>${worldState.car.driven ? 'Driving' : 'Parked'}</b></span></div>`;
+    if (chip.dataset.h !== html) { chip.dataset.h = html; chip.innerHTML = html; }
+}
+function wcToast(msg, level) {
+    const box = document.getElementById('world-toast'); if (!box) return;
+    const el = document.createElement('div'); el.className = 'wt ' + (level || ''); el.textContent = msg; box.appendChild(el);
+    while (box.children.length > 3) box.removeChild(box.firstChild);
+    setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 500); }, 4200);
+}
+function wcRenderTask() {
+    const el = document.getElementById('world-task'); if (!el) return;
+    if (WC.task < 0) { el.style.display = 'none'; return; }
+    el.style.display = 'block'; el.querySelector('i').style.width = Math.round(WC.task * 100) + '%'; el.querySelector('span').textContent = 'Working… ' + Math.round(WC.task * 100) + '%';
+}
+function wcRenderPrompt() {
+    const el = document.getElementById('world-prompt'); if (!el) return;
+    const p = WC.prompt;
+    if (!p) { el.style.display = 'none'; el.dataset.id = ''; return; }
+    let firstOn = true;
+    const acts = (p.actions || []).map(a => {
+        const key = (a.on !== false && firstOn) ? '<kbd>F</kbd>' : ''; if (a.on !== false) firstOn = false;
+        return `<button class="wp-btn" ${a.on === false ? 'disabled' : ''} data-a="${escapeHTML(a.a)}">${key}${escapeHTML(a.label)}</button>`;
+    }).join('');
+    el.className = p.mini ? 'mini' : '';
+    el.innerHTML = `<div class="wp-title">${escapeHTML(p.title || '')}</div>${(p.lines || []).map(l => `<div class="wp-line">${escapeHTML(l)}</div>`).join('')}${acts ? `<div class="wp-actions">${acts}</div>` : ''}`;
+    el.dataset.id = p.id; el.style.display = 'block';
+    el.querySelectorAll('.wp-btn').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); worldSend('world_interact', { id: p.id, a: b.dataset.a }); }));
+}
+function worldInteractPrimary() {
+    const p = WC.prompt; if (!p) return;
+    const a = (p.actions || []).find(x => x.on !== false); if (a) worldSend('world_interact', { id: p.id, a: a.a });
+}
+function wcPositionPrompt() {
+    const el = document.getElementById('world-prompt'); if (!el || !WC.prompt) return;
+    let sx = worldToScreenX(WC.prompt.ax), sy = worldToScreenY(WC.prompt.ay);
+    const w = el.offsetWidth || 220, h = el.offsetHeight || 80;
+    sx = Math.max(w / 2 + 10, Math.min(canvas.width - w / 2 - 10, sx)); sy = Math.max(h + 16, Math.min(canvas.height - 20, sy));
+    el.style.transform = `translate(${Math.round(sx - w / 2)}px, ${Math.round(sy - h - 8)}px)`;
+}
 
+// ---- field of view: zooms out as the tank grows and as the car speeds up --------------------------
+let fovTarget = BASE_FOV;
+function worldFovMultiplier() {
+    let m = 1 + ((myStats.level || 1) - 1) * 0.011;
+    const me = myId != null ? gameState.entities.find(e => e.id === myId) : null;
+    if (me && me.veh) m *= 1 + Math.min(0.5, Math.abs(me.veh.v) * 0.05);
+    return m;
+}
+
+// ---- procedural textures (world-anchored patterns) ----------------------------------------------------
+let wcTex = null;
+function wcMakeTex() {
+    const mk = (size, fn) => { const c = document.createElement('canvas'); c.width = c.height = size; fn(c.getContext('2d'), size); return c; };
+    let seed = 1337; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    const speckle = (g, s, n, cols, rmin, rmax) => { for (let i = 0; i < n; i++) { g.fillStyle = cols[Math.floor(rnd() * cols.length)]; const r = rmin + rnd() * (rmax - rmin); g.fillRect(rnd() * s, rnd() * s, r, r); } };
+    wcTex = {
+        asphalt: mk(128, (g, s) => { g.fillStyle = '#3b4146'; g.fillRect(0, 0, s, s); speckle(g, s, 900, ['#444a50', '#33393e', '#4b5157', '#30363a'], 1, 2.4); }),
+        pave: mk(104, (g, s) => { g.fillStyle = '#cbc8bd'; g.fillRect(0, 0, s, s); speckle(g, s, 160, ['#c2bfb4', '#d3d0c5'], 1, 3); g.strokeStyle = 'rgba(120,116,104,.35)'; g.lineWidth = 1.2; for (let i = 0; i <= s; i += 26) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, s); g.moveTo(0, i); g.lineTo(s, i); g.stroke(); } }),
+        concrete: mk(128, (g, s) => { g.fillStyle = '#b6b5ab'; g.fillRect(0, 0, s, s); speckle(g, s, 500, ['#aeada3', '#bebdb3', '#a8a79e'], 1, 2.4); g.strokeStyle = 'rgba(90,90,82,.22)'; g.lineWidth = 1; g.strokeRect(0.5, 0.5, s - 1, s - 1); }),
+        grass: mk(128, (g, s) => { g.fillStyle = '#8bb06d'; g.fillRect(0, 0, s, s); speckle(g, s, 1100, ['#82a866', '#94b876', '#7ba061', '#9cbf80'], 1, 2.6); }),
+        lawn: mk(128, (g, s) => { g.fillStyle = '#7fae66'; g.fillRect(0, 0, s, s); speckle(g, s, 1100, ['#76a55d', '#88b76f', '#6e9d56'], 1, 2.6); }),
+        forest: mk(128, (g, s) => { g.fillStyle = '#5f8d52'; g.fillRect(0, 0, s, s); speckle(g, s, 900, ['#567f49', '#689659', '#4f7742'], 1, 3); }),
+        dirt: mk(128, (g, s) => { g.fillStyle = '#a68a58'; g.fillRect(0, 0, s, s); speckle(g, s, 600, ['#9a7f4f', '#b09462', '#8f7548'], 1, 2.6); }),
+        plaza: mk(104, (g, s) => { g.fillStyle = '#d8d2c0'; g.fillRect(0, 0, s, s); g.strokeStyle = 'rgba(140,130,108,.4)'; g.lineWidth = 1.2; for (let i = 0; i <= s; i += 52) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, s); g.moveTo(0, i); g.lineTo(s, i); g.stroke(); } speckle(g, s, 90, ['#cfc8b4', '#e0dac8'], 1, 3); })
+    };
+    for (const k of Object.keys(wcTex)) wcTex[k] = { canvas: wcTex[k], size: wcTex[k].width, pat: null };
+}
+function wcTexPattern(name) { const t = wcTex[name]; if (!t.pat) t.pat = ctx.createPattern(t.canvas, 'repeat'); return t; }
+// fill a world rect with a pattern that stays pinned to the world (does not slide while the camera moves)
+function wcFillTex(name, x, y, w, h, worldTile = 96) {
+    const t = wcTexPattern(name), s = 1 / fov, k = s * worldTile / t.size;
+    if (t.pat.setTransform) t.pat.setTransform(new DOMMatrix([k, 0, 0, k, -camera.x * s, -camera.y * s]));
+    ctx.fillStyle = t.pat; ctx.fillRect(worldToScreenX(x), worldToScreenY(y), w * s, h * s);
+}
+
+// ---- sprite cache ---------------------------------------------------------------------------------------------
+const wcSpriteCache = new Map();
+let wcSPR = 1.25;
+function worldOnResize() { wcSPR = Math.max(1, Math.min(2.2, Math.round(2 / (baseFov * 0.74)) / 2)); wcSpriteCache.clear(); wcIntCache = null; }
+function wcSprite(key, w, h, paint) {
+    let s = wcSpriteCache.get(key);
+    if (s) return s;
+    const c = document.createElement('canvas'); c.width = Math.ceil((w + WC_PAD * 2) * wcSPR); c.height = Math.ceil((h + WC_PAD * 2) * wcSPR);
+    const g = c.getContext('2d'); g.scale(wcSPR, wcSPR); g.translate(WC_PAD, WC_PAD); paint(g);
+    if (wcSpriteCache.size > 700) wcSpriteCache.delete(wcSpriteCache.keys().next().value);
+    wcSpriteCache.set(key, c); return c;
+}
+function wcBlit(spr, x, y) { const s = 1 / fov; ctx.drawImage(spr, worldToScreenX(x) - WC_PAD * s, worldToScreenY(y) - WC_PAD * s, spr.width / wcSPR * s, spr.height / wcSPR * s); }
+const wcRR = (g, x, y, w, h, r) => { g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); };
+function wcShade(hex, amt) { const n = parseInt(hex.slice(1), 16); const f = v => Math.max(0, Math.min(255, Math.round(v + amt))); return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`; }
+function wcRng(seed) { let a = (seed | 0) + 0x6D2B79F5; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// ---- vehicles ----------------------------------------------------------------------------------------------------
+const WC_CAR_DIMS = [[52, 29], [60, 31], [62, 30]];     // owned models: compact, sedan, sport
+function wcDrawCarBody(g, w, h, color, style) {
+    // top-down: shadow, wheels, body, glass, lights. Car faces +x.
+    g.fillStyle = 'rgba(0,0,0,.3)'; wcRR(g, -w / 2 + 3, -h / 2 + 4, w, h, 9); g.fill();
+    g.fillStyle = '#12171b'; for (const [wx, wy] of [[-w * .32, -h / 2 - 1], [w * .2, -h / 2 - 1], [-w * .32, h / 2 - 5], [w * .2, h / 2 - 5]]) { wcRR(g, wx - 5, wy, 11, 6, 2); g.fill(); }
+    g.fillStyle = wcShade(color, -50); wcRR(g, -w / 2, -h / 2 + 1, w, h - 2, 9); g.fill();
+    g.fillStyle = color; wcRR(g, -w / 2 + 1.5, -h / 2 + 2, w - 3, h - 4, 8); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.22)'; wcRR(g, -w / 2 + 6, -h / 2 + 3.5, w - 16, 3.5, 2); g.fill();
+    if (style === 2) { g.fillStyle = 'rgba(255,255,255,.55)'; g.fillRect(-w / 2 + 6, -2.2, w - 12, 1.8); g.fillRect(-w / 2 + 6, 1, w - 12, 1.8); }
+    const cabW = style === 3 ? w * .72 : w * .46, cabX = style === 3 ? -w * .36 : -w * .2;
+    g.fillStyle = '#26323a'; wcRR(g, cabX, -h / 2 + 4.5, cabW, h - 9, 5); g.fill();
+    g.fillStyle = '#8db8c9'; g.beginPath(); g.moveTo(cabX + cabW - 2, -h / 2 + 6); g.lineTo(cabX + cabW + 5, -h / 2 + 8.5); g.lineTo(cabX + cabW + 5, h / 2 - 8.5); g.lineTo(cabX + cabW - 2, h / 2 - 6); g.closePath(); g.fill();
+    g.fillStyle = '#6f98aa'; g.fillRect(cabX + 2, -h / 2 + 6, 3, h - 12);
+    g.fillStyle = color; wcRR(g, cabX + 6, -h / 2 + 6.5, cabW - 11, h - 13, 3); g.fill();
+    g.fillStyle = '#fff3c4'; g.fillRect(w / 2 - 4, -h / 2 + 4, 3, 5); g.fillRect(w / 2 - 4, h / 2 - 9, 3, 5);
+    g.fillStyle = '#d4443d'; g.fillRect(-w / 2 + 1, -h / 2 + 4, 3, 5); g.fillRect(-w / 2 + 1, h / 2 - 9, 3, 5);
+}
+function wcCarSprite(color, style, w, h) {
+    const key = 'car' + color + style + w;
+    let s = wcSpriteCache.get(key); if (s) return s;
+    const c = document.createElement('canvas'); c.width = Math.ceil((w + 14) * wcSPR); c.height = Math.ceil((h + 14) * wcSPR);
+    const g = c.getContext('2d'); g.scale(wcSPR, wcSPR); g.translate((w + 14) / 2, (h + 14) / 2); wcDrawCarBody(g, w, h, color, style);
+    c._w = w + 14; c._h = h + 14; wcSpriteCache.set(key, c); return c;
+}
+function wcBlitCar(spr, x, y, a) {
+    const s = 1 / fov, sx = worldToScreenX(x), sy = worldToScreenY(y);
+    ctx.save(); ctx.translate(sx, sy); ctx.rotate(a); ctx.drawImage(spr, -spr._w / 2 * s, -spr._h / 2 * s, spr._w * s, spr._h * s); ctx.restore();
+}
+function wcDrawVehicleEntity(context, rPos, en) {
+    const m = WC.cars.findIndex(c => c.id === en.veh.m), spec = WC.cars[m] || { color: '#cccccc' }, dim = WC_CAR_DIMS[Math.max(0, m)];
+    rPos.vehA = lerpAngle(rPos.vehA !== undefined ? rPos.vehA : en.veh.a, en.veh.a, 0.35);
+    const spr = wcCarSprite(spec.color, m === 2 ? 2 : 0, dim[0], dim[1]), s = 1 / fov;
+    context.save(); context.rotate(rPos.vehA); context.drawImage(spr, -spr._w / 2 * s, -spr._h / 2 * s, spr._w * s, spr._h * s); context.restore();
+}
+
+// ---- building painters (drawn once into cached sprites, in world units; origin = building top-left) -------------------
+const WC_ROOF = ['#76828d', '#85919a', '#6d7986', '#8a9692', '#68767f', '#7c8691'];
+const WC_HOUSE_ROOF = ['#8f5140', '#6e4b42', '#a56a4b', '#566a78', '#745a49', '#8a6847'];
+const WC_AWN = [['#c0392b', '#f4efe4'], ['#2c7a5b', '#f4efe4'], ['#2f5f9e', '#f4efe4'], ['#d68a1c', '#f4efe4'], ['#7a3f8f', '#f4efe4'], ['#1f7f8c', '#f4efe4']];
+function wcShadow(g, w, h, len) {
+    g.fillStyle = 'rgba(8,12,16,.30)'; g.beginPath(); g.moveTo(len * .35, len * .45); g.lineTo(w + len, len * .45); g.lineTo(w + len, h + len); g.lineTo(len * .35, h + len); g.closePath(); g.fill();
+}
+function wcDoorMark(g, b, accent) {
+    const d = b.door, dx = d.x - b.x, dy = d.y - b.y;
+    g.save(); g.translate(dx, dy);
+    const rot = { S: 0, N: Math.PI, E: -Math.PI / 2, W: Math.PI / 2 }[d.dir] || 0; g.rotate(rot);
+    g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(-22, 1, 44, 17);
+    g.fillStyle = accent || '#3a4650'; wcRR(g, -22, -2, 44, 15, 3); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.28)'; g.fillRect(-20, -1, 40, 3);
+    g.fillStyle = '#1d252b'; g.fillRect(-13, -9, 26, 9); g.fillStyle = '#7fb1c4'; g.fillRect(-11, -7.5, 10, 6); g.fillRect(1, -7.5, 10, 6);
+    g.restore();
+}
+function wcBanner(g, text, cx, cy, maxW, h, color, txt = '#fff') {
+    g.save(); g.font = `bold ${h * 0.62}px Ubuntu, Arial`; const tw = Math.min(maxW, g.measureText(text).width + h);
+    g.fillStyle = 'rgba(0,0,0,.28)'; wcRR(g, cx - tw / 2 + 2, cy - h / 2 + 3, tw, h, 5); g.fill();
+    g.fillStyle = color; wcRR(g, cx - tw / 2, cy - h / 2, tw, h, 5); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 1.4; wcRR(g, cx - tw / 2 + 2, cy - h / 2 + 2, tw - 4, h - 4, 4); g.stroke();
+    g.fillStyle = txt; g.textAlign = 'center'; g.textBaseline = 'middle';
+    let fs = h * 0.62; while (fs > 6 && g.measureText(text).width > tw - 8) { fs -= 1; g.font = `bold ${fs}px Ubuntu, Arial`; }
+    g.fillText(text, cx, cy + 1); g.restore();
+}
+function wcRoofClutter(g, b, rnd, inset) {
+    const w = b.w, h = b.h;
+    const n = 2 + Math.floor(rnd() * 3);
+    for (let i = 0; i < n; i++) {
+        const rw = 24 + rnd() * 36, rh = 18 + rnd() * 26, x = inset + rnd() * Math.max(1, w - 2 * inset - rw), y = inset + rnd() * Math.max(1, h - 2 * inset - rh);
+        g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(x + 3, y + 3, rw, rh);
+        g.fillStyle = '#4c5963'; g.fillRect(x, y, rw, rh); g.fillStyle = '#6b7a85'; g.fillRect(x + 2, y + 2, rw - 4, 3);
+        if (rnd() < 0.7) { g.fillStyle = '#2c353c'; g.beginPath(); g.arc(x + rw / 2, y + rh / 2 + 2, Math.min(rw, rh) * 0.28, 0, 7); g.fill(); g.strokeStyle = '#8c9aa4'; g.lineWidth = 1; g.beginPath(); g.moveTo(x + rw / 2 - 5, y + rh / 2 + 2); g.lineTo(x + rw / 2 + 5, y + rh / 2 + 2); g.moveTo(x + rw / 2, y + rh / 2 - 3); g.lineTo(x + rw / 2, y + rh / 2 + 7); g.stroke(); }
+    }
+    if (rnd() < 0.3) { const px = w * 0.5, py = h * 0.5, r = Math.min(w, h) * 0.2; g.fillStyle = '#3e4750'; g.beginPath(); g.arc(px, py, r, 0, 7); g.fill(); g.strokeStyle = '#e6c94a'; g.lineWidth = 3; g.beginPath(); g.arc(px, py, r - 3, 0, 7); g.stroke(); g.fillStyle = '#e6c94a'; g.font = `bold ${r}px Arial`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('H', px, py + 1); }
+    else if (rnd() < 0.5) { for (let i = 0; i < 6; i++) { g.fillStyle = '#27465e'; g.fillRect(inset + 4 + (i % 3) * 30, h - inset - 34 + Math.floor(i / 3) * 16, 26, 12); g.fillStyle = 'rgba(160,200,230,.4)'; g.fillRect(inset + 4 + (i % 3) * 30, h - inset - 34 + Math.floor(i / 3) * 16, 26, 3); } }
+}
+function wcPaintTower(g, b, low) {
+    const w = b.w, h = b.h, rnd = wcRng(b.s || 1), base = WC_ROOF[(b.t || 0) % 6];
+    wcShadow(g, w, h, Math.min(36, (b.f || 8) * 1.5));
+    g.fillStyle = wcShade(base, -46); g.fillRect(0, 0, w, h);
+    g.fillStyle = wcShade(base, -20); g.fillRect(3, 3, w - 6, h - 6);
+    g.fillStyle = base; g.fillRect(7, 7, w - 14, h - 14);
+    g.strokeStyle = 'rgba(255,255,255,.2)'; g.lineWidth = 1.4; g.strokeRect(10, 10, w - 20, h - 20);
+    g.strokeStyle = 'rgba(0,0,0,.07)'; g.lineWidth = 1; for (let x = 10; x < w - 10; x += 24) { g.beginPath(); g.moveTo(x, 10); g.lineTo(x, h - 10); g.stroke(); } for (let y = 10; y < h - 10; y += 24) { g.beginPath(); g.moveTo(10, y); g.lineTo(w - 10, y); g.stroke(); }
+    wcRoofClutter(g, b, rnd, 14);
+    if (b.work) { wcBanner(g, b.sign.toUpperCase(), w / 2, h * 0.5, w - 22, Math.min(30, h * 0.16), b.col); }
+    wcDoorMark(g, b, b.work ? b.col : null);
+}
+function wcPaintShop(g, b) {
+    const w = b.w, h = b.h, rnd = wcRng(b.s || 1), aw = WC_AWN[(b.aw || 0) % 6];
+    wcShadow(g, w, h, 12);
+    g.fillStyle = '#8d8a80'; g.fillRect(0, 0, w, h); g.fillStyle = '#cfcabb'; g.fillRect(4, 4, w - 8, h - 8);
+    g.strokeStyle = 'rgba(0,0,0,.1)'; for (let x = 12; x < w - 4; x += 16) { g.beginPath(); g.moveTo(x, 4); g.lineTo(x, h - 4); g.stroke(); }
+    wcRoofClutter(g, { w, h }, rnd, 10);
+    // striped awning over the door side
+    const dd = b.door, dx = dd.x - b.x, dy = dd.y - b.y; g.save(); g.translate(dx, dy); g.rotate({ S: 0, N: Math.PI, E: -Math.PI / 2, W: Math.PI / 2 }[dd.dir] || 0);
+    const aw2 = Math.min(w - 10, 70); for (let i = 0; i < 10; i++) { g.fillStyle = i % 2 ? aw[1] : aw[0]; g.fillRect(-aw2 / 2 + i * aw2 / 10, -6, aw2 / 10 + .5, 22); }
+    g.fillStyle = 'rgba(0,0,0,.2)'; g.fillRect(-aw2 / 2, 16, aw2, 3); g.restore();
+}
+function wcPaintApt(g, b) {
+    const w = b.w, h = b.h, rnd = wcRng(b.s || 1), base = ['#b7ab98', '#a9a597', '#bbb1a2', '#a8aeb0', '#b5a9a0', '#a7a79b'][(b.t || 0) % 6];
+    wcShadow(g, w, h, 18);
+    g.fillStyle = wcShade(base, -50); g.fillRect(0, 0, w, h); g.fillStyle = base; g.fillRect(4, 4, w - 8, h - 8);
+    g.fillStyle = wcShade(base, 14); g.fillRect(4, 4, w - 8, (h - 8) / 2);
+    g.strokeStyle = 'rgba(0,0,0,.12)'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(4, h / 2); g.lineTo(w - 4, h / 2); g.stroke();
+    for (let x = 30; x < w - 30; x += 60 + rnd() * 30) { g.fillStyle = '#6e5e50'; g.fillRect(x, h / 2 - 11, 22, 22); g.fillStyle = '#8c7b6b'; g.fillRect(x + 2, h / 2 - 9, 18, 4); }
+    wcRoofClutter(g, b, rnd, 12); wcDoorMark(g, b);
+}
+function wcPaintMall(g, b) {
+    const w = b.w, h = b.h, rnd = wcRng(b.s || 1);
+    wcShadow(g, w, h, 20); g.fillStyle = '#7a7d80'; g.fillRect(0, 0, w, h); g.fillStyle = '#c8c9c3'; g.fillRect(5, 5, w - 10, h - 10);
+    for (let i = 0; i < 5; i++) { const sx = 24 + i * (w - 48) / 5; g.fillStyle = '#7fb3c6'; g.fillRect(sx, h * 0.3, (w - 48) / 5 - 14, h * 0.4); g.strokeStyle = 'rgba(255,255,255,.5)'; g.lineWidth = 1.3; g.strokeRect(sx, h * 0.3, (w - 48) / 5 - 14, h * 0.4); for (let k = 1; k < 4; k++) { g.beginPath(); g.moveTo(sx + k * ((w - 48) / 5 - 14) / 4, h * 0.3); g.lineTo(sx + k * ((w - 48) / 5 - 14) / 4, h * 0.7); g.stroke(); } }
+    wcBanner(g, 'CENTRAL MALL', w / 2, 24, w * 0.5, 26, '#c0392b'); wcRoofClutter(g, { w, h: h * 0.9 }, rnd, 12); wcDoorMark(g, b, '#c0392b');
+}
+function wcPaintBank(g, b) {
+    const w = b.w, h = b.h;
+    wcShadow(g, w, h, 24);
+    g.fillStyle = '#9fa49f'; g.fillRect(0, 0, w, h); g.fillStyle = '#e4e0d3'; g.fillRect(5, 5, w - 10, h - 10);
+    g.strokeStyle = 'rgba(120,110,90,.35)'; g.lineWidth = 1.2; for (let i = 14; i < w - 10; i += 28) { g.beginPath(); g.moveTo(i, 5); g.lineTo(i, h - 5); g.stroke(); }
+    const r = Math.min(w, h) * 0.26, cx = w / 2, cy = h * 0.46;
+    const gr = g.createRadialGradient(cx - r * .3, cy - r * .3, r * .1, cx, cy, r); gr.addColorStop(0, '#bfe0ec'); gr.addColorStop(1, '#3d7a96');
+    g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.arc(cx + 5, cy + 6, r, 0, 7); g.fill(); g.fillStyle = gr; g.beginPath(); g.arc(cx, cy, r, 0, 7); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.6)'; g.lineWidth = 2; for (let a = 0; a < 8; a++) { g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(a * Math.PI / 4) * r, cy + Math.sin(a * Math.PI / 4) * r); g.stroke(); }
+    g.beginPath(); g.arc(cx, cy, r, 0, 7); g.stroke();
+    wcBanner(g, 'BANK', w / 2, h * 0.14, w * 0.46, 36, '#1f4e79');
+    for (let i = 0; i < 8; i++) { g.fillStyle = '#f2efe6'; g.beginPath(); g.arc(30 + i * (w - 60) / 7, h - 16, 6, 0, 7); g.fill(); g.strokeStyle = '#9a9588'; g.lineWidth = 1; g.stroke(); }
+    wcDoorMark(g, b, '#1f4e79');
+}
+function wcPaintDealer(g, b) {
+    const w = b.w, h = b.h;
+    wcShadow(g, w, h, 16);
+    g.fillStyle = '#58656e'; g.fillRect(0, 0, w, h); g.fillStyle = '#a9cfdc'; g.fillRect(5, 5, w - 10, h - 10);
+    g.fillStyle = 'rgba(255,255,255,.18)'; g.beginPath(); g.moveTo(5, 5); g.lineTo(w * .55, 5); g.lineTo(5, h * .6); g.closePath(); g.fill();
+    g.strokeStyle = 'rgba(40,70,90,.45)'; g.lineWidth = 1.3; for (let x = 5; x < w - 5; x += 40) { g.beginPath(); g.moveTo(x, 5); g.lineTo(x, h - 5); g.stroke(); } for (let y = 5; y < h - 5; y += 40) { g.beginPath(); g.moveTo(5, y); g.lineTo(w - 5, y); g.stroke(); }
+    const cols = ['#e4e7eb', '#2684d9', '#e84d4d'], dims = [[52, 29], [60, 31], [62, 30]];
+    for (let i = 0; i < 3; i++) { g.save(); g.translate(w * (0.2 + i * 0.3), h * 0.52); g.rotate(-0.5 + i * 0.5); wcDrawCarBody(g, dims[i][0], dims[i][1], cols[i], i === 2 ? 2 : 0); g.restore(); }
+    wcBanner(g, 'MOTORS', w / 2, 24, w * 0.5, 28, '#c0392b'); wcDoorMark(g, b, '#c0392b');
+}
+function wcPaintHall(g, b) {
+    const w = b.w, h = b.h; wcShadow(g, w, h, 26);
+    g.fillStyle = '#8c897f'; g.fillRect(0, 0, w, h); g.fillStyle = '#d6d1c2'; g.fillRect(5, 5, w - 10, h - 10);
+    g.fillStyle = '#c4bfae'; g.fillRect(5, h * 0.62, w - 10, h * 0.2);
+    const r = Math.min(w, h) * 0.28, cx = w / 2, cy = h * 0.38, gr = g.createRadialGradient(cx - r * .3, cy - r * .35, 2, cx, cy, r); gr.addColorStop(0, '#9fd6c6'); gr.addColorStop(1, '#3a7c6a');
+    g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.arc(cx + 5, cy + 6, r, 0, 7); g.fill(); g.fillStyle = gr; g.beginPath(); g.arc(cx, cy, r, 0, 7); g.fill();
+    g.fillStyle = '#e8e3d3'; g.beginPath(); g.arc(cx, cy, r * 0.22, 0, 7); g.fill();
+    wcBanner(g, 'CITY HALL', w / 2, h * 0.84, w * 0.5, 26, '#4a4a52');
+    for (let i = 0; i < 7; i++) { g.fillStyle = '#f2efe6'; g.beginPath(); g.arc(34 + i * (w - 68) / 6, h - 14, 5.5, 0, 7); g.fill(); }
+    wcDoorMark(g, b, '#4a4a52');
+}
+function wcPaintHouse(g, b) {
+    const w = b.w, h = b.h, rnd = wcRng(b.s || 1), col = WC_HOUSE_ROOF[(b.r || 0) % 6], horiz = w >= h;
+    wcShadow(g, w, h, 14);
+    g.fillStyle = '#e6dcc8'; g.fillRect(-3, -3, w + 6, h + 6);
+    const light = wcShade(col, 18), dark = wcShade(col, -20);
+    if (horiz) { g.fillStyle = light; g.fillRect(0, 0, w, h / 2); g.fillStyle = dark; g.fillRect(0, h / 2, w, h / 2); g.strokeStyle = 'rgba(0,0,0,.14)'; g.lineWidth = 1; for (let y = 6; y < h; y += 6) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); } g.strokeStyle = 'rgba(0,0,0,.4)'; g.lineWidth = 2; g.beginPath(); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.stroke(); }
+    else { g.fillStyle = light; g.fillRect(0, 0, w / 2, h); g.fillStyle = dark; g.fillRect(w / 2, 0, w / 2, h); g.strokeStyle = 'rgba(0,0,0,.14)'; g.lineWidth = 1; for (let x = 6; x < w; x += 6) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); } g.strokeStyle = 'rgba(0,0,0,.4)'; g.lineWidth = 2; g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2, h); g.stroke(); }
+    if (b.gar) { const left = (b.s || 0) % 2 === 0, gw = w * 0.3; g.fillStyle = '#b5b1a6'; g.fillRect(left ? 0 : w - gw, 0, gw, h); g.strokeStyle = 'rgba(0,0,0,.25)'; g.lineWidth = 1.2; g.strokeRect(left ? 1 : w - gw + 1, 1, gw - 2, h - 2); }
+    g.fillStyle = '#6e6458'; g.fillRect(w * (0.3 + rnd() * 0.3), h * 0.18, 9, 12); g.fillStyle = '#a99c8d'; g.fillRect(w * 0.3 - 1, h * 0.18 - 1, 11, 2);
+    if (b.por || b.k === 'farmhouse') { const d = b.door, dx = d.x - b.x, dy = d.y - b.y; g.save(); g.translate(dx, dy); g.rotate({ S: 0, N: Math.PI, E: -Math.PI / 2, W: Math.PI / 2 }[d.dir] || 0); g.fillStyle = 'rgba(0,0,0,.22)'; g.fillRect(-17, 1, 38, 15); g.fillStyle = '#d9cdb2'; g.fillRect(-18, -1, 36, 14); g.fillStyle = '#6d5d4a'; g.fillRect(-16, 9, 3, 4); g.fillRect(13, 9, 3, 4); g.restore(); }
+    wcDoorMark(g, { door: b.door, x: b.x, y: b.y }, '#6d4a38');
+}
+function wcPaintBarn(g, b) {
+    const w = b.w, h = b.h; wcShadow(g, w, h, 20);
+    g.fillStyle = '#7a2d26'; g.fillRect(0, 0, w, h); g.fillStyle = '#a63d33'; g.fillRect(4, 4, w - 8, h / 2 - 4); g.fillStyle = '#8f332b'; g.fillRect(4, h / 2, w - 8, h / 2 - 4);
+    g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = 1; for (let x = 10; x < w; x += 10) { g.beginPath(); g.moveTo(x, 4); g.lineTo(x, h - 4); g.stroke(); }
+    g.strokeStyle = '#efe7d6'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.stroke(); wcDoorMark(g, b, '#efe7d6');
+}
+function wcPaintShed(g, b) { const w = b.w, h = b.h; wcShadow(g, w, h, 8); g.fillStyle = '#6c7378'; g.fillRect(0, 0, w, h); g.fillStyle = '#8a9298'; g.fillRect(3, 3, w - 6, h - 6); g.strokeStyle = 'rgba(0,0,0,.2)'; for (let x = 8; x < w; x += 8) { g.beginPath(); g.moveTo(x, 3); g.lineTo(x, h - 3); g.stroke(); } wcDoorMark(g, b); }
+function wcPaintSchool(g, b) {
+    const w = b.w, h = b.h; wcShadow(g, w, h, 16);
+    g.fillStyle = '#7d4637'; g.fillRect(0, 0, w, h); g.fillStyle = '#b0674d'; g.fillRect(5, 5, w - 10, h - 10);
+    g.fillStyle = '#8fa67a'; g.fillRect(w * 0.32, h * 0.3, w * 0.36, h * 0.4); g.strokeStyle = '#d9d2bd'; g.lineWidth = 3; g.strokeRect(w * 0.32, h * 0.3, w * 0.36, h * 0.4);
+    wcBanner(g, 'SCHOOL', w / 2, h * 0.14, w * 0.3, 24, '#2f5f9e'); wcDoorMark(g, b, '#2f5f9e');
+}
+const WC_PAINTERS = { tower: (g, b) => wcPaintTower(g, b, false), mid: (g, b) => wcPaintTower(g, b, true), shop: wcPaintShop, apt: wcPaintApt, mall: wcPaintMall, bank: wcPaintBank, dealer: wcPaintDealer, hall: wcPaintHall, house: wcPaintHouse, farmhouse: wcPaintHouse, barn: wcPaintBarn, shed: wcPaintShed, school: wcPaintSchool };
+function wcBuildingSprite(b) { return wcSprite('b' + b.id, b.w, b.h, g => (WC_PAINTERS[b.k] || wcPaintTower)(g, b)); }
+
+// lot-level house furniture: front hedge, driveway, path, mailbox and the for-sale / owner sign (drawn live: ownership changes)
+function wcHouseLot(b, s) {
+    if (!b.lot) return;
+    const [lx, ly, lw, ld] = b.lot, north = b.door.dir === 'N', fy = north ? ly : ly + ld;
+    const X = v => worldToScreenX(v), Y = v => worldToScreenY(v), r = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(X(x), Y(y), w * s, h * s); };
+    if (b.k === 'house') {
+        r(lx + 4, north ? ly + 3 : ly + ld - 11, lw - 8, 8, '#4f7f46');
+        if (b.fen) { ctx.strokeStyle = 'rgba(240,233,214,.9)'; ctx.lineWidth = Math.max(1, 2 * s); ctx.strokeRect(X(lx + 2), Y(ly + 2), (lw - 4) * s, (ld - 4) * s); }
+        const gx = b.x + (b.gar ? (((b.s || 0) % 2 === 0) ? 0 : b.w * 0.7) : b.w * 0.35), gw = b.gar ? b.w * 0.3 : 0;
+        if (b.gar) { const y0 = north ? ly : b.y + b.h, len = north ? b.y - ly : ly + ld - (b.y + b.h); r(gx, y0, gw, len, '#aaa89e'); }
+        const py0 = north ? ly : b.door.y, plen = north ? b.door.y - ly : ly + ld - b.door.y; r(b.door.x - 7, py0, 14, plen, '#cbc4b0');
+        const stakeX = b.door.x + 26, stakeY = north ? ly + 14 : ly + ld - 30; r(stakeX + 8, stakeY + 8, 3, 14, '#6b5a44');
+        const o = WC.houses.get(b.hid);
+        if (!o) { r(stakeX, stakeY, 26, 14, '#fdfbf4'); r(stakeX, stakeY, 26, 4, '#d6453b'); ctx.fillStyle = '#d6453b'; ctx.font = `bold ${Math.max(6, 6 * s)}px Ubuntu`; ctx.textAlign = 'center'; ctx.fillText('SALE', X(stakeX + 13), Y(stakeY + 11)); }
+        else { r(stakeX, stakeY, 26, 14, o.m ? '#e2b33a' : '#e5e0d2'); ctx.fillStyle = o.m ? '#4a3510' : '#4a463c'; ctx.font = `bold ${Math.max(6, 5.5 * s)}px Ubuntu`; ctx.textAlign = 'center'; ctx.fillText(o.m ? 'HOME' : o.o.slice(0, 5).toUpperCase(), X(stakeX + 13), Y(stakeY + 10)); }
+    }
+}
+
+// ---- trees, lamps, benches ----------------------------------------------------------------------------------------------
+function wcTreeSprite(v) {
+    return wcSprite('t' + v, 96, 96, g => {
+        const r = 24 + (v % 4) * 6, rnd = wcRng(v * 977 + 5), fam = (v >> 2) & 1, cols = fam ? ['#2f6d3c', '#3a7e46', '#48904f'] : ['#4a8a3a', '#5a9c46', '#6aae52'];
+        g.translate(48, 48); g.fillStyle = 'rgba(0,0,0,.22)'; g.beginPath(); g.ellipse(r * .3, r * .34, r * 1.02, r * .86, 0, 0, 7); g.fill();
+        g.fillStyle = '#5b4632'; g.beginPath(); g.arc(0, 0, 4, 0, 7); g.fill();
+        for (let i = 0; i < 6; i++) { const a = i / 6 * 6.283 + rnd(), d = r * 0.42; g.fillStyle = cols[i % 3]; g.beginPath(); g.arc(Math.cos(a) * d, Math.sin(a) * d, r * 0.62, 0, 7); g.fill(); }
+        g.fillStyle = cols[1]; g.beginPath(); g.arc(0, 0, r * 0.62, 0, 7); g.fill(); g.fillStyle = 'rgba(255,255,255,.14)'; g.beginPath(); g.arc(-r * .25, -r * .28, r * .32, 0, 7); g.fill();
+    });
+}
+function wcDrawTree(p, s) {
+    const spr = wcTreeSprite(p.v), sx = worldToScreenX(p.x), sy = worldToScreenY(p.y);
+    ctx.drawImage(spr, sx - 88 * s, sy - 88 * s, spr.width / wcSPR * s, spr.height / wcSPR * s);   // sprite centre = (96 + 2*pad) / 2
+}
+
+// ---- the exterior scene ---------------------------------------------------------------------------------------------------
+const WC_CROPS = [['#6aa84f', '#92cf68'], ['#d9bf5b', '#efdc8a'], ['#7fae3f', '#a5d05c'], ['#3f8f57', '#68b87b'], ['#a2693f', '#c79067']];
+function wcLine(x0, y0, x1, y1, color, w, dash, phase) {
+    ctx.strokeStyle = color; ctx.lineWidth = w; if (dash) { ctx.setLineDash(dash); ctx.lineDashOffset = phase || 0; }
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); if (dash) ctx.setLineDash([]);
+}
+function wcDrawRoads(vx0, vy0, vx1, vy1, s) {
+    const C = WC.center;
+    for (const r of WC.roads) {
+        const v = r.a === 'v';
+        const aMin = Math.max(C - r.e, v ? vy0 : vx0), aMax = Math.min(C + r.e, v ? vy1 : vx1);
+        if (aMax <= aMin) continue;
+        if (v ? (r.p + r.hw < vx0 || r.p - r.hw > vx1) : (r.p + r.hw < vy0 || r.p - r.hw > vy1)) continue;
+        if (v) wcFillTex('asphalt', r.p - r.hw, aMin, 2 * r.hw, aMax - aMin, 110); else wcFillTex('asphalt', aMin, r.p - r.hw, aMax - aMin, 2 * r.hw, 110);
+        const A0 = (a) => v ? [worldToScreenX(r.p + a), worldToScreenY(aMin), worldToScreenX(r.p + a), worldToScreenY(aMax)] : [worldToScreenX(aMin), worldToScreenY(r.p + a), worldToScreenX(aMax), worldToScreenY(r.p + a)];
+        const phase = ((aMin - (C - r.e)) / fov);
+        const line = (off, color, w, dash) => { const q = A0(off); wcLine(q[0], q[1], q[2], q[3], color, Math.max(1, w * s), dash ? dash.map(d => d * s) : null, dash ? phase % ((dash[0] + dash[1]) * s) : 0); };
+        line(-r.hw + 5, 'rgba(240,240,232,.8)', 2.4); line(r.hw - 5, 'rgba(240,240,232,.8)', 2.4);
+        if (r.ln === 4) { line(-2.6, '#e6c23a', 2.4); line(2.6, '#e6c23a', 2.4); line(-r.hw / 2, 'rgba(240,240,232,.7)', 2, [26, 30]); line(r.hw / 2, 'rgba(240,240,232,.7)', 2, [26, 30]); }
+        else line(0, '#e3c43e', 2.6, [30, 26]);
+    }
+}
+function wcDrawJunction(j, s) {
+    wcFillTex('asphalt', j.x - j.hv, j.y - j.hh, 2 * j.hv, 2 * j.hh, 110);
+    const X = v => worldToScreenX(v), Y = v => worldToScreenY(v), R = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(X(x), Y(y), w * s, h * s); };
+    const Z = 'rgba(244,244,236,.92)';
+    // zebra crossings on every arm that exists + a stop line on the approach lane (right-hand traffic)
+    if (j.n) { for (let x = j.x - j.n + 8; x < j.x + j.n - 8; x += 13) R(x, j.y - j.hh - 21, 7, 16, Z); R(j.x - j.n + 3, j.y - j.hh - 28, j.n - 3, 4, Z); }
+    if (j.s) { for (let x = j.x - j.s + 8; x < j.x + j.s - 8; x += 13) R(x, j.y + j.hh + 5, 7, 16, Z); R(j.x, j.y + j.hh + 24, j.s - 3, 4, Z); }
+    if (j.w) { for (let y = j.y - j.w + 8; y < j.y + j.w - 8; y += 13) R(j.x - j.hv - 21, y, 16, 7, Z); R(j.x - j.hv - 28, j.y, 4, j.w - 3, Z); }
+    if (j.e) { for (let y = j.y - j.e + 8; y < j.y + j.e - 8; y += 13) R(j.x + j.hv + 5, y, 16, 7, Z); R(j.x + j.hv + 24, j.y - j.e + 3, 4, j.e - 3, Z); }
+}
+function wcDrawLot(l, s) {
+    wcFillTex('asphalt', l.x, l.y, l.w, l.h, 110); ctx.fillStyle = 'rgba(255,255,255,.05)'; ctx.fillRect(worldToScreenX(l.x), worldToScreenY(l.y), l.w * s, l.h * s);
+    if (!l._bays) l._bays = lotBays(l);
+    ctx.strokeStyle = l.dealer ? 'rgba(245,197,66,.95)' : 'rgba(240,240,232,.8)'; ctx.lineWidth = Math.max(1, 1.8 * s); ctx.beginPath();
+    for (const b of l._bays) {
+        const x0 = worldToScreenX(b.x - 27), x1 = worldToScreenX(b.x + 27), ya = worldToScreenY(b.y - 48), yb = worldToScreenY(b.y + 48), cl = b.a < 0 ? ya : yb;
+        ctx.moveTo(x0, ya); ctx.lineTo(x0, yb); ctx.moveTo(x1, ya); ctx.lineTo(x1, yb); ctx.moveTo(x0, cl); ctx.lineTo(x1, cl);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(60,60,55,.6)'; ctx.lineWidth = Math.max(1, 2 * s); ctx.strokeRect(worldToScreenX(l.x), worldToScreenY(l.y), l.w * s, l.h * s);
+    if (l.dealer && l.w * s > 120) { ctx.fillStyle = 'rgba(245,197,66,.75)'; ctx.font = `bold ${Math.max(8, 14 * s)}px Ubuntu`; ctx.textAlign = 'center'; ctx.fillText('DEALERSHIP PARKING', worldToScreenX(l.x + l.w / 2), worldToScreenY(l.y + l.h / 2 + 5)); }
+}
+function wcDrawField(f, s) {
+    if (f.kind === 'pitch') { wcFillTex('lawn', f.x, f.y, f.w, f.h); ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = Math.max(1, 3 * s); ctx.strokeRect(worldToScreenX(f.x + 12), worldToScreenY(f.y + 12), (f.w - 24) * s, (f.h - 24) * s); wcLine(worldToScreenX(f.x + f.w / 2), worldToScreenY(f.y + 12), worldToScreenX(f.x + f.w / 2), worldToScreenY(f.y + f.h - 12), 'rgba(255,255,255,.85)', Math.max(1, 3 * s)); return; }
+    if (f.kind === 'ranch') { wcFillTex('lawn', f.x, f.y, f.w, f.h); ctx.strokeStyle = '#7a5a3a'; ctx.lineWidth = Math.max(2, 5 * s); ctx.strokeRect(worldToScreenX(f.x), worldToScreenY(f.y), f.w * s, f.h * s); ctx.strokeStyle = 'rgba(210,180,130,.9)'; ctx.lineWidth = Math.max(1, 2 * s); ctx.strokeRect(worldToScreenX(f.x), worldToScreenY(f.y), f.w * s, f.h * s); return; }
+    wcFillTex('dirt', f.x, f.y, f.w, f.h);
+    const cr = WC_CROPS[f.crop % 5], step = 26, sx0 = worldToScreenX(f.x), sx1 = worldToScreenX(f.x + f.w);
+    const y0 = worldToScreenY(f.y + 8), y1 = worldToScreenY(f.y + f.h - 8);
+    const first = Math.max(0, Math.floor((camera.x - f.x) / step)), last = Math.min(Math.floor(f.w / step), Math.ceil((camera.x + canvas.width * fov - f.x) / step));
+    ctx.lineCap = 'round';
+    for (let i = first; i <= last; i++) { const x = worldToScreenX(f.x + 14 + i * step); if (x < sx0 || x > sx1) continue; ctx.strokeStyle = cr[0]; ctx.lineWidth = Math.max(2, 13 * s); ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y1); ctx.stroke(); ctx.strokeStyle = cr[1]; ctx.lineWidth = Math.max(1, 4 * s); ctx.beginPath(); ctx.moveTo(x - 2 * s, y0); ctx.lineTo(x - 2 * s, y1); ctx.stroke(); }
+    ctx.lineCap = 'butt'; ctx.strokeStyle = 'rgba(70,52,30,.55)'; ctx.lineWidth = Math.max(1, 3 * s); ctx.strokeRect(sx0, worldToScreenY(f.y), f.w * s, f.h * s);
+}
+function wcDrawBlock(b, s) {
+    if (b.sw > 0) {
+        wcFillTex('pave', b.x, b.y, b.w, b.h, 104);
+        const lx = b.x + b.sw, ly = b.y + b.sw, lw = b.w - 2 * b.sw, lh = b.h - 2 * b.sw;
+        const tex = b.g === 'plaza' ? 'plaza' : (b.g === 'park' || b.z >= 2) ? 'lawn' : 'concrete';
+        wcFillTex(tex, lx, ly, lw, lh, 104);
+        ctx.strokeStyle = 'rgba(60,60,54,.55)'; ctx.lineWidth = Math.max(1, 2.4 * s); ctx.strokeRect(worldToScreenX(b.x), worldToScreenY(b.y), b.w * s, b.h * s);
+        ctx.strokeStyle = 'rgba(90,88,80,.4)'; ctx.lineWidth = Math.max(1, 1.2 * s); ctx.strokeRect(worldToScreenX(lx), worldToScreenY(ly), lw * s, lh * s);
+    } else wcFillTex(b.g === 'forest' ? 'forest' : 'grass', b.x, b.y, b.w, b.h, 110);
+}
+function wcDrawProp(p, s, pass) {
+    const X = v => worldToScreenX(v), Y = v => worldToScreenY(v);
+    if (pass === 0) {
+        if (p.k === 'path') { ctx.fillStyle = '#d9d0b6'; ctx.fillRect(X(p.x), Y(p.y), p.w * s, p.h * s); ctx.strokeStyle = 'rgba(120,108,80,.4)'; ctx.lineWidth = Math.max(1, 1.5 * s); ctx.strokeRect(X(p.x), Y(p.y), p.w * s, p.h * s); }
+        else if (p.k === 'yard') wcFillTex('dirt', p.x, p.y, p.w, p.h);
+        else if (p.k === 'fountain') {
+            const cx = X(p.x + p.w / 2), cy = Y(p.y + p.h / 2), r = p.w / 2 * s;
+            ctx.fillStyle = '#b9b3a2'; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill(); ctx.fillStyle = '#5ea6c4'; ctx.beginPath(); ctx.arc(cx, cy, r * .82, 0, 7); ctx.fill();
+            const t = performance.now() / 700; ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = Math.max(1, 1.5 * s); for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(cx, cy, r * (0.25 + ((t + i / 3) % 1) * 0.55), 0, 7); ctx.stroke(); }
+            ctx.fillStyle = '#c9c3b2'; ctx.beginPath(); ctx.arc(cx, cy, r * .2, 0, 7); ctx.fill();
+        } else if (p.k === 'silo') { const cx = X(p.x + p.w / 2), cy = Y(p.y + p.h / 2), r = p.w / 2 * s; ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(cx + 5 * s, cy + 6 * s, r, 0, 7); ctx.fill(); const gr = ctx.createRadialGradient(cx - r * .3, cy - r * .3, r * .1, cx, cy, r); gr.addColorStop(0, '#e9ecef'); gr.addColorStop(1, '#8a949c'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = Math.max(1, 1.5 * s); ctx.stroke(); }
+    } else if (pass === 1) {
+        if (p.k === 'lamp') { const x = X(p.x), y = Y(p.y); ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.beginPath(); ctx.ellipse(x + 3 * s, y + 4 * s, 5 * s, 3 * s, 0, 0, 7); ctx.fill(); ctx.fillStyle = '#2f383d'; ctx.beginPath(); ctx.arc(x, y, 3.4 * s, 0, 7); ctx.fill(); ctx.fillStyle = '#f6e3a4'; ctx.beginPath(); ctx.arc(x, y, 1.8 * s, 0, 7); ctx.fill(); }
+        else if (p.k === 'bench') { const x = X(p.x), y = Y(p.y), w = p.w * s, h = p.h * s; ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fillRect(x + 2 * s, y + 3 * s, w, h); ctx.fillStyle = '#5e432c'; ctx.fillRect(x, y, w, h); ctx.fillStyle = '#a47b4f'; if (p.w > p.h) { for (let i = 0; i < 4; i++) ctx.fillRect(x + 2 * s, y + (1.5 + i * 4.5) * s, w - 4 * s, 3 * s); } else { for (let i = 0; i < 4; i++) ctx.fillRect(x + (1.5 + i * 4.5) * s, y + 2 * s, 3 * s, h - 4 * s); } }
+    }
+}
+function wcUpdateDyn() {
+    for (const o of WC.dyn.values()) {
+        o.rx += (o.x - o.rx) * 0.3; o.ry += (o.y - o.ry) * 0.3;
+        if (o.kind === 'car') { o.ra = lerpAngle(o.ra, o.a, 0.25); }
+        else { const dx = o.x - o.rx, dy = o.y - o.ry; if (dx * dx + dy * dy > 0.4) o.ra = Math.atan2(dy, dx); }
+    }
+}
+function wcDrawDyn(vx0, vy0, vx1, vy1, s) {
+    const t = performance.now() / 1000;
+    for (const o of WC.dyn.values()) {
+        if (o.rx < vx0 - 80 || o.rx > vx1 + 80 || o.ry < vy0 - 80 || o.ry > vy1 + 80) continue;
+        if (o.kind === 'car') {
+            let spr;
+            if (o.t >= 3) { const m = o.c, spec = WC.cars[m] || { color: '#ccc' }, dim = WC_CAR_DIMS[Math.max(0, m)]; spr = wcCarSprite(spec.color, m === 2 ? 2 : 0, dim[0], dim[1]); if (o.t === 4) { ctx.strokeStyle = `rgba(255,214,90,${0.5 + 0.35 * Math.sin(t * 4)})`; ctx.lineWidth = Math.max(2, 3 * s); ctx.beginPath(); ctx.arc(worldToScreenX(o.rx), worldToScreenY(o.ry), 44 * s, 0, 7); ctx.stroke(); } }
+            else spr = wcCarSprite(WC.carColors[o.c % WC.carColors.length] || '#ccc', o.t === 2 ? 3 : o.t === 1 ? 1 : 0, o.t === 2 ? 66 : o.t === 1 ? 50 : 56, o.t === 2 ? 32 : 29);
+            wcBlitCar(spr, o.rx, o.ry, o.ra);
+        } else {
+            const x = worldToScreenX(o.rx), y = worldToScreenY(o.ry), sk = o.skin || 0, shirts = ['#c94c4c', '#4c78c9', '#4cc98a', '#c9a64c', '#8b4cc9', '#4cc9c2', '#c94c9a', '#7a8a96'], skins = ['#e4b995', '#c68e63', '#8d5a3b', '#f0cfae'];
+            ctx.save(); ctx.translate(x, y); ctx.rotate(o.ra || 0);
+            ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.beginPath(); ctx.ellipse(1.5 * s, 2 * s, 6 * s, 5 * s, 0, 0, 7); ctx.fill();
+            ctx.fillStyle = shirts[sk % 8]; ctx.beginPath(); ctx.ellipse(0, 0, 3.6 * s, 6 * s, 0, 0, 7); ctx.fill();
+            ctx.fillStyle = skins[sk % 4]; ctx.beginPath(); ctx.arc(1 * s, 0, 3.6 * s, 0, 7); ctx.fill(); ctx.fillStyle = 'rgba(40,30,25,.8)'; ctx.beginPath(); ctx.arc(0, 0, 3.6 * s, 1.2, 5.1); ctx.fill();
+            ctx.restore();
+        }
+    }
+}
+function wcDrawExterior() {
+    const s = 1 / fov, W = canvas.width, H = canvas.height;
+    const vx0 = camera.x - 100, vy0 = camera.y - 100, vx1 = camera.x + W * fov + 100, vy1 = camera.y + H * fov + 100;
+    wcFillTex('grass', camera.x, camera.y, W * fov, H * fov, 110);
+    const cx0 = Math.max(0, Math.floor(vx0 / WC.chunk)), cx1 = Math.min(WC.nch - 1, Math.floor(vx1 / WC.chunk)), cy0 = Math.max(0, Math.floor(vy0 / WC.chunk)), cy1 = Math.min(WC.nch - 1, Math.floor(vy1 / WC.chunk));
+    const list = [];
+    for (let cx = cx0; cx <= cx1; cx++) for (let cy = cy0; cy <= cy1; cy++) { const c = WC.chunks.get(cx + cy * WC.nch); if (c) list.push(c); }
+    const seen = new Set(), vis = (x, y, w, h) => x < vx1 && y < vy1 && x + w > vx0 && y + h > vy0;
+    const once = (k) => { if (seen.has(k)) return false; seen.add(k); return true; };
+    for (const c of list) for (const b of c.blocks) if (vis(b.x, b.y, b.w, b.h) && once('b' + b.id)) wcDrawBlock(b, s);
+    for (const c of list) for (const f of c.fields) if (vis(f.x, f.y, f.w, f.h) && once('f' + f.id)) wcDrawField(f, s);
+    wcDrawRoads(vx0, vy0, vx1, vy1, s);
+    for (const c of list) for (const j of c.junctions) if (vis(j.x - 140, j.y - 140, 280, 280) && once('j' + j.id)) wcDrawJunction(j, s);
+    for (const c of list) for (const l of c.lots) if (vis(l.x, l.y, l.w, l.h) && once('l' + l.id)) wcDrawLot(l, s);
+    for (const c of list) for (const p of c.props) if (p.k === 'path' || p.k === 'yard' || p.k === 'fountain') { if (vis(p.x, p.y, p.w, p.h) && once('p' + p.k + p.x + ',' + p.y)) wcDrawProp(p, s, 0); }
+    for (const c of list) for (const q of c.pcars) {
+        if (!vis(q.x - 40, q.y - 40, 80, 80)) continue;
+        const van = q.t === 1; wcBlitCar(wcCarSprite(WC.carColors[q.c % WC.carColors.length] || '#ccc', van ? 3 : 0, van ? 66 : 56, van ? 32 : 29), q.x, q.y, q.a);
+    }
+    for (const c of list) for (const b of c.buildings) {
+        if (!vis(b.x - WC_PAD, b.y - WC_PAD, b.w + 2 * WC_PAD, b.h + 2 * WC_PAD) || !once('B' + b.id)) continue;
+        if (b.k === 'house') wcHouseLot(b, s);
+        wcBlit(wcBuildingSprite(b), b.x, b.y);
+    }
+    for (const c of list) for (const p of c.props) if (p.k === 'silo' && vis(p.x, p.y, p.w, p.h) && once('s' + p.x + ',' + p.y)) wcDrawProp(p, s, 0);
+    wcUpdateDyn(); wcDrawDyn(vx0, vy0, vx1, vy1, s);
+    for (const c of list) for (const p of c.props) if ((p.k === 'lamp' || p.k === 'bench') && vis(p.x - 10, p.y - 10, (p.w || 0) + 20, (p.h || 0) + 20) && once('q' + p.k + p.x + ',' + p.y)) wcDrawProp(p, s, 1);
+    for (const c of list) for (const p of c.props) if (p.k === 'tree' && p.x > vx0 - 60 && p.x < vx1 + 60 && p.y > vy0 - 60 && p.y < vy1 + 60) wcDrawTree(p, s);
+}
+
+// ---- interiors (static; rendered once into an offscreen canvas) ------------------------------------------------------------------
+let wcIntCache = null;
+function wcPaintFurniture(g, f, D) {
+    const x = f.x, y = f.y, w = f.w, h = f.h, k = f.k, acc = D.theme.accent || '#5b7fa8';
+    const sh = () => { g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(x + 3, y + 4, w, h); };
+    switch (k) {
+        case 'rug': g.fillStyle = D.kind === 'house' ? '#8a4a4a' : '#44566c'; wcRR(g, x, y, w, h, 10); g.fill(); g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 3; wcRR(g, x + 7, y + 7, w - 14, h - 14, 7); g.stroke(); break;
+        case 'desk': sh(); g.fillStyle = '#9b7248'; g.fillRect(x, y, w, h); g.fillStyle = '#b88b5a'; g.fillRect(x + 2, y + 2, w - 4, h - 4); g.fillStyle = '#2a3036'; g.fillRect(x + w / 2 - 22, y + h - 20, 44, 11); g.fillStyle = '#4a5560'; g.fillRect(x + w / 2 - 20, y + h - 18, 40, 7); g.fillStyle = '#f1f1f1'; g.fillRect(x + 12, y + 12, 18, 12); break;
+        case 'monitor': g.fillStyle = '#15191d'; g.fillRect(x, y, w, h); g.fillStyle = '#5aa6d8'; g.fillRect(x + 2, y + 1.5, w - 4, h - 3); break;
+        case 'chair': g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.arc(x + 2, y + 3, f.r, 0, 7); g.fill(); g.fillStyle = '#2f3b46'; g.beginPath(); g.arc(x, y, f.r, 0, 7); g.fill(); g.fillStyle = '#44566a'; g.beginPath(); g.arc(x, y, f.r * .7, 0, 7); g.fill(); break;
+        case 'reception': sh(); g.fillStyle = '#5b4330'; g.fillRect(x, y, w, h); g.fillStyle = '#e3d6b8'; g.fillRect(x + 3, y + 3, w - 6, h - 12); g.fillStyle = acc; g.fillRect(x + 3, y + h - 8, w - 6, 5); g.fillStyle = '#e4b995'; g.beginPath(); g.arc(x + w / 2, y - 16, 9, 0, 7); g.fill(); g.fillStyle = '#4c5d70'; g.beginPath(); g.ellipse(x + w / 2, y - 3, 17, 8, 0, 0, 7); g.fill(); break;
+        case 'sofa': sh(); g.fillStyle = '#3d556e'; wcRR(g, x, y, w, h, 10); g.fill(); g.fillStyle = '#4f6d8a'; wcRR(g, x + 8, y + 14, w - 16, h - 20, 7); g.fill(); g.strokeStyle = 'rgba(0,0,0,.25)'; g.lineWidth = 1.5; for (let i = 1; i < 3; i++) { g.beginPath(); g.moveTo(x + 8 + i * (w - 16) / 3, y + 14); g.lineTo(x + 8 + i * (w - 16) / 3, y + h - 6); g.stroke(); } break;
+        case 'plant': g.fillStyle = 'rgba(0,0,0,.22)'; g.beginPath(); g.arc(x + 3, y + 4, f.r, 0, 7); g.fill(); g.fillStyle = '#7a5538'; g.beginPath(); g.arc(x, y, f.r * .7, 0, 7); g.fill(); for (let i = 0; i < 7; i++) { g.fillStyle = i % 2 ? '#3d8a48' : '#58a85a'; g.beginPath(); g.arc(x + Math.cos(i * .9) * f.r * .5, y + Math.sin(i * .9) * f.r * .5, f.r * .55, 0, 7); g.fill(); } break;
+        case 'cabinet': sh(); g.fillStyle = '#7d8790'; g.fillRect(x, y, w, h); g.fillStyle = '#a0abb3'; g.fillRect(x + 2, y + 2, w - 4, h - 4); g.strokeStyle = 'rgba(0,0,0,.3)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x + w / 2, y + 2); g.lineTo(x + w / 2, y + h - 2); g.stroke(); break;
+        case 'cooler': g.fillStyle = '#cfd8de'; g.fillRect(x, y, w, h); g.fillStyle = '#6fb6e0'; g.beginPath(); g.arc(x + w / 2, y + h / 2, 10, 0, 7); g.fill(); break;
+        case 'table': sh(); g.fillStyle = '#6b4a30'; wcRR(g, x, y, w, h, 6); g.fill(); g.fillStyle = '#8c6440'; wcRR(g, x + 3, y + 3, w - 6, h - 6, 5); g.fill(); break;
+        case 'dining': sh(); g.fillStyle = '#6b4a30'; wcRR(g, x, y, w, h, 8); g.fill(); g.fillStyle = '#a07650'; wcRR(g, x + 3, y + 3, w - 6, h - 6, 6); g.fill(); g.fillStyle = '#f2efe6'; for (let i = 0; i < 4; i++) { g.beginPath(); g.arc(x + 25 + i * (w - 50) / 3, y + h / 2, 9, 0, 7); g.fill(); } break;
+        case 'tv': sh(); g.fillStyle = '#14181c'; g.fillRect(x, y, w, h); g.fillStyle = '#3a5d78'; g.fillRect(x + 3, y + 3, w - 6, h - 9); break;
+        case 'counter': case 'island': sh(); g.fillStyle = '#8a8f94'; g.fillRect(x, y, w, h); g.fillStyle = '#d9dcdc'; g.fillRect(x + 2, y + 2, w - 4, h - 4); if (k === 'counter') { g.fillStyle = '#7fa8bf'; wcRR(g, x + w * .2, y + 8, 42, h - 16, 6); g.fill(); g.fillStyle = '#2e3236'; for (let i = 0; i < 4; i++) { g.beginPath(); g.arc(x + w * .62 + (i % 2) * 22, y + 15 + Math.floor(i / 2) * 20, 7, 0, 7); g.fill(); } } else { g.fillStyle = '#c8a368'; g.fillRect(x + 6, y + h - 7, w - 12, 4); } break;
+        case 'bed': sh(); g.fillStyle = '#5d3f2b'; wcRR(g, x, y, w, h, 8); g.fill(); g.fillStyle = '#efeae0'; wcRR(g, x + 6, y + 6, w - 12, h - 12, 6); g.fill(); g.fillStyle = '#fff'; wcRR(g, x + 14, y + 12, w / 2 - 20, 34, 8); g.fill(); wcRR(g, x + w / 2 + 6, y + 12, w / 2 - 20, 34, 8); g.fill(); g.fillStyle = '#5a7fa5'; wcRR(g, x + 6, y + 70, w - 12, h - 76, 6); g.fill(); break;
+        case 'wardrobe': sh(); g.fillStyle = '#6c4d34'; g.fillRect(x, y, w, h); g.fillStyle = '#865f40'; g.fillRect(x + 2, y + 2, w - 4, h - 4); g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x + w / 2, y + 2); g.lineTo(x + w / 2, y + h - 2); g.stroke(); break;
+        case 'nightstand': sh(); g.fillStyle = '#7a5a3c'; g.fillRect(x, y, w, h); g.fillStyle = '#f6e3a4'; g.beginPath(); g.arc(x + w / 2, y + h / 2, 7, 0, 7); g.fill(); break;
+        case 'bath': sh(); g.fillStyle = '#e9eef0'; wcRR(g, x, y, w, h, 12); g.fill(); g.fillStyle = '#9ccbe0'; wcRR(g, x + 8, y + 8, w - 16, h - 16, 10); g.fill(); g.fillStyle = '#b0b6ba'; g.beginPath(); g.arc(x + w - 14, y + h / 2, 4, 0, 7); g.fill(); break;
+    }
+}
+function wcGetInterior() {
+    if (wcIntCache && wcIntCache.key === WC.intKey) return wcIntCache;
+    const D = WC.interior, fl = D.floor, M = 90, sc = Math.min(wcSPR, 1.25);
+    const c = document.createElement('canvas'); c.width = Math.ceil((fl.w + 2 * M) * sc); c.height = Math.ceil((fl.h + 2 * M) * sc);
+    const g = c.getContext('2d'); g.scale(sc, sc); g.translate(M - fl.x, M - fl.y);
+    g.fillStyle = '#12171c'; g.fillRect(fl.x - M, fl.y - M, fl.w + 2 * M, fl.h + 2 * M);
+    for (const r of D.rooms) {
+        const col = { office: '#8d9aa8', lobby: '#d8d1c0', living: '#c9a070', kitchen: '#cfd3d0', bedroom: '#b9a7a0' }[r.c] || '#bbb';
+        g.fillStyle = col; g.fillRect(r.x, r.y, r.w, r.h); g.strokeStyle = 'rgba(0,0,0,.10)'; g.lineWidth = 1;
+        if (r.c === 'living') { for (let y = r.y; y < r.y + r.h; y += 24) { g.beginPath(); g.moveTo(r.x, y); g.lineTo(r.x + r.w, y); g.stroke(); } }
+        else if (r.c === 'office') { for (let x = r.x; x < r.x + r.w; x += 48) { g.beginPath(); g.moveTo(x, r.y); g.lineTo(x, r.y + r.h); g.stroke(); } for (let y = r.y; y < r.y + r.h; y += 48) { g.beginPath(); g.moveTo(r.x, y); g.lineTo(r.x + r.w, y); g.stroke(); } }
+        else if (r.c === 'lobby' || r.c === 'kitchen') { for (let x = r.x; x < r.x + r.w; x += 40) for (let y = r.y; y < r.y + r.h; y += 40) { if (((x - r.x) / 40 + (y - r.y) / 40) % 2 === 0) { g.fillStyle = 'rgba(0,0,0,.05)'; g.fillRect(x, y, 40, 40); } } }
+        else { g.fillStyle = 'rgba(255,255,255,.04)'; for (let i = 0; i < 300; i++) g.fillRect(r.x + (i * 97 % r.w), r.y + (i * 53 % r.h), 3, 3); }
+    }
+    if (D.kind === 'office') { g.fillStyle = D.theme.accent; g.fillRect(fl.x, fl.y + fl.h - 304, fl.w, 5); g.save(); g.fillStyle = D.theme.accent; g.fillRect(fl.x, fl.y - 26, fl.w, 26); g.fillStyle = '#fff'; g.font = 'bold 17px Ubuntu, Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(D.theme.name.toUpperCase(), fl.x + fl.w / 2, fl.y - 12); g.restore(); }
+    for (const f of D.furn) wcPaintFurniture(g, f, D);
+    for (const w of D.walls) { g.fillStyle = '#2a323b'; g.fillRect(w.x, w.y, w.w, w.h); g.fillStyle = '#566272'; g.fillRect(w.x + 2, w.y + 2, w.w - 4, Math.min(5, w.h - 4)); }
+    const d = D.door; g.fillStyle = '#7a3b3b'; g.fillRect(d.x, d.y - 26, d.w, 26); g.fillStyle = 'rgba(255,255,255,.4)'; g.fillRect(d.x + 6, d.y - 22, d.w - 12, 3); g.fillStyle = '#e3d9b8'; g.fillRect(d.x, d.y, d.w, d.h);
+    g.fillStyle = 'rgba(255,255,255,.7)'; g.font = 'bold 14px Ubuntu, Arial'; g.textAlign = 'center'; g.fillText('EXIT', d.x + d.w / 2, d.y - 8);
+    wcIntCache = { key: WC.intKey, c, M, sc, fl };
+    return wcIntCache;
+}
+function wcDrawInterior() {
+    if (!WC.interior) return;
+    const I = wcGetInterior(), s = 1 / fov;
+    ctx.fillStyle = '#0d1115'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(I.c, worldToScreenX(I.fl.x - I.M), worldToScreenY(I.fl.y - I.M), I.c.width / I.sc * s, I.c.height / I.sc * s);
+    if (WC.interior.kind === 'office') {   // the desk you are at lights up when you work
+        const me = gameState.entities.find(e => e.id === myId);
+        for (const st of WC.interior.stations) if (me && Math.hypot(st.x - me.x, st.y - me.y) < st.r) { ctx.strokeStyle = 'rgba(255,230,120,.55)'; ctx.lineWidth = Math.max(2, 3 * s); ctx.beginPath(); ctx.arc(worldToScreenX(st.x), worldToScreenY(st.y), 26 * s, 0, 7); ctx.stroke(); }
+    }
+}
+function drawWorldEnvironment() {
+    if (!wcTex) wcMakeTex();
+    ctx.save();
+    if (WC.scene === 'ext') wcDrawExterior(); else wcDrawInterior();
+    ctx.restore();
+    wcPositionPrompt();                                                   // keep the bubble glued to its building / car
+    const now = performance.now(); if (now - wcChipT > 400) { wcChipT = now; wcRenderChip(); }   // shift countdown
+}
+let wcChipT = 0;
+
+// ---- minimap ----------------------------------------------------------------------------------------------------------------------------------
+function drawWorldMinimap() {
+    const me = gameState.entities.find(e => e.id === myId), px = me ? me.x : WC.pos.x, py = me ? me.y : WC.pos.y;
+    mCtx.fillStyle = '#1b2228'; mCtx.fillRect(0, 0, 150, 150);
+    if (WC.scene !== 'ext') {
+        const D = WC.interior; if (!D) return; const fl = D.floor, k = 140 / Math.max(fl.w, fl.h), ox = 5 + (140 - fl.w * k) / 2, oy = 5 + (140 - fl.h * k) / 2;
+        mCtx.fillStyle = '#7f8b94'; mCtx.fillRect(ox, oy, fl.w * k, fl.h * k);
+        for (const w of D.walls) { mCtx.fillStyle = '#2b333b'; mCtx.fillRect(ox + (w.x - fl.x) * k, oy + (w.y - fl.y) * k, Math.max(1, w.w * k), Math.max(1, w.h * k)); }
+        for (const f of D.furn) if (f.solid && f.w) { mCtx.fillStyle = '#5d6a74'; mCtx.fillRect(ox + (f.x - fl.x) * k, oy + (f.y - fl.y) * k, f.w * k, f.h * k); }
+        mCtx.fillStyle = '#fff'; mCtx.strokeStyle = '#142027'; mCtx.lineWidth = 1.4; mCtx.beginPath(); mCtx.arc(ox + (px - fl.x) * k, oy + (py - fl.y) * k, 3.2, 0, 7); mCtx.fill(); mCtx.stroke();
+        mCtx.strokeStyle = 'rgba(255,255,255,.85)'; mCtx.lineWidth = 1; mCtx.strokeRect(.5, .5, 149, 149); return;
+    }
+    const R = 2600, k = 150 / (2 * R), X = v => (v - px + R) * k, Y = v => (v - py + R) * k, C = WC.center;
+    mCtx.save(); mCtx.beginPath(); mCtx.rect(0, 0, 150, 150); mCtx.clip();
+    mCtx.fillStyle = '#7fa56a'; mCtx.fillRect(0, 0, 150, 150);
+    const cx0 = Math.max(0, Math.floor((px - R) / WC.chunk)), cx1 = Math.min(WC.nch - 1, Math.floor((px + R) / WC.chunk)), cy0 = Math.max(0, Math.floor((py - R) / WC.chunk)), cy1 = Math.min(WC.nch - 1, Math.floor((py + R) / WC.chunk));
+    const seen = new Set(), list = [];
+    for (let cx = cx0; cx <= cx1; cx++) for (let cy = cy0; cy <= cy1; cy++) { const c = WC.chunks.get(cx + cy * WC.nch); if (c) list.push(c); }
+    for (const c of list) for (const b of c.blocks) { if (seen.has('b' + b.id)) continue; seen.add('b' + b.id); mCtx.fillStyle = b.g === 'forest' ? '#4f7d47' : b.g === 'farm' ? '#9bb877' : b.g === 'park' || b.g === 'plaza' ? '#6fa062' : b.z <= 1 ? '#a9a99f' : b.z === 2 ? '#8db172' : '#8bb06d'; mCtx.fillRect(X(b.x), Y(b.y), b.w * k + .5, b.h * k + .5); }
+    for (const c of list) for (const f of c.fields) { if (seen.has('f' + f.id)) continue; seen.add('f' + f.id); mCtx.fillStyle = f.kind === 'pitch' ? '#5c9a4e' : '#b89a55'; mCtx.fillRect(X(f.x), Y(f.y), f.w * k, f.h * k); }
+    mCtx.fillStyle = '#39414a';
+    for (const r of WC.roads) { const w = Math.max(1, 2 * r.hw * k); if (r.a === 'v') { if (Math.abs(r.p - px) < R + 100) mCtx.fillRect(X(r.p) - w / 2, 0, w, 150); } else if (Math.abs(r.p - py) < R + 100) mCtx.fillRect(0, Y(r.p) - w / 2, 150, w); }
+    for (const c of list) for (const l of c.lots) { if (seen.has('l' + l.id)) continue; seen.add('l' + l.id); mCtx.fillStyle = l.dealer ? '#c9a23a' : '#4b535b'; mCtx.fillRect(X(l.x), Y(l.y), l.w * k, l.h * k); }
+    for (const c of list) for (const b of c.buildings) {
+        if (seen.has('B' + b.id)) continue; seen.add('B' + b.id);
+        let col = '#6d7a85'; const sz = b.k === 'house' || b.k === 'farmhouse' ? 3 : 0;
+        if (b.k === 'bank') col = '#2f7cc4'; else if (b.k === 'dealer') col = '#e0592f'; else if (b.work) col = b.col; else if (sz) { const o = WC.houses.get(b.hid); col = !o ? '#f1e7a8' : o.m ? '#ffcc33' : '#a0856a'; } else if (b.k === 'barn') col = '#a63d33';
+        mCtx.fillStyle = col;
+        if (sz) mCtx.fillRect(X(b.x + b.w / 2) - 1.2, Y(b.y + b.h / 2) - 1.2, 2.4, 2.4); else mCtx.fillRect(X(b.x), Y(b.y), Math.max(1.5, b.w * k), Math.max(1.5, b.h * k));
+    }
+    for (const e of gameState.entities) { if (!['square', 'triangle', 'pentagon', 'hexagon', 'powerup'].includes(e.type)) continue; mCtx.fillStyle = e.type === 'square' ? '#f8de4d' : e.type === 'triangle' ? '#fc6868' : e.type === 'pentagon' ? '#7b83ff' : e.type === 'powerup' ? '#f5a6ff' : '#72eff4'; mCtx.fillRect(X(e.x) - 1, Y(e.y) - 1, 2, 2); }
+    for (const e of gameState.entities) if (['tank', 'ai'].includes(e.type) && e.id !== myId && e.x != null) { mCtx.fillStyle = '#f0a0a0'; mCtx.fillRect(X(e.x) - 1.5, Y(e.y) - 1.5, 3, 3); }
+    const myCar = worldState.car; if (myCar && myCar.x != null && !myCar.driven) { mCtx.fillStyle = '#ffb43a'; mCtx.strokeStyle = '#2a1d05'; mCtx.lineWidth = 1; mCtx.fillRect(X(myCar.x) - 2.5, Y(myCar.y) - 2.5, 5, 5); mCtx.strokeRect(X(myCar.x) - 2.5, Y(myCar.y) - 2.5, 5, 5); }
+    mCtx.strokeStyle = 'rgba(255,255,255,.35)'; mCtx.lineWidth = .8; const vw = canvas.width * fov * k, vh = canvas.height * fov * k; mCtx.strokeRect(75 - vw / 2, 75 - vh / 2, vw, vh);
+    mCtx.fillStyle = '#fff'; mCtx.strokeStyle = '#142027'; mCtx.lineWidth = 1.6; mCtx.beginPath(); mCtx.arc(75, 75, 3.5, 0, 7); mCtx.fill(); mCtx.stroke();
+    mCtx.restore(); mCtx.strokeStyle = 'rgba(255,255,255,.85)'; mCtx.lineWidth = 1; mCtx.strokeRect(.5, .5, 149, 149);
+}
 
 function connectWS(regionStr, modeStr) {
 
@@ -2247,7 +2696,7 @@ function connectWS(regionStr, modeStr) {
 
         window.inputInterval = setInterval(() => {
 
-    if (isWorldMode && performance.now()-worldLastView>1400) { worldLastView=performance.now(); worldSend('world_refresh'); }
+    
     if (myId) {
 
         let finalAngle = 0;
@@ -2379,13 +2828,7 @@ function connectWS(regionStr, modeStr) {
     ws.onmessage = (e) => {
 
         const data = JSON.parse(e.data);
-        if(data.type==='world_joined'){beginWorldMode(data);return;}
-        if(data.type==='world_position'){worldState={...worldState,...data};updateWorldHud();return;}
-        if(data.type==='world_view'){worldView=data.view;return;}
-        if(data.type==='world_notice'){if(data.sessionCoins!==undefined)worldState.sessionCoins=data.sessionCoins;if(data.statPoints!==undefined)worldState.statPoints=data.statPoints;document.getElementById('world-message').innerText=data.message||'';updateWorldHud();return;}
-        if(data.type==='world_death'){worldState=data.world;worldView=data.view;document.getElementById('world-message').innerText=`${data.reason}. Fresh FFA spawn; permanent stat upgrades kept.`;updateWorldHud();return;}
-        if(data.type==='world_house_prompt'){if(confirm(`Available house plot: ${data.price.toLocaleString()} coins. Buy it?`))worldBuyHouse(data.houseId);return;}
-        if(data.type==='world_error'){pendingWorldJoin=false;alert(data.message);return;}
+        if (handleWorldMessage(data)) return;
 
         if(data.type === 'init') { myId = data.id; myTeam = data.team; spectateId = null; myNameColor = data.nc; myName = data.name1}
 
@@ -3277,7 +3720,8 @@ function draw() {
 
     // Camera targeting logic stays exactly the same...
 
-    const activeWorldExtent = isWorldMode ? (worldView?.extent || 50400) : WORLD_SIZE;
+    if (isWorldMode) { updateVisualFov(); fov += (fovTarget - fov) * 0.08; }
+    const activeWorldExtent = isWorldMode ? wcExtent() : WORLD_SIZE;
     let targetCamX = activeWorldExtent/2 - (canvas.width * fov) / 2;
 
     let targetCamY = activeWorldExtent/2 - (canvas.height * fov) / 2;
@@ -3297,6 +3741,7 @@ function draw() {
             targetCamX = rMe.renderX - (canvas.width * fov) / 2;
 
             targetCamY = rMe.renderY - (canvas.height * fov) / 2;
+            if (isWorldMode && me.veh) { targetCamX += Math.cos(me.veh.a) * me.veh.v * 22; targetCamY += Math.sin(me.veh.a) * me.veh.v * 22; }   // look ahead while driving
 
 
 
@@ -3310,13 +3755,13 @@ function draw() {
 
             }
 
-        } else if (isWorldMode && worldState) {
-            const wx=activeWorldExtent/2+(worldState.x||180),wy=activeWorldExtent/2+(worldState.y||180);
+        } else if (isWorldMode) {
+            const wx=WC.pos.x,wy=WC.pos.y;
             targetCamX=wx-(canvas.width*fov)/2;targetCamY=wy-(canvas.height*fov)/2;
         }
 
-    } else if (isWorldMode && worldState) {
-        const wx=activeWorldExtent/2+(worldState.x||180),wy=activeWorldExtent/2+(worldState.y||180);
+    } else if (isWorldMode) {
+        const wx=WC.pos.x,wy=WC.pos.y;
         targetCamX=wx-(canvas.width*fov)/2;targetCamY=wy-(canvas.height*fov)/2;
 
     } else if (spectateId) {
@@ -4041,7 +4486,7 @@ if (e.square) {
 
         
 
-        Object.assign(rPos, en);
+        Object.assign(rPos, en); if (!en.veh) rPos.veh = undefined;
 
         
 
@@ -4145,9 +4590,9 @@ if (e.square) {
 
             
 
-            ctx.strokeText(en.name, sx, sy - en.radius - 25);
+            ctx.strokeText(en.name, sx, sy - scaleSize(en.veh ? Math.max(en.radius, 30) : en.radius) - 25);
 
-            ctx.fillText(en.name, sx, sy - en.radius - 25);
+            ctx.fillText(en.name, sx, sy - scaleSize(en.veh ? Math.max(en.radius, 30) : en.radius) - 25);
 
             
 
@@ -4161,9 +4606,9 @@ if (e.square) {
 
             const displayScore = formatScore(Math.floor(en.score));
 
-            ctx.strokeText(displayScore, sx, sy - en.radius- 12);
+            ctx.strokeText(displayScore, sx, sy - scaleSize(en.veh ? Math.max(en.radius, 30) : en.radius) - 12);
 
-            ctx.fillText(displayScore, sx, sy - en.radius - 12);
+            ctx.fillText(displayScore, sx, sy - scaleSize(en.veh ? Math.max(en.radius, 30) : en.radius) - 12);
 
 
 
@@ -4220,7 +4665,7 @@ if (e.square) {
 
         }
 
-        drawEntityBody(ctx, rPos);
+        if (en.veh) wcDrawVehicleEntity(ctx, rPos, en); else drawEntityBody(ctx, rPos);
 
         ctx.globalAlpha = 1;
 
@@ -4237,47 +4682,7 @@ if (e.square) {
     }
 
     mCtx.clearRect(0,0,150,150);
-    if (isWorldMode) {
-        const tile=worldView?.tile||420,cells=worldView?.cells||[],extent=worldView?.extent||50400;
-        mCtx.fillStyle='#202b31';mCtx.fillRect(0,0,150,150);
-        if(cells.length){
-            const minGX=Math.min(...cells.map(c=>c.gx)),maxGX=Math.max(...cells.map(c=>c.gx));
-            const minGY=Math.min(...cells.map(c=>c.gy)),maxGY=Math.max(...cells.map(c=>c.gy));
-            const cols=maxGX-minGX+1,rows=maxGY-minGY+1,cellW=150/cols,cellH=150/rows;
-            const point=(wx,wy)=>({x:((wx/tile+60)-minGX)*cellW,y:((wy/tile+60)-minGY)*cellH});
-            const biomeColors={city:'#59666f',suburb:'#73966c',park:'#3f794d',farmland:'#aa9255'};
-            cells.forEach(cell=>{
-                const x=(cell.gx-minGX)*cellW,y=(cell.gy-minGY)*cellH;
-                mCtx.fillStyle=biomeColors[cell.biome]||'#73966c';mCtx.fillRect(x,y,cellW+.4,cellH+.4);
-                (cell.roads||[]).forEach(r=>{
-                    mCtx.fillStyle='#313b42';
-                    if(r.axis==='horizontal'){
-                        const road=Math.max(1,(r.w||80)/tile*cellH),ry=((r.y/tile+60)-minGY)*cellH;
-                        mCtx.fillRect(x,ry-road*.5,cellW,road);
-                    }else{
-                        const road=Math.max(1,(r.w||80)/tile*cellW),rx=((r.x/tile+60)-minGX)*cellW;
-                        mCtx.fillRect(rx-road*.5,y,road,cellH);
-                    }
-                });
-            });
-            // Shape dots are the same server-side arena shapes that award score/XP.
-            gameState.entities.forEach(en=>{
-                if(!['square','triangle','pentagon','hexagon','powerup'].includes(en.type))return;
-                const q=point(en.x-extent/2,en.y-extent/2);if(q.x<0||q.y<0||q.x>150||q.y>150)return;
-                mCtx.fillStyle=en.type==='square'?'#f8de4d':en.type==='triangle'?'#fc6868':en.type==='pentagon'?'#7b83ff':en.type==='powerup'?'#f5a6ff':'#72eff4';
-                mCtx.beginPath();mCtx.arc(q.x,q.y,1.15,0,Math.PI*2);mCtx.fill();
-            });
-            (worldView.cars||[]).forEach(car=>{const q=point(car.x,car.y);if(q.x>=0&&q.y>=0&&q.x<=150&&q.y<=150){mCtx.fillStyle='#e8a15b';mCtx.fillRect(q.x-1,q.y-1,2,2);}});
-            (worldView.houses||[]).forEach(h=>{const q=point(h.x,h.y);if(q.x>=0&&q.y>=0&&q.x<=150&&q.y<=150){mCtx.fillStyle=h.owner_id?'#89958b':'#ffe19a';mCtx.fillRect(q.x-1.5,q.y-1.5,3,3);}});
-            const me=gameState.entities.find(en=>en.id===myId);
-            const px=me?me.x-extent/2:(worldState?.x||0),py=me?me.y-extent/2:(worldState?.y||0),q=point(px,py);
-            // Current camera footprint, clipped to the local minimap window.
-            const viewW=Math.min(150,canvas.width*fov/tile*cellW),viewH=Math.min(150,canvas.height*fov/tile*cellH);
-            mCtx.strokeStyle='rgba(255,255,255,.32)';mCtx.lineWidth=.8;mCtx.strokeRect(q.x-viewW/2,q.y-viewH/2,viewW,viewH);
-            mCtx.fillStyle='#fff';mCtx.strokeStyle='#142027';mCtx.lineWidth=1.6;mCtx.beginPath();mCtx.arc(q.x,q.y,3.5,0,Math.PI*2);mCtx.fill();mCtx.stroke();
-        }
-        mCtx.strokeStyle='rgba(255,255,255,.85)';mCtx.lineWidth=1;mCtx.strokeRect(.5,.5,149,149);
-    }else {
+    if (isWorldMode) { drawWorldMinimap(); } else {
         if(gameMode === "2TDM") {
             mCtx.fillStyle = "rgba(0, 178, 225, 0.3)"; mCtx.fillRect(0, 0, (400/WORLD_SIZE)*150, 150);
             mCtx.fillStyle = "rgba(241, 78, 84, 0.3)"; mCtx.fillRect(150-(400/WORLD_SIZE)*150, 0, (400/WORLD_SIZE)*150, 150);
@@ -4363,7 +4768,7 @@ window.onkeydown = e => {
 
     // Toggles
 
-    if (key === 'g' && isWorldMode) { worldSend('world_enter_car'); return; }
+    if (key === 'f' && isWorldMode) { worldInteractPrimary(); return; }
     if (key === 'e') autoFire = !autoFire;
 
     if (key === 'c') autoSpin = !autoSpin;
@@ -4483,7 +4888,8 @@ window.oncontextmenu = e => e.preventDefault(); function resizeGame() {
     // Scale fov so every screen sees the same world coverage as 1536px wide at BASE_FOV
 
     baseFov = (REF_WIDTH * BASE_FOV) / canvas.width;
-        updateVisualFov();
+    worldOnResize();
+    updateVisualFov();
 
 
 
