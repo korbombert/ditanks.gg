@@ -1360,7 +1360,7 @@ class Entity {
 this.maxHealthPowerupActive = false;
 this.baseMaxHpBeforePowerup = null;
         this.radius = 20; this.angle = 0;
-        this.worldInCar = false; this.worldCarSpeed = 1.35;
+        this.vehicle = null; this.ghost = false;
         this.vx = 0; this.vy = 0;
         this.barrelTimers = []; this.wasShooting = false; this.activeDrones = 0;
         this.inputs = { up: false, down: false, left: false, right: false, shooting: false, angle: 0, repel: false };
@@ -1510,6 +1510,10 @@ getPowerupBulletSpeedMultiplier() {
         const arenaExtent = this.room.mode === 'WORLD' ? (this.room.worldExtent || WORLD_SIZE) : WORLD_SIZE;
         this.x = Math.max(0, Math.min(arenaExtent, this.x));
         this.y = Math.max(0, Math.min(arenaExtent, this.y));
+        // World mode: solid buildings/trees/benches/walls/cars for tanks on foot, car physics when driving.
+        if (this.room.worldKind && this.isPlayer) {
+            if (this.vehicle) worldStepVehicle(this); else worldCollideEntity(this);
+        }
         const now = Date.now();
 
 if (this.maxHealthPowerupActive &&
@@ -1579,7 +1583,7 @@ if (this.hp < effectiveMaxHp) {
             if(this.inputs.right) inputX += 1;
             if(this.inputs.up) inputY -= 1;
             if(this.inputs.down) inputY += 1;
-            if (inputX !== 0 || inputY !== 0) {
+            if ((inputX !== 0 || inputY !== 0) && !this.vehicle) {
                 let length = Math.sqrt(inputX * inputX + inputY * inputY);
                 this.vx += (inputX / length) * moveSpeed;
                 this.vy += (inputY / length) * moveSpeed;
@@ -1971,6 +1975,7 @@ if (tooDeep) {
         ((30 * 1.002) - (this.stats[6] * (3 * 0.995)))
     ) * this.getPowerupReloadMultiplier();
 
+        if (this.vehicle || (this.room && this.room.noCombat)) isShooting = false;   // no shooting from a car or indoors
         if (isShooting && !this.wasShooting) {
             specs.barrels.forEach((b, i) => {
                 if (this.barrelTimers[i] <= 0) {
@@ -2200,6 +2205,11 @@ const worldRoom = new Room('WORLD', 'WORLD', { shapeCount: 0, botCount: 0, shape
 worldRoom.worldExtent = WORLD_EXTENT;
 worldRoom.grid = new SpatialGrid(WORLD_EXTENT, 500);
 rooms.WORLD = worldRoom;
+worldRoom.worldKind = 'exterior';
+// Interiors (houses / workplaces) are private Rooms created on demand; they are kept out of `rooms`
+// so they never show up in server lists / admin APIs.
+const interiorRooms = {};
+function allRooms() { return Object.values(rooms).concat(Object.values(interiorRooms)); }
 
 // ===================== GAME LOGIC =====================
 
@@ -2470,7 +2480,7 @@ function updateRoom(room) {
         b.x += b.vx; b.y += b.vy; b.life--;
     });
     room.grid.clear();
-    room.entities.forEach(e => { if(!e.markedForDeletion) room.grid.insert(e, 'entities'); });
+    room.entities.forEach(e => { if(!e.markedForDeletion && !e.ghost) room.grid.insert(e, 'entities'); });
     room.bullets.forEach(b => { if(b.life > 0) room.grid.insert(b, 'bullets'); });
     room.drones.forEach(d => { if(!d.markedForDeletion) room.grid.insert(d, 'drones'); });
     room.entities.forEach(e => { if(!e.markedForDeletion) e.update(); });
@@ -2640,7 +2650,7 @@ function updateRoom(room) {
                 other.vx += pushX * (m1 / totalM);
                 other.vy += pushY * (m1 / totalM);
                 
-                if (!isSameTeam) {
+                if (!isSameTeam && !room.noCombat) {
                     let damageRate = 2; 
                     let dmgE = (1 + (other.stats ? other.stats[2]*2 : 0)) * damageRate;
                     let dmgO = (1 + (en.stats ? en.stats[2]*2 : 0)) * damageRate;
@@ -2679,23 +2689,8 @@ function updateRoom(room) {
         if(e.hp <= 0) {
             if (room.mode === 'WORLD' && e.isPlayer) {
                 const owner = room.clients.find(c => c.player === e);
-                if (owner?.world) {
-                    owner.world.x = 180; owner.world.y = 180;
-                    owner.world.sessionCoins = 0; owner.world.inCar = false;
-                    owner.world.invulnerableUntil = Date.now() + 4000;
-                    e.x = WORLD_EXTENT / 2 + 180; e.y = WORLD_EXTENT / 2 + 180;
-                    e.vx = 0; e.vy = 0; e.maxHp = 100; e.hp = 100; e.radius = 20;
-                    e.level = 1; e.score = 0; e.xp = 0; e.statPoints = 0;
-                    e.tankType = 'Basic'; e.barrelTimers = []; e.wasShooting = false; e.activeDrones = 0; e.lastDamagedBy = null;
-                    e.powerups = { movementSpeed:0, reload:0, damage:0, fov:0, bulletSpeed:0, forceField:0, maxHealth:0, healthRegen:0 };
-                    e.maxHealthPowerupActive = false; e.baseMaxHpBeforePowerup = null;
-                    e.lastDamageTime = Date.now(); e.worldInCar = false;
-                    // Permanent World stat upgrades remain; temporary arena progression resets.
-                    e.inputs = { up:false, down:false, left:false, right:false, shooting:false, angle:0, repel:false };
-                    owner.room.drones=owner.room.drones.filter(d=>d.owner!==e);
-                    sendWorld(owner, 'world_death', { reason: 'Your tank was destroyed', world: owner.world, view: getWorldView(180,180) });
-                    worldSave(owner);
-                }
+                if (owner?.world) worldOnPlayerDeath(owner, e);
+                e.hp = e.maxHp;          // keep the old entity alive for a moment; the world loop respawns the player
                 return true;
             }
             // Resolve the killer once so both the achievement logic below and the
@@ -2783,7 +2778,7 @@ function updateRoom(room) {
                     client.spectatingId = e.lastDamagedBy;
                 }
             }
-            if (room.mode === 'WORLD' && ['square','triangle','pentagon','hexagon'].includes(e.type) && e.lastDamagedBy) {
+            if (room.mode === 'WORLD' && !e.noReward && ['square','triangle','pentagon','hexagon'].includes(e.type) && e.lastDamagedBy) {
                 const shooter = room.entities.find(p => p.id === e.lastDamagedBy && p.isPlayer);
                 const owner = shooter && room.clients.find(c => c.player === shooter);
                 if (owner?.world) {
@@ -2819,188 +2814,1362 @@ function updateRoom(room) {
 // ===================== GAME TICK =====================
 
 setInterval(() => { 
-    Object.values(rooms).forEach(updateRoom); 
+    allRooms().forEach(updateRoom); 
 }, 1000 / (TICK_RATE * GAME_SPEED));
 
-// ===================== PERSISTENT WORLD MODE =====================
-const WORLD_JOBS = { delivery: 35, farming: 28, construction: 45 };
-const WORLD_CARS = [
-    { id:'compact', name:'Compact', price:2500, speed:1.45, color:'#e4e7eb' },
-    { id:'sedan', name:'Sedan', price:6500, speed:1.85, color:'#2684d9' },
-    { id:'sport', name:'Sport', price:18000, speed:2.35, color:'#e84d4d' }
+// <<WORLD_LAYOUT_BEGIN>>
+// ---------------------------------------------------------------------------
+// Deterministic world layout.
+//
+// The old generator rolled dice per 420-unit cell, so every cell invented its
+// own roads / props and neighbouring cells overlapped. This one works top-down:
+//   1. Roads are GLOBAL lines on a 600-unit grid (avenue / street / lane).
+//   2. Every block is exactly the space BETWEEN two roads on each axis, so a
+//      pavement can never sit on asphalt and no road can cross a building.
+//   3. Each block lays out its content inside its own rectangle from explicit
+//      slots (rows of house lots, grids of towers, car-park bays, field tiles),
+//      so nothing inside a block can overlap anything else.
+// ---------------------------------------------------------------------------
+const W_EXT = 50400, W_C = 25200, W_S = 600;
+const W_CORE = 3600, W_INNER = 9600, W_SUB = 18000;
+const W_SW = 26;                       // pavement width inside a block
+const W_CHUNK = 1800;                  // streaming chunk size
+const W_NCH = Math.ceil(W_EXT / W_CHUNK);
+const ROAD_CLASSES = { avenue: { hw: 105, lanes: 4, e: W_C }, street: { hw: 60, lanes: 2, e: W_SUB }, lane: { hw: 46, lanes: 2, e: W_CORE } };
+const W_COMPANIES = [
+    { id: 'meridian',  name: 'Meridian Finance',   pay: 38, color: '#2f6fb0', role: 'Analyst' },
+    { id: 'atlas',     name: 'Atlas Digital',      pay: 44, color: '#7a4fd0', role: 'Developer' },
+    { id: 'northgate', name: 'Northgate Legal',    pay: 52, color: '#9a3544', role: 'Paralegal' },
+    { id: 'helix',     name: 'Helix Media',        pay: 34, color: '#d0782f', role: 'Producer' },
+    { id: 'orion',     name: 'Orion Logistics',    pay: 40, color: '#2f9c78', role: 'Coordinator' },
+    { id: 'pinnacle',  name: 'Pinnacle Insurance', pay: 48, color: '#b8962b', role: 'Underwriter' }
 ];
-function worldRand(seed, x, y) { let n = (seed ^ Math.imul(x+1, 374761393) ^ Math.imul(y+1, 668265263)) >>> 0; n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; }
+
+function wRng(seed) {
+    let a = seed >>> 0;
+    return function () {
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        let t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+}
+function wHash(seed, a, b) {
+    let n = (seed ^ Math.imul((a + 0x9e3779b1) | 0, 374761393) ^ Math.imul((b + 0x85ebca6b) | 0, 668265263)) >>> 0;
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+}
+function lineClass(k) {
+    const p = Math.abs(k * W_S);
+    if (k % 6 === 0) return 'avenue';
+    if (k % 2 === 0) return p <= W_SUB ? 'street' : null;
+    return p <= W_CORE ? 'lane' : null;
+}
+
+// Car-park bay positions. Shared by the server (parking / dealership) and the
+// client (painted lines), so both always agree.
+function lotBays(lot) {
+    const BW = 54, BD = 96, pad = 8, out = [];
+    const cols = Math.max(1, Math.floor((lot.w - 2 * pad) / BW));
+    const x0 = lot.x + (lot.w - cols * BW) / 2;
+    const rows = [];
+    if (lot.h >= BD + 2 * pad) rows.push({ y: lot.y + pad, a: -Math.PI / 2 });
+    if (lot.h >= BD * 2 + 40) rows.push({ y: lot.y + lot.h - pad - BD, a: Math.PI / 2 });
+    if (lot.h >= BD * 4 + 160) {
+        rows.push({ y: lot.y + lot.h / 2 - BD, a: -Math.PI / 2 });
+        rows.push({ y: lot.y + lot.h / 2, a: Math.PI / 2 });
+    }
+    for (const r of rows) for (let c = 0; c < cols; c++) out.push({ x: x0 + BW * (c + 0.5), y: r.y + BD / 2, a: r.a });
+    return out;
+}
+
+function buildWorldLayout(seed) {
+    const C = W_C, S = W_S;
+    const L = {
+        seed, roads: [], junctions: [], blocks: [], buildings: [], props: [], lots: [], fields: [], pcars: [],
+        colliders: [], houses: [], works: [], bank: null, dealer: null, spawn: { x: C + 300, y: C + 470 },
+        nid: 1, rv: {}, rh: {}
+    };
+    const nid = () => L.nid++;
+
+    // ---- 1. roads -----------------------------------------------------------------
+    for (const axis of ['v', 'h']) {
+        for (let k = -42; k <= 42; k++) {
+            const cls = lineClass(k); if (!cls) continue;
+            const rc = ROAD_CLASSES[cls];
+            const road = { a: axis, k, p: C + k * S, c: cls[0], hw: rc.hw, ln: rc.lanes, e: rc.e };
+            L.roads.push(road);
+            (axis === 'v' ? L.rv : L.rh)[k] = road;
+        }
+    }
+    for (const v of L.roads) {
+        if (v.a !== 'v') continue;
+        for (const h of L.roads) {
+            if (h.a !== 'h') continue;
+            const rx = v.k * S, ry = h.k * S;
+            if (Math.abs(ry) > v.e || Math.abs(rx) > h.e) continue;
+            L.junctions.push({
+                id: nid(), x: C + rx, y: C + ry,
+                n: ry > -v.e ? v.hw : 0, s: ry < v.e ? v.hw : 0,
+                w: rx > -h.e ? h.hw : 0, e: rx < h.e ? h.hw : 0, hv: v.hw, hh: h.hw
+            });
+        }
+    }
+
+    // ---- helpers to add content -----------------------------------------------------
+    const rectCol = (x, y, w, h) => L.colliders.push({ t: 0, x, y, w, h });
+    const circCol = (x, y, r) => L.colliders.push({ t: 1, x, y, r });
+    function addBuilding(kind, x, y, w, h, extra) {
+        const b = Object.assign({ id: nid(), k: kind, x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) }, extra || {});
+        if (!b.door) b.door = { dir: 'S' };
+        const d = b.door;
+        if (d.dir === 'S') { d.x = b.x + b.w / 2; d.y = b.y + b.h; }
+        else if (d.dir === 'N') { d.x = b.x + b.w / 2; d.y = b.y; }
+        else if (d.dir === 'E') { d.x = b.x + b.w; d.y = b.y + b.h / 2; }
+        else { d.x = b.x; d.y = b.y + b.h / 2; }
+        d.x = Math.round(d.x); d.y = Math.round(d.y);
+        L.buildings.push(b); rectCol(b.x, b.y, b.w, b.h);
+        return b;
+    }
+    const addTree = (x, y, v, r = 9) => { L.props.push({ k: 'tree', x: Math.round(x), y: Math.round(y), v: v | 0, r: 24 + (v % 4) * 6 }); circCol(x, y, r); };
+    const addBench = (x, y, horiz = true) => { const w = horiz ? 56 : 20, h = horiz ? 20 : 56; L.props.push({ k: 'bench', x: Math.round(x - w / 2), y: Math.round(y - h / 2), w, h }); rectCol(x - w / 2, y - h / 2, w, h); };
+    const addLamp = (x, y) => { L.props.push({ k: 'lamp', x: Math.round(x), y: Math.round(y) }); circCol(x, y, 5); };
+    const addDeco = (k, x, y, w, h, extra) => L.props.push(Object.assign({ k, x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) }, extra || {}));
+    function addLot(x, y, w, h, dealer) {
+        const lot = { id: nid(), x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), dealer: !!dealer };
+        L.lots.push(lot); return lot;
+    }
+    function fillLotWithCars(lot, rng, fill) {
+        const bays = lotBays(lot); lot.bays = bays.length;
+        if (lot.dealer) return;
+        for (let i = 0; i < bays.length; i++) {
+            if (rng() > fill) continue;
+            const b = bays[i], vert = Math.abs(Math.sin(b.a)) > 0.5;
+            L.pcars.push({ x: Math.round(b.x), y: Math.round(b.y), a: b.a, c: Math.floor(rng() * 8), t: rng() < 0.2 ? 1 : 0 });
+            rectCol(b.x - (vert ? 17 : 31), b.y - (vert ? 31 : 17), vert ? 34 : 62, vert ? 62 : 34);
+        }
+    }
+    function addField(x, y, w, h, kind, crop, target) {
+        const f = { id: nid(), x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), kind, crop, target };
+        L.fields.push(f); return f;
+    }
+    // Lamp posts sit on the pavement ring, away from every building (buildings are inset).
+    function cornerLamps(B) {
+        const o = W_SW / 2;
+        addLamp(B.x + o, B.y + o); addLamp(B.x + B.w - o, B.y + o);
+        addLamp(B.x + o, B.y + B.h - o); addLamp(B.x + B.w - o, B.y + B.h - o);
+        addLamp(B.x + B.w / 2, B.y + o); addLamp(B.x + B.w / 2, B.y + B.h - o);
+        addLamp(B.x + o, B.y + B.h / 2); addLamp(B.x + B.w - o, B.y + B.h / 2);
+    }
+    const inset = (r, d) => ({ x: r.x + d, y: r.y + d, w: r.w - 2 * d, h: r.h - 2 * d });
+
+    function companyFor(b) { return W_COMPANIES[Math.floor(wHash(seed, b.id, 77) * W_COMPANIES.length)]; }
+    function makeWork(b) { const co = companyFor(b); b.work = co.id; b.sign = co.name; b.col = co.color; L.works.push(b); }
+
+    // ---- per-zone block generators ---------------------------------------------------
+    function parkBlock(B, rng, big) {
+        const Lr = inset(B, W_SW);
+        L.blocks[L.blocks.length - 1].g = 'park';
+        // Trees on a jittered grid, benches at fixed path-side slots: no two can overlap.
+        const step = big ? 150 : 110, margin = 36;
+        const nx = Math.max(1, Math.floor((Lr.w - 2 * margin) / step)), ny = Math.max(1, Math.floor((Lr.h - 2 * margin) / step));
+        const cx = Lr.x + Lr.w / 2, cy = Lr.y + Lr.h / 2;
+        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+            const px = Lr.x + margin + (i + 0.5) * (Lr.w - 2 * margin) / nx, py = Lr.y + margin + (j + 0.5) * (Lr.h - 2 * margin) / ny;
+            if (Math.abs(px - cx) < 46 || Math.abs(py - cy) < 46) continue;          // keep the two paths clear
+            if (rng() < 0.42) continue;
+            addTree(px + (rng() - 0.5) * 20, py + (rng() - 0.5) * 20, Math.floor(rng() * 8));
+        }
+        addDeco('path', Lr.x, cy - 17, Lr.w, 34); addDeco('path', cx - 17, Lr.y, 34, Lr.h);
+        addDeco('fountain', cx - 36, cy - 36, 72, 72); circCol(cx, cy, 36);
+        const q = Math.min(Lr.w, Lr.h) * 0.27;
+        addBench(cx - q, cy - 30, true); addBench(cx + q, cy + 30, true);
+        addBench(cx - 30, cy - q, false); addBench(cx + 30, cy + q, false);
+    }
+    function towerBlock(B, rng, lowrise) {
+        const Lr = inset(B, W_SW + 12);
+        const w = Lr.w * (0.74 + rng() * 0.2), h = Lr.h * (0.74 + rng() * 0.2);
+        const x = Lr.x + (Lr.w - w) * (0.3 + rng() * 0.4), y = Lr.y + (Lr.h - h) * (0.3 + rng() * 0.4);
+        const b = addBuilding('tower', x, y, w, h, {
+            s: Math.floor(rng() * 9999), f: lowrise ? 5 + Math.floor(rng() * 6) : 12 + Math.floor(rng() * 26),
+            t: Math.floor(rng() * 6), r: Math.floor(rng() * 4)
+        });
+        if (rng() < (lowrise ? 0.28 : 0.5)) makeWork(b);
+        cornerLamps(B);
+    }
+    function twinBlock(B, rng) {
+        const Lr = inset(B, W_SW + 12), gap = 34, horiz = Lr.w >= Lr.h;
+        for (let i = 0; i < 2; i++) {
+            const w = horiz ? (Lr.w - gap) / 2 : Lr.w, h = horiz ? Lr.h : (Lr.h - gap) / 2;
+            const x = horiz ? Lr.x + i * (w + gap) : Lr.x, y = horiz ? Lr.y : Lr.y + i * (h + gap);
+            const iw = w * (0.8 + rng() * 0.15), ih = h * (0.8 + rng() * 0.15);
+            const b = addBuilding('mid', x + (w - iw) / 2, y + (h - ih) / 2, iw, ih, { s: Math.floor(rng() * 9999), f: 6 + Math.floor(rng() * 8), t: Math.floor(rng() * 6), r: Math.floor(rng() * 4) });
+            if (rng() < 0.3) makeWork(b);
+        }
+        cornerLamps(B);
+    }
+    function shopsBlock(B, rng) {
+        const Lr = inset(B, W_SW + 8), n = Math.max(2, Math.floor(Lr.w / 130)), sw = Lr.w / n, sh = Math.min(150, Lr.h * 0.42);
+        for (let i = 0; i < n; i++) addBuilding('shop', Lr.x + i * sw + 6, Lr.y, sw - 12, sh, { s: Math.floor(rng() * 9999), t: Math.floor(rng() * 6), aw: Math.floor(rng() * 6) });
+        const ty = Lr.y + sh + 60;
+        for (let i = 0; i < n; i++) if (ty + 30 < Lr.y + Lr.h) addTree(Lr.x + i * sw + sw / 2, ty + 20 + (i % 2) * 40, i + 1);
+        if (ty + 90 < Lr.y + Lr.h) addBench(Lr.x + Lr.w / 2, Lr.y + Lr.h - 40, true);
+        cornerLamps(B);
+    }
+    function carparkBlock(B, rng, dealer) {
+        const Lr = inset(B, W_SW);
+        const lot = addLot(Lr.x, Lr.y, Lr.w, Lr.h, dealer);
+        fillLotWithCars(lot, rng, 0.55);
+        cornerLamps(B);
+        return lot;
+    }
+    function midriseBlock(B, rng) {
+        const Lr = inset(B, W_SW + 14), gap = 60;
+        const nx = Lr.w > 800 ? 2 : 1, ny = Lr.h > 800 ? 2 : 1, cw = (Lr.w - gap * (nx - 1)) / nx, ch = (Lr.h - gap * (ny - 1)) / ny;
+        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+            const w = cw * (0.62 + rng() * 0.25), h = ch * (0.62 + rng() * 0.25);
+            const b = addBuilding('mid', Lr.x + i * (cw + gap) + (cw - w) / 2, Lr.y + j * (ch + gap) + (ch - h) / 2, w, h,
+                { s: Math.floor(rng() * 9999), f: 5 + Math.floor(rng() * 10), t: Math.floor(rng() * 6), r: Math.floor(rng() * 4) });
+            if (rng() < 0.3) makeWork(b);
+        }
+        cornerLamps(B);
+    }
+    function aptBlock(B, rng) {
+        const Lr = inset(B, W_SW + 14), rows = 3, gap = 46, rh = (Lr.h - gap * (rows - 1)) / rows;
+        for (let j = 0; j < rows; j++) {
+            const w = Lr.w * (0.7 + rng() * 0.2), x = Lr.x + (Lr.w - w) * rng();
+            addBuilding('apt', x, Lr.y + j * (rh + gap), w, rh * 0.78, { s: Math.floor(rng() * 9999), f: 4 + Math.floor(rng() * 5), t: Math.floor(rng() * 6) });
+            const ty = Lr.y + j * (rh + gap) + rh * 0.78 + 22;
+            for (let i = 0; i < 4; i++) if (rng() < 0.7) addTree(Lr.x + 60 + i * (Lr.w - 120) / 3, ty, i + j, 8);
+        }
+        cornerLamps(B);
+    }
+    function mallBlock(B, rng) {
+        const Lr = inset(B, W_SW + 8), bh = Lr.h * 0.5;
+        addBuilding('mall', Lr.x + 20, Lr.y, Lr.w - 40, bh - 16, { s: Math.floor(rng() * 9999), t: Math.floor(rng() * 6) });
+        const lot = addLot(Lr.x, Lr.y + bh + 30, Lr.w, Lr.h - bh - 30, false);
+        fillLotWithCars(lot, rng, 0.5);
+        cornerLamps(B);
+    }
+    function housingBlock(B, rng, bz) {
+        const Lr = inset(B, W_SW), depth = 300;
+        const n = Math.max(3, Math.floor(Lr.w / 190)), lw = Lr.w / n;
+        const D = Math.max(Math.abs(B.x + B.w / 2 - C), Math.abs(B.y + B.h / 2 - C));
+        const basePrice = D < 12000 ? 30000 : D < 15000 ? 17000 : 10000;
+        for (const north of [true, false]) {
+            const ly0 = north ? Lr.y : Lr.y + Lr.h - depth;
+            for (let i = 0; i < n; i++) {
+                const lx = Lr.x + i * lw;
+                const hw = 92 + Math.floor(rng() * 38), hh = 76 + Math.floor(rng() * 26);
+                const room = lw - hw - 28;
+                const hx = lx + 14 + rng() * Math.max(0, room);
+                const hy = north ? ly0 + 38 : ly0 + depth - 38 - hh;
+                const tier = hw * hh > 11400 ? 2 : hw * hh > 8800 ? 1 : 0;
+                const hid = 'h' + L.nid;                    // stable: derived from generation order
+                const b = addBuilding('house', hx, hy, hw, hh, {
+                    s: Math.floor(rng() * 9999), t: Math.floor(rng() * 6), r: Math.floor(rng() * 6),
+                    door: { dir: north ? 'N' : 'S' }, tier, price: Math.round(basePrice * (0.85 + tier * 0.25) / 500) * 500,
+                    gar: rng() > 0.42, por: rng() > 0.35, fen: rng() > 0.55, hid, lot: [Math.round(lx), Math.round(ly0), Math.round(lw), depth]
+                });
+                L.houses.push(b);
+                // Back-garden tree: placed in the band behind the house, so it cannot touch the house.
+                const by0 = north ? hy + hh + 46 : ly0 + 22, by1 = north ? ly0 + depth - 22 : hy - 46;
+                if (by1 - by0 > 30 && rng() < 0.7) addTree(lx + 24 + rng() * (lw - 48), by0 + 20 + rng() * Math.max(0, by1 - by0 - 40), Math.floor(rng() * 8), 8);
+            }
+        }
+        // Green strip between the two rows: playground bench + trees on fixed slots.
+        const gy0 = Lr.y + depth + 24, gy1 = Lr.y + Lr.h - depth - 24;
+        if (gy1 - gy0 > 80) {
+            const cy = (gy0 + gy1) / 2;
+            addDeco('path', Lr.x + 20, cy - 14, Lr.w - 40, 28);
+            for (let i = 0; i < n; i++) {
+                const tx = Lr.x + (i + 0.5) * lw;
+                if (rng() < 0.75) addTree(tx, gy0 + 22 + rng() * 20, i, 8);
+                if (rng() < 0.75) addTree(tx + lw * 0.25, gy1 - 22 - rng() * 20, i + 3, 8);
+            }
+            addBench(Lr.x + Lr.w * 0.3, cy - 34, true); addBench(Lr.x + Lr.w * 0.7, cy + 34, true);
+        }
+        for (const x of [B.x + 13, B.x + B.w - 13]) for (const y of [B.y + 13, B.y + B.h / 2, B.y + B.h - 13]) addLamp(x, y);
+    }
+    function allotmentBlock(B, rng) {
+        const Lr = inset(B, W_SW + 14), gap = 28;
+        const fw = (Lr.w - gap) / 2, fh = (Lr.h - gap) / 2;
+        for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) addField(Lr.x + i * (fw + gap), Lr.y + j * (fh + gap), fw, fh, 'farm', Math.floor(rng() * 5), 12);
+    }
+    function shopStripBlock(B, rng) {
+        const Lr = inset(B, W_SW + 8), n = Math.floor(Lr.w / 150), sw = Lr.w / n;
+        for (let i = 0; i < n; i++) addBuilding('shop', Lr.x + i * sw + 6, Lr.y + 10, sw - 12, 110, { s: Math.floor(rng() * 9999), t: Math.floor(rng() * 6), aw: Math.floor(rng() * 6) });
+        const lot = addLot(Lr.x, Lr.y + 150, Lr.w, Math.min(300, Lr.h - 150), false);
+        fillLotWithCars(lot, rng, 0.4);
+        const rest = Lr.h - 150 - Math.min(300, Lr.h - 150);
+        if (rest > 120) for (let i = 0; i < 6; i++) addTree(Lr.x + (i + 0.5) * Lr.w / 6, Lr.y + Lr.h - 60, i, 8);
+        cornerLamps(B);
+    }
+    function schoolBlock(B, rng) {
+        const Lr = inset(B, W_SW + 14);
+        addBuilding('school', Lr.x, Lr.y, Lr.w, 220, { s: Math.floor(rng() * 9999), t: 2 });
+        addField(Lr.x + 40, Lr.y + 280, Lr.w - 80, Lr.h - 480, 'pitch', 0, 0);
+        const lot = addLot(Lr.x + Lr.w * 0.25, Lr.y + Lr.h - 150, Lr.w * 0.5, 140, false);
+        fillLotWithCars(lot, rng, 0.35);
+        cornerLamps(B);
+    }
+    function farmBlock(B, rng, nx, ny, kind) {
+        L.blocks[L.blocks.length - 1].g = 'farm';
+        const tw = B.w / nx, th = B.h / ny, homeI = Math.floor(rng() * nx), homeJ = Math.floor(rng() * ny);
+        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+            const tx = B.x + i * tw, ty = B.y + j * th;
+            if (i === homeI && j === homeJ) {
+                // farmstead: every element has its own fixed slot inside the tile
+                const hx = tx + 70, hy = ty + 90;
+                const house = addBuilding('farmhouse', hx, hy, 150, 110, { s: Math.floor(rng() * 9999), t: Math.floor(rng() * 5), r: Math.floor(rng() * 6), door: { dir: 'S' }, tier: 0, price: 6500, hid: 'h' + L.nid, lot: [Math.round(tx + 40), Math.round(ty + 50), 230, 260], por: true });
+                L.houses.push(house);
+                addBuilding('barn', tx + 330, ty + 90, 250, 170, { s: Math.floor(rng() * 9999), door: { dir: 'S' } });
+                addDeco('silo', tx + 640, ty + 110, 84, 84); circCol(tx + 682, ty + 152, 42);
+                addDeco('yard', tx + 40, ty + 290, 700, 130);
+                for (let q = 0; q < 6; q++) addTree(tx + 70 + q * 120, ty + 470 + (q % 2) * 40, q, 9);
+                addBuilding('shed', tx + 120, ty + 330, 80, 60, { s: 1, door: { dir: 'S' } });
+            } else {
+                const f = addField(tx + 36, ty + 36, tw - 72, th - 72, kind, Math.floor(rng() * 5), 0);
+                f.target = Math.max(10, Math.min(30, Math.round(f.w * f.h / 60000)));
+            }
+        }
+    }
+    function forestBlock(B, rng, density) {
+        L.blocks[L.blocks.length - 1].g = 'forest';
+        const step = 175, nx = Math.floor((B.w - 60) / step), ny = Math.floor((B.h - 60) / step);
+        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+            if (rng() > density) continue;
+            addTree(B.x + 40 + (i + 0.5) * step + (rng() - 0.5) * 60, B.y + 40 + (j + 0.5) * step + (rng() - 0.5) * 60, Math.floor(rng() * 8), 10);
+        }
+    }
+
+    // ---- 2. blocks (the space between roads) ------------------------------------------
+    const hwAt = (axis, k) => (axis === 'v' ? L.rv[k] : L.rh[k]).hw;
+    function cell(i0, j0, i1, j1, sizeKind) {
+        const k0 = i0, k1 = i1, m0 = j0, m1 = j1;                    // line indices (units of S)
+        const x = C + k0 * S + hwAt('v', k0), y = C + m0 * S + hwAt('h', m0);
+        const w = (k1 - k0) * S - hwAt('v', k0) - hwAt('v', k1), h = (m1 - m0) * S - hwAt('h', m0) - hwAt('h', m1);
+        const B = { x, y, w, h };
+        const ccx = (k0 + k1) * S / 2, ccy = (m0 + m1) * S / 2, D = Math.max(Math.abs(ccx), Math.abs(ccy));
+        const zone = D < W_CORE ? 0 : D < W_INNER ? 1 : D < W_SUB ? 2 : 3;
+        const rng = wRng(Math.floor(wHash(seed, k0 * 131 + 7, m0 * 197 + 3) * 4294967296));
+        const blk = { id: nid(), x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), z: zone, g: zone === 3 ? 'grass' : 'pav', sw: zone === 3 ? 0 : W_SW };
+        L.blocks.push(blk);
+        const r = rng();
+        const ci = k0 / 1, cj = m0 / 1;                              // cell index in line units (core: 1 per cell)
+        if (sizeKind === 'core') {
+            // landmarks at fixed cells around the central avenue crossing
+            const key = ci + ',' + cj;
+            if (key === '0,0') {                                       // Central Plaza (spawn)
+                parkBlock(B, rng, false); blk.g = 'plaza';
+                L.spawn = { x: Math.round(B.x + B.w / 2), y: Math.round(B.y + B.h - 52) };
+                return;
+            }
+            if (key === '-1,0') { const Lr = inset(B, W_SW + 10); L.bank = addBuilding('bank', Lr.x, Lr.y + 8, Lr.w, Lr.h - 16, { door: { dir: 'S' }, s: 11 }); cornerLamps(B); return; }
+            if (key === '1,0') { const Lr = inset(B, W_SW + 10); L.dealer = addBuilding('dealer', Lr.x, Lr.y + 8, Lr.w, Lr.h * 0.62, { door: { dir: 'S' }, s: 12 }); const lot = addLot(Lr.x, Lr.y + 8 + Lr.h * 0.62 + 24, Lr.w, Lr.h - Lr.h * 0.62 - 40, true); lot.showroom = true; cornerLamps(B); return; }
+            if (key === '2,0') { L.dealerLot = carparkBlock(B, rng, true); return; }
+            if (key === '0,-1') { const Lr = inset(B, W_SW + 12); addBuilding('hall', Lr.x, Lr.y + 20, Lr.w, Lr.h - 40, { door: { dir: 'S' }, s: 13 }); cornerLamps(B); return; }
+            if (key === '0,1' || key === '-1,-1') { carparkBlock(B, rng, false); return; }
+            if (key === '1,-1') { parkBlock(B, rng, false); return; }
+            if (r < 0.46) towerBlock(B, rng, false);
+            else if (r < 0.64) twinBlock(B, rng);
+            else if (r < 0.76) carparkBlock(B, rng, false);
+            else if (r < 0.85) parkBlock(B, rng, false);
+            else shopsBlock(B, rng);
+        } else if (zone <= 1) {
+            if (r < 0.28) midriseBlock(B, rng);
+            else if (r < 0.46) aptBlock(B, rng);
+            else if (r < 0.62) mallBlock(B, rng);
+            else if (r < 0.72) carparkBlock(B, rng, false);
+            else if (r < 0.82) parkBlock(B, rng, true);
+            else if (r < 0.9) towerBlock(B, rng, true);
+            else shopsBlock(B, rng);
+        } else if (zone === 2) {
+            if (r < 0.7) housingBlock(B, rng);
+            else if (r < 0.8) allotmentBlock(B, rng);
+            else if (r < 0.9) parkBlock(B, rng, true);
+            else if (r < 0.95) schoolBlock(B, rng);
+            else shopStripBlock(B, rng);
+        } else {
+            if (r < 0.5) farmBlock(B, rng, 3, 3, 'farm');
+            else if (r < 0.68) farmBlock(B, rng, 2, 2, 'ranch');
+            else if (r < 0.9) forestBlock(B, rng, 0.62);
+            else forestBlock(B, rng, 0.14);
+        }
+    }
+    // core: 600 cells inside |k|<=6 ; mid: 1200 cells (even lines) outside the core, within SUB ; rural: 3600 cells
+    for (let i = -6; i < 6; i++) for (let j = -6; j < 6; j++) cell(i, j, i + 1, j + 1, 'core');
+    for (let i = -15; i < 15; i++) for (let j = -15; j < 15; j++) {
+        const k0 = i * 2, m0 = j * 2;
+        if (k0 >= -6 && k0 + 2 <= 6 && m0 >= -6 && m0 + 2 <= 6) continue;
+        cell(k0, m0, k0 + 2, m0 + 2, 'mid');
+    }
+    for (let i = -7; i < 7; i++) for (let j = -7; j < 7; j++) {
+        if (i >= -5 && i < 5 && j >= -5 && j < 5) continue;
+        cell(i * 6, j * 6, i * 6 + 6, j * 6 + 6, 'rural');
+    }
+
+    // ---- 3. indexes -----------------------------------------------------------------
+    L.dealerLot = L.dealerLot || L.lots.find(l => l.dealer);
+    const bucketOf = (x, y) => Math.floor(x / 600) + Math.floor(y / 600) * 84;
+    L.cbuckets = new Map();
+    for (const c of L.colliders) {
+        const x0 = c.t ? c.x - c.r : c.x, x1 = c.t ? c.x + c.r : c.x + c.w, y0 = c.t ? c.y - c.r : c.y, y1 = c.t ? c.y + c.r : c.y + c.h;
+        for (let bx = Math.floor(x0 / 600); bx <= Math.floor(x1 / 600); bx++) for (let by = Math.floor(y0 / 600); by <= Math.floor(y1 / 600); by++) {
+            const key = bx + by * 84; let a = L.cbuckets.get(key); if (!a) L.cbuckets.set(key, a = []); a.push(c);
+        }
+    }
+    L.houseById = new Map(L.houses.map(h => [h.hid, h]));
+    L.buildingById = new Map(L.buildings.map(b => [b.id, b]));
+    L.fieldById = new Map(L.fields.map(f => [f.id, f]));
+    // chunk index (objects are listed in every chunk their bounding box touches)
+    L.chunks = new Map();
+    const chunkList = (key) => { let c = L.chunks.get(key); if (!c) L.chunks.set(key, c = { blocks: [], buildings: [], props: [], lots: [], fields: [], pcars: [], junctions: [] }); return c; };
+    const put = (arr, name, o, w, h) => {
+        const x0 = Math.max(0, Math.floor(o.x / W_CHUNK)), x1 = Math.min(W_NCH - 1, Math.floor((o.x + (w || 0)) / W_CHUNK));
+        const y0 = Math.max(0, Math.floor(o.y / W_CHUNK)), y1 = Math.min(W_NCH - 1, Math.floor((o.y + (h || 0)) / W_CHUNK));
+        for (let cx = x0; cx <= x1; cx++) for (let cy = y0; cy <= y1; cy++) chunkList(cx + cy * W_NCH)[name].push(o);
+    };
+    L.blocks.forEach(o => put(0, 'blocks', o, o.w, o.h));
+    L.buildings.forEach(o => put(0, 'buildings', o, o.w, o.h));
+    L.lots.forEach(o => put(0, 'lots', o, o.w, o.h));
+    L.fields.forEach(o => put(0, 'fields', o, o.w, o.h));
+    L.props.forEach(o => put(0, 'props', o, o.w || 0, o.h || 0));
+    L.pcars.forEach(o => put(0, 'pcars', o, 0, 0));
+    L.junctions.forEach(o => put(0, 'junctions', o, 0, 0));
+    L.chunkJson = new Map();
+    return L;
+}
+function layoutChunkJson(L, cx, cy) {
+    const key = cx + cy * W_NCH;
+    let s = L.chunkJson.get(key);
+    if (s) return s;
+    const c = L.chunks.get(key) || { blocks: [], buildings: [], props: [], lots: [], fields: [], pcars: [], junctions: [] };
+    const slim = b => { const o = Object.assign({}, b); delete o.price; return o; };
+    s = JSON.stringify({ cx, cy, blocks: c.blocks, buildings: c.buildings.map(slim), props: c.props, lots: c.lots, fields: c.fields, pcars: c.pcars, junctions: c.junctions });
+    L.chunkJson.set(key, s);
+    return s;
+}
+// Circle-vs-static-collider push-out. Returns true when the position was moved.
+function layoutPushOut(L, pos, r) {
+    let moved = false;
+    for (let pass = 0; pass < 3; pass++) {
+        let any = false;
+        for (let bx = Math.floor((pos.x - r) / 600); bx <= Math.floor((pos.x + r) / 600); bx++)
+            for (let by = Math.floor((pos.y - r) / 600); by <= Math.floor((pos.y + r) / 600); by++) {
+                const list = L.cbuckets.get(bx + by * 84); if (!list) continue;
+                for (const c of list) any = collidePush(pos, r, c) || any;
+            }
+        moved = moved || any; if (!any) break;
+    }
+    return moved;
+}
+function collidePush(pos, r, c) {
+    if (c.t === 1) {
+        const dx = pos.x - c.x, dy = pos.y - c.y, rr = r + c.r, d2 = dx * dx + dy * dy;
+        if (d2 >= rr * rr) return false;
+        const d = Math.sqrt(d2) || 0.001; pos.x = c.x + dx / d * rr; pos.y = c.y + dy / d * rr; return true;
+    }
+    const nx = Math.max(c.x, Math.min(pos.x, c.x + c.w)), ny = Math.max(c.y, Math.min(pos.y, c.y + c.h));
+    let dx = pos.x - nx, dy = pos.y - ny, d2 = dx * dx + dy * dy;
+    if (d2 >= r * r) return false;
+    if (d2 > 1e-6) { const d = Math.sqrt(d2); pos.x = nx + dx / d * r; pos.y = ny + dy / d * r; return true; }
+    // centre is inside the rectangle: exit through the nearest face
+    const l = pos.x - c.x, rt = c.x + c.w - pos.x, t = pos.y - c.y, b = c.y + c.h - pos.y, m = Math.min(l, rt, t, b);
+    if (m === l) pos.x = c.x - r; else if (m === rt) pos.x = c.x + c.w + r; else if (m === t) pos.y = c.y - r; else pos.y = c.y + c.h + r;
+    return true;
+}
+// <<WORLD_LAYOUT_END>>
+
+// <<WORLD_INTERIORS_BEGIN>>
+// ---------------------------------------------------------------------------
+// Interior maps. Each interior is its own Room (a separate map the player is
+// teleported into). Definitions are pure data: the server turns walls + solid
+// furniture into colliders and the client draws the very same rectangles.
+// ---------------------------------------------------------------------------
+const INT_EXT = 1800, INT_WALL = 26;
+function intWallsAround(fl, doorX, doorW) {
+    const T = INT_WALL, w = [];
+    w.push({ x: fl.x - T, y: fl.y - T, w: fl.w + 2 * T, h: T });                               // top
+    w.push({ x: fl.x - T, y: fl.y, w: T, h: fl.h });                                           // left
+    w.push({ x: fl.x + fl.w, y: fl.y, w: T, h: fl.h });                                        // right
+    w.push({ x: fl.x - T, y: fl.y + fl.h, w: doorX - doorW / 2 - (fl.x - T), h: T });          // bottom-left of the door
+    w.push({ x: doorX + doorW / 2, y: fl.y + fl.h, w: fl.x + fl.w + T - (doorX + doorW / 2), h: T }); // bottom-right of the door
+    return w;
+}
+function buildOfficeInterior(co) {
+    const X0 = 250, Y0 = 250, W = 1300, H = 1100, fl = { x: X0, y: Y0, w: W, h: H };
+    const doorX = X0 + W / 2, doorW = 130;
+    const D = {
+        kind: 'office', ext: INT_EXT, floor: fl, theme: { accent: co.color, name: co.name },
+        walls: intWallsAround(fl, doorX, doorW), furn: [], stations: [], rooms: [],
+        door: { x: doorX - doorW / 2, y: Y0 + H, w: doorW, h: INT_WALL, px: doorX, py: Y0 + H - 36, r: 110 },
+        spawn: { x: doorX, y: Y0 + H - 90 }
+    };
+    D.rooms.push({ x: X0, y: Y0, w: W, h: H - 300, c: 'office' }, { x: X0, y: Y0 + H - 300, w: W, h: 300, c: 'lobby' });
+    const f = D.furn;
+    // reception desk with the receptionist behind it
+    f.push({ k: 'reception', x: doorX - 170, y: Y0 + H - 250, w: 340, h: 56, solid: 1 });
+    f.push({ k: 'rug', x: doorX - 160, y: Y0 + H - 140, w: 320, h: 90 });
+    f.push({ k: 'sofa', x: X0 + 50, y: Y0 + H - 160, w: 190, h: 70, solid: 1 }, { k: 'sofa', x: X0 + W - 240, y: Y0 + H - 160, w: 190, h: 70, solid: 1 });
+    f.push({ k: 'plant', x: X0 + 40, y: Y0 + H - 290, r: 20, solid: 1 }, { k: 'plant', x: X0 + W - 40, y: Y0 + H - 290, r: 20, solid: 1 });
+    f.push({ k: 'plant', x: X0 + 40, y: Y0 + H - 40, r: 20, solid: 1 }, { k: 'plant', x: X0 + W - 40, y: Y0 + H - 40, r: 20, solid: 1 });
+    D.reception = { id: 'reception', x: doorX, y: Y0 + H - 196, r: 150 };
+    // open-plan desks: 3 rows x 4 columns, every desk has its own work station
+    let n = 0;
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) {
+        const dx = X0 + 110 + c * 300, dy = Y0 + 120 + r * 220;
+        f.push({ k: 'desk', x: dx, y: dy, w: 140, h: 64, solid: 1 });
+        f.push({ k: 'monitor', x: dx + 52, y: dy + 8, w: 36, h: 8 });
+        f.push({ k: 'chair', x: dx + 55, y: dy + 80, r: 15 });
+        D.stations.push({ id: 'desk' + n++, x: dx + 70, y: dy + 70, r: 80 });
+    }
+    for (let i = 0; i < 5; i++) f.push({ k: 'cabinet', x: X0 + 150 + i * 220, y: Y0 + 10, w: 90, h: 44, solid: 1 });
+    f.push({ k: 'plant', x: X0 + 40, y: Y0 + 50, r: 20, solid: 1 }, { k: 'plant', x: X0 + W - 40, y: Y0 + 50, r: 20, solid: 1 });
+    f.push({ k: 'cooler', x: X0 + W - 80, y: Y0 + 480, w: 34, h: 34, solid: 1 });
+    return D;
+}
+function buildHouseInterior(tier) {
+    const dims = [[960, 720], [1160, 820], [1360, 920]][Math.max(0, Math.min(2, tier | 0))];
+    const W = dims[0], H = dims[1], X0 = (INT_EXT - W) / 2, Y0 = (INT_EXT - H) / 2, fl = { x: X0, y: Y0, w: W, h: H };
+    const doorW = 120, doorX = X0 + W * 0.28, T = 20;
+    const D = {
+        kind: 'house', ext: INT_EXT, floor: fl, theme: { tier }, furn: [], stations: [], rooms: [],
+        walls: intWallsAround(fl, doorX, doorW),
+        door: { x: doorX - doorW / 2, y: Y0 + H, w: doorW, h: INT_WALL, px: doorX, py: Y0 + H - 36, r: 100 },
+        spawn: { x: doorX, y: Y0 + H - 80 }
+    };
+    const sx = Math.round(W * 0.56), ky = Math.round(H * 0.42);
+    // interior walls (with doorways)
+    const vgap = [Math.round(H * 0.5), 120], hgap = [sx + Math.round((W - sx) * 0.55), 120];
+    D.walls.push({ x: X0 + sx, y: Y0, w: T, h: vgap[0] });
+    D.walls.push({ x: X0 + sx, y: Y0 + vgap[0] + vgap[1], w: T, h: H - vgap[0] - vgap[1] });
+    D.walls.push({ x: X0 + sx + T, y: Y0 + ky, w: hgap[0] - sx - T, h: T });
+    D.walls.push({ x: X0 + hgap[0] + hgap[1], y: Y0 + ky, w: W - hgap[0] - hgap[1], h: T });
+    D.rooms.push({ x: X0, y: Y0, w: sx, h: H, c: 'living' }, { x: X0 + sx, y: Y0, w: W - sx, h: ky, c: 'kitchen' }, { x: X0 + sx, y: Y0 + ky, w: W - sx, h: H - ky, c: 'bedroom' });
+    const f = D.furn, rx = X0 + sx;
+    // living room
+    f.push({ k: 'rug', x: X0 + 80, y: Y0 + 190, w: 330, h: 210 });
+    f.push({ k: 'sofa', x: X0 + 110, y: Y0 + 300, w: 220, h: 80, solid: 1 });
+    f.push({ k: 'table', x: X0 + 150, y: Y0 + 215, w: 140, h: 56, solid: 1 });
+    f.push({ k: 'tv', x: X0 + 160, y: Y0 + 70, w: 120, h: 34, solid: 1 });
+    f.push({ k: 'plant', x: X0 + 40, y: Y0 + 40, r: 18, solid: 1 });
+    f.push({ k: 'dining', x: X0 + sx - 230, y: Y0 + H - 270, w: 150, h: 100, solid: 1 });
+    f.push({ k: 'chair', x: X0 + sx - 262, y: Y0 + H - 220, r: 14 }, { k: 'chair', x: X0 + sx - 48, y: Y0 + H - 220, r: 14 });
+    // kitchen
+    f.push({ k: 'counter', x: rx + 30, y: Y0 + 20, w: W - sx - 60, h: 50, solid: 1 });
+    f.push({ k: 'island', x: rx + 90, y: Y0 + ky - 160, w: Math.max(120, W - sx - 240), h: 60, solid: 1 });
+    // bedroom
+    f.push({ k: 'bed', x: rx + (W - sx) - 220, y: Y0 + H - 250, w: 190, h: 220, solid: 1 });
+    f.push({ k: 'wardrobe', x: rx + 24, y: Y0 + ky + 34, w: 150, h: 56, solid: 1 });
+    f.push({ k: 'nightstand', x: rx + (W - sx) - 262, y: Y0 + H - 250, w: 36, h: 36, solid: 1 });
+    f.push({ k: 'rug', x: rx + 40, y: Y0 + H - 250, w: 170, h: 200 });
+    D.stations.push({ id: 'bed', x: rx + (W - sx) - 125, y: Y0 + H - 260, r: 120 });
+    if (tier >= 1) { f.push({ k: 'desk', x: X0 + 40, y: Y0 + H - 140, w: 130, h: 60, solid: 1 }, { k: 'chair', x: X0 + 95, y: Y0 + H - 70, r: 14 }); }
+    if (tier >= 2) { f.push({ k: 'bath', x: X0 + sx - 170, y: Y0 + 24, w: 140, h: 70, solid: 1 }, { k: 'plant', x: X0 + sx - 40, y: Y0 + 180, r: 18, solid: 1 }); }
+    return D;
+}
+function interiorColliders(def) {
+    const out = [];
+    for (const w of def.walls) out.push({ t: 0, x: w.x, y: w.y, w: w.w, h: w.h });
+    for (const f of def.furn) if (f.solid) out.push(f.r ? { t: 1, x: f.x, y: f.y, r: f.r } : { t: 0, x: f.x, y: f.y, w: f.w, h: f.h });
+    return out;
+}
+// <<WORLD_INTERIORS_END>>
+
+// ===================== PERSISTENT WORLD MODE =====================
+// The exterior (WORLD room) is the city + suburbs + farmland built by buildWorldLayout().
+// Houses and workplaces are separate interior Rooms players are teleported into.
+const WORLD_LAYOUT_VERSION = 2;
+const WORLD_CARS = [
+    { id: 'compact', name: 'Compact', price: 2500,  speed: 6.2,  accel: 0.15, turn: 0.052, color: '#e4e7eb' },
+    { id: 'sedan',   name: 'Sedan',   price: 6500,  speed: 8.0,  accel: 0.19, turn: 0.046, color: '#2684d9' },
+    { id: 'sport',   name: 'Sport',   price: 18000, speed: 10.4, accel: 0.27, turn: 0.042, color: '#e84d4d' }
+];
+const WORLD_FIRE_MS = 15 * 60 * 1000;      // online play time allowed between shifts before you are fired
+const WORLD_WARN_MS = [5 * 60 * 1000, 60 * 1000];
+const WORLD_TASK_MS = 8000;                // one shift task
+const WORLD_REHIRE_MS = 3 * 60 * 1000;     // wait after being fired
+const WORLD_SAVE_MS = 5000;
+const WORLD_CAR_COLORS = ['#e2e7e9', '#286da5', '#b84e46', '#d0ad58', '#5c6975', '#f1f0e9', '#3d7a52', '#7a4f8a'];
+
+// persistent columns ---------------------------------------------------------------
+for (const col of ['score REAL NOT NULL DEFAULT 0', 'level INTEGER NOT NULL DEFAULT 1', "tank_type TEXT NOT NULL DEFAULT 'Basic'",
+    'stat_points INTEGER NOT NULL DEFAULT 0', 'car_x REAL', 'car_y REAL', 'car_a REAL', 'job TEXT',
+    'job_last INTEGER NOT NULL DEFAULT 0', 'play_ms INTEGER NOT NULL DEFAULT 0', 'job_cd INTEGER NOT NULL DEFAULT 0']) {
+    try { db.prepare('ALTER TABLE world_players ADD COLUMN ' + col).run(); } catch (err) { if (!/duplicate column/i.test(String(err.message))) throw err; }
+}
+try { db.prepare('ALTER TABLE world_meta ADD COLUMN layout_version INTEGER NOT NULL DEFAULT 1').run(); } catch (err) { if (!/duplicate column/i.test(String(err.message))) throw err; }
+
+// ---- state ---------------------------------------------------------------------------
+let WL = null, WSEED = 0;
+const houseOwner = new Map();          // hid -> { owner_id, name, purchased_at }
+const parkedCars = new Map();          // user id -> { uid, model, x, y, a, driven, pid }
+const worldClients = new Set();
+const interiorDefs = new Map();        // scene key -> def (cached)
+const traffic = [], peds = [];
+let worldNextDyn = 1, worldPidSeq = 1;
+const junctionMap = new Map(), roadNodes = new Map(), pcarKeys = new Set();
+
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function sendWorld(client, type, extra = {}) { if (client.ws.readyState === WebSocket.OPEN) client.ws.send(JSON.stringify({ type, ...extra })); }
+function worldNotice(client, message, extra = {}) { sendWorld(client, 'world_notice', { message, ...extra }); }
+function fmtMoney(n) { return Math.floor(n).toLocaleString('en-US'); }
+function angDiff(a, b) { let d = (a - b) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; }
+function worldZone(x, y) { const D = Math.max(Math.abs(x - W_C), Math.abs(y - W_C)); return D < W_CORE ? 0 : D < W_INNER ? 1 : D < W_SUB ? 2 : 3; }
+function rectDist(x, y, r) { const dx = Math.max(r.x - x, 0, x - (r.x + r.w)), dy = Math.max(r.y - y, 0, y - (r.y + r.h)); return Math.hypot(dx, dy); }
+
+// ---- world bootstrap -------------------------------------------------------------------
 function ensureWorld() {
-    let row = db.prepare('SELECT seed FROM world_meta WHERE id=1').get();
+    if (WL) return WSEED;
+    let row = db.prepare('SELECT seed, layout_version FROM world_meta WHERE id=1').get();
     if (!row) {
         const seed = crypto.randomInt(1, 0x7fffffff);
-        db.prepare('INSERT INTO world_meta(id,seed,created_at) VALUES(1,?,?)').run(seed,Date.now()); row={seed};
-        const addHouse=db.prepare('INSERT OR IGNORE INTO world_houses(id,owner_id,price,x,y) VALUES(?,NULL,?,?,?)');
-        for(let i=0;i<320;i++){
-            const gx=5+Math.floor(worldRand(seed,i,9)*110), gy=5+Math.floor(worldRand(seed,i,10)*110);
-            const x=(gx-WORLD_GRID/2)*WORLD_TILE+130, y=(gy-WORLD_GRID/2)*WORLD_TILE+130;
-            const price=Math.hypot(x,y)<5200?45000:Math.hypot(x,y)<13500?12000:3500;
-            addHouse.run('plot-'+i,price,x,y);
+        db.prepare('INSERT INTO world_meta(id,seed,created_at,layout_version) VALUES(1,?,?,?)').run(seed, Date.now(), WORLD_LAYOUT_VERSION);
+        row = { seed, layout_version: WORLD_LAYOUT_VERSION };
+    }
+    WSEED = row.seed;
+    WL = buildWorldLayout(WSEED);
+    WL.dealerLots = WL.lots.filter(l => l.dealer);
+    junctionMap.clear(); roadNodes.clear(); pcarKeys.clear();
+    for (const j of WL.junctions) junctionMap.set(Math.round((j.x - W_C) / W_S) + ',' + Math.round((j.y - W_C) / W_S), j);
+    for (const r of WL.roads) roadNodes.set(r.a + r.k, []);
+    for (const j of WL.junctions) {
+        const kx = Math.round((j.x - W_C) / W_S), ky = Math.round((j.y - W_C) / W_S);
+        roadNodes.get('v' + kx).push(j.y); roadNodes.get('h' + ky).push(j.x);
+    }
+    for (const a of roadNodes.values()) a.sort((p, q) => p - q);
+    for (const c of WL.pcars) pcarKeys.add(Math.round(c.x) + ',' + Math.round(c.y));
+    if (row.layout_version < WORLD_LAYOUT_VERSION) worldMigrateLegacyHouses();
+    houseOwner.clear();
+    for (const h of db.prepare('SELECT h.id, h.owner_id, h.purchased_at, u.username FROM world_houses h LEFT JOIN users u ON u.id = h.owner_id WHERE h.owner_id IS NOT NULL').all())
+        houseOwner.set(h.id, { owner_id: h.owner_id, name: h.username || 'Resident', purchased_at: h.purchased_at || 0 });
+    parkedCars.clear();
+    for (const p of db.prepare('SELECT user_id, owned_car, car_x, car_y, car_a FROM world_players WHERE owned_car IS NOT NULL').all()) {
+        if (!WORLD_CARS.find(c => c.id === p.owned_car)) continue;
+        let pos = (p.car_x != null && p.car_y != null) ? { x: p.car_x, y: p.car_y, a: p.car_a || 0 } : worldFindFreeBay(p.user_id);
+        parkedCars.set(p.user_id, { uid: p.user_id, model: p.owned_car, x: pos.x, y: pos.y, a: pos.a, driven: false, pid: worldPidSeq++ });
+    }
+    return WSEED;
+}
+// Old worlds had 320 random plots that could sit on roads. Owned plots are moved to the nearest real house.
+function worldMigrateLegacyHouses() {
+    const old = db.prepare('SELECT * FROM world_houses WHERE owner_id IS NOT NULL ORDER BY purchased_at').all();
+    const taken = new Set();
+    const ins = db.prepare('INSERT OR REPLACE INTO world_houses(id,owner_id,price,x,y,purchased_at,last_seen) VALUES(?,?,?,?,?,?,?)');
+    db.transaction(() => {
+        db.prepare('DELETE FROM world_houses').run();
+        for (const h of old) {
+            const ax = W_C + h.x, ay = W_C + h.y;
+            let best = null, bd = Infinity;
+            for (const b of WL.houses) { if (taken.has(b.hid)) continue; const d = (b.x + b.w / 2 - ax) ** 2 + (b.y + b.h / 2 - ay) ** 2; if (d < bd) { bd = d; best = b; } }
+            if (!best) continue;
+            taken.add(best.hid);
+            ins.run(best.hid, h.owner_id, best.price, best.x + best.w / 2, best.y + best.h / 2, h.purchased_at, h.last_seen);
+        }
+        db.prepare('UPDATE world_meta SET layout_version=? WHERE id=1').run(WORLD_LAYOUT_VERSION);
+    })();
+    console.log(`[World] Migrated ${taken.size} legacy house plot(s) to the new layout.`);
+}
+function worldRegenerate() {
+    db.prepare('DELETE FROM world_meta WHERE id=1').run();
+    db.prepare('DELETE FROM world_houses').run();
+    db.prepare('UPDATE world_players SET car_x=NULL, car_y=NULL, car_a=NULL').run();
+    for (const c of [...worldClients]) sendWorld(c, 'world_reload');
+    worldRoom.entities = worldRoom.entities.filter(e => e.isPlayer);
+    traffic.length = 0; peds.length = 0; WL = null; ensureWorld();
+}
+
+// ---- parking ------------------------------------------------------------------------------
+function worldBayFree(bay, ignoreUid) {
+    if (pcarKeys.has(Math.round(bay.x) + ',' + Math.round(bay.y))) return false;
+    for (const pc of parkedCars.values()) if (pc.uid !== ignoreUid && Math.abs(pc.x - bay.x) < 34 && Math.abs(pc.y - bay.y) < 34) return false;
+    return true;
+}
+function worldFindFreeBay(ignoreUid, nearX, nearY) {
+    const nx = nearX ?? WL.dealer.x, ny = nearY ?? WL.dealer.y;
+    for (const lots of [WL.dealerLots, WL.lots.filter(l => !l.dealer && Math.hypot(l.x + l.w / 2 - nx, l.y + l.h / 2 - ny) < 4000).sort((a, b) => Math.hypot(a.x - nx, a.y - ny) - Math.hypot(b.x - nx, b.y - ny))]) {
+        const cands = [];
+        for (const lot of lots) for (const bay of lotBays(lot)) if (worldBayFree(bay, ignoreUid)) cands.push(bay);
+        if (cands.length) { cands.sort((a, b) => Math.hypot(a.x - nx, a.y - ny) - Math.hypot(b.x - nx, b.y - ny)); return cands[0]; }
+    }
+    return { x: WL.dealer.door.x + 80, y: WL.dealer.door.y + 120, a: 0 };
+}
+function worldSnapToBay(x, y, uid) {
+    for (const lot of WL.lots) {
+        if (x < lot.x - 20 || x > lot.x + lot.w + 20 || y < lot.y - 20 || y > lot.y + lot.h + 20) continue;
+        let best = null, bd = 80;
+        for (const bay of lotBays(lot)) { const d = Math.hypot(bay.x - x, bay.y - y); if (d < bd && worldBayFree(bay, uid)) { bd = d; best = bay; } }
+        if (best) return best;
+    }
+    return null;
+}
+
+// ---- collision helpers ---------------------------------------------------------------------
+const _circ = [];
+function worldCarCircles(x, y, a) { const c = Math.cos(a), s = Math.sin(a); _circ.length = 0; for (const o of [-20, 0, 20]) _circ.push({ x: x + c * o, y: y + s * o, r: 17 }); return _circ; }
+function worldDynCars(x, y, range, skipUid, skipTraffic) {
+    const out = [];
+    for (const pc of parkedCars.values()) { if (pc.driven || pc.uid === skipUid) continue; if (Math.abs(pc.x - x) < range && Math.abs(pc.y - y) < range) out.push(pc); }
+    if (!skipTraffic) for (const t of traffic) if (Math.abs(t.x - x) < range && Math.abs(t.y - y) < range) out.push(t);
+    return out;
+}
+function worldPushOutOfCars(pos, r, skipUid) {
+    for (const car of worldDynCars(pos.x, pos.y, 90, skipUid, false)) {
+        for (const c of worldCarCircles(car.x, car.y, car.a)) {
+            const dx = pos.x - c.x, dy = pos.y - c.y, rr = r + c.r, d2 = dx * dx + dy * dy;
+            if (d2 < rr * rr) { const d = Math.sqrt(d2) || 0.001; pos.x = c.x + dx / d * rr; pos.y = c.y + dy / d * rr; }
         }
     }
-    return row.seed;
 }
-function generateWorldCell(seed,gx,gy) {
-    const x=(gx-WORLD_GRID/2)*WORLD_TILE, y=(gy-WORLD_GRID/2)*WORLD_TILE;
-    const d=Math.hypot(x,y), r=worldRand(seed,gx,gy), rnd=s=>worldRand(seed,gx+s*17,gy-s*31);
-    let biome=d<5200?'city':d<13500?'suburb':(r<.22?'farmland':r<.34?'park':'suburb');
-    if(d>17000&&r<.68)biome='farmland';
-    const roads=[],avenue=(gx%17===0)||(gy%19===0),street=(gx%5===0)||(gy%5===0);
-    if(avenue||street){
-        const width=avenue?(biome==='city'?190:168):(biome==='city'?142:biome==='suburb'?118:94);
-        if(gx%17===0||(!(gy%19===0)&&gx%5===0))roads.push({x,y,w:width,axis:'vertical',lanes:avenue?4:2});
-        if(gy%19===0||(!(gx%17===0)&&gy%5===0))roads.push({x,y,w:width,axis:'horizontal',lanes:avenue?4:2});
-    }
-    const buildings=[],onRoad=roads.length>0;
-    if(biome==='city'&&!onRoad&&r>.025){
-        const count=1+Math.floor(rnd(1)*2);
-        for(let i=0;i<count;i++){
-            const bw=106+rnd(i+2)*92,bh=118+rnd(i+5)*220;
-            buildings.push({kind:'tower',x:x+22+rnd(i+8)*(WORLD_TILE-bw-44),y:y+22+rnd(i+12)*(WORLD_TILE-bh-44),w:bw,h:bh,floors:8+Math.floor(rnd(i+15)*24),tone:Math.floor(rnd(i+18)*6),roof:Math.floor(rnd(i+21)*4),seed:Math.floor(rnd(i+24)*9999)});
+// On-foot tank vs buildings, trees, benches, walls and cars. Called from Entity.update().
+function worldCollideEntity(e) {
+    const room = e.room, pos = { x: e.x, y: e.y };
+    if (room.worldKind === 'interior') { for (const c of room.colliders) collidePush(pos, e.radius, c); }
+    else if (WL) { layoutPushOut(WL, pos, e.radius); worldPushOutOfCars(pos, e.radius, null); }
+    e.x = pos.x; e.y = pos.y;
+}
+// Driven car: bicycle-style steering, 3-circle body against all static colliders and other cars.
+function worldStepVehicle(e) {
+    const v = e.vehicle, spec = v.spec, inp = e.inputs || {};
+    if (inp.up) v.v += spec.accel;
+    else if (inp.down) v.v -= (v.v > 0.2 ? spec.accel * 2.4 : spec.accel * 0.8);
+    else v.v *= 0.985;
+    if (inp.repel) v.v *= 0.92;                                    // Shift = handbrake
+    v.v = clamp(v.v, -spec.speed * 0.35, spec.speed);
+    if (Math.abs(v.v) < 0.02 && !inp.up && !inp.down) v.v = 0;
+    const steer = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
+    v.a += steer * spec.turn * Math.min(1, Math.abs(v.v) / 2.5) * (v.v >= 0 ? 1 : -1) / (1 + Math.abs(v.v) * 0.08);
+    let nx = e.x + Math.cos(v.a) * v.v, ny = e.y + Math.sin(v.a) * v.v, hit = false;
+    const uid = e.room.clients.find(c => c.player === e)?.dbId;
+    if (WL) {
+        for (let pass = 0; pass < 2; pass++) {
+            const cs = worldCarCircles(nx, ny, v.a);
+            let ox = 0, oy = 0;
+            for (const c of cs) {
+                const p = { x: c.x, y: c.y };
+                if (layoutPushOut(WL, p, c.r)) { ox += p.x - c.x; oy += p.y - c.y; hit = true; }
+                for (const car of worldDynCars(c.x, c.y, 90, uid, false)) for (const o of worldCarCircles(car.x, car.y, car.a).slice()) {
+                    const dx = c.x + ox - o.x, dy = c.y + oy - o.y, rr = c.r + o.r, d2 = dx * dx + dy * dy;
+                    if (d2 < rr * rr) { const d = Math.sqrt(d2) || 0.001; ox += dx / d * (rr - d); oy += dy / d * (rr - d); hit = true; if (car.v !== undefined) car.v = 0; }
+                }
+            }
+            nx += ox / 3; ny += oy / 3;
+            if (!hit) break;
         }
-        if(rnd(25)>.42)buildings.push({kind:'bench',x:x+WORLD_TILE*.18,y:y+WORLD_TILE*.78,w:58,h:22});
-        if(rnd(26)>.68)buildings.push({kind:'trees',x:x+WORLD_TILE*.72,y:y+WORLD_TILE*.72,w:78,h:78});
-    }else if(biome==='suburb'&&!onRoad&&r>.045){
-        const count=2+Math.floor(rnd(30)*3);
-        for(let i=0;i<count;i++){
-            const col=i%2,row=Math.floor(i/2),bw=82+rnd(i+32)*34,bh=72+rnd(i+35)*28;
-            const px=x+12+col*188+rnd(i+38)*12,py=y+12+row*145+rnd(i+41)*10;
-            buildings.push({kind:'house',x:px,y:py,w:bw,h:bh,roof:Math.floor(rnd(i+44)*6),style:Math.floor(rnd(i+47)*5),garage:rnd(i+50)>.42,porch:rnd(i+51)>.35,fence:rnd(i+52)>.62,seed:Math.floor(rnd(i+54)*9999)});
-            if(rnd(i+53)>.24)buildings.push({kind:'trees',x:px+bw+13,y:py+bh*.55,w:46,h:48,seed:i});
+    }
+    if (hit) v.v *= 0.55;
+    // run over anything on foot
+    if (Math.abs(v.v) > 3) {
+        const now = Date.now();
+        for (const o of e.room.entities) {
+            if (o === e || !o.isPlayer || o.ghost || o.markedForDeletion) continue;
+            if (Math.hypot(o.x - nx, o.y - ny) < o.radius + 24 && now - (o.lastCarHit || 0) > 700) {
+                o.lastCarHit = now; o.hp -= 12 + Math.abs(v.v) * 5; o.lastDamageTime = now; o.lastDamagedBy = e.id;
+                o.vx += Math.cos(v.a) * v.v * 0.9; o.vy += Math.sin(v.a) * v.v * 0.9; v.v *= 0.7;
+            }
         }
-        if(rnd(56)>.3)buildings.push({kind:'bench',x:x+WORLD_TILE*.68,y:y+WORLD_TILE*.78,w:54,h:20});
-        if(rnd(59)>.42)buildings.push({kind:'trees',x:x+WORLD_TILE*.78,y:y+WORLD_TILE*.18,w:88,h:88});
-    }else if(biome==='farmland'&&r>.12){
-        buildings.push({kind:'field',x:x+12,y:y+12,w:WORLD_TILE-24,h:WORLD_TILE-24,crop:Math.floor(rnd(62)*5)});
-        if(rnd(65)>.66)buildings.push({kind:'house',x:x+WORLD_TILE*.57,y:y+WORLD_TILE*.58,w:76,h:64,roof:Math.floor(rnd(68)*5),style:3,garage:true,porch:true,seed:Math.floor(rnd(69)*9999)});
-    }else if(biome==='park'){
-        buildings.push({kind:'trees',x:x+WORLD_TILE*.5,y:y+WORLD_TILE*.48,w:176,h:164,seed:1});
-        buildings.push({kind:'bench',x:x+WORLD_TILE*.24,y:y+WORLD_TILE*.72,w:56,h:20});
-        buildings.push({kind:'bench',x:x+WORLD_TILE*.68,y:y+WORLD_TILE*.28,w:56,h:20});
-        if(rnd(71)>.4)buildings.push({kind:'trees',x:x+WORLD_TILE*.25,y:y+WORLD_TILE*.25,w:108,h:104,seed:2});
     }
-    return {gx,gy,biome,roads,buildings};
+    e.x = clamp(nx, 30, W_EXT - 30); e.y = clamp(ny, 30, W_EXT - 30); e.vx = 0; e.vy = 0;
 }
-function getWorldView(x,y) {
-    const seed=ensureWorld(), cells=[],cx=Math.floor(x/WORLD_TILE+WORLD_GRID/2),cy=Math.floor(y/WORLD_TILE+WORLD_GRID/2);
-    for(let gy=cy-5;gy<=cy+5;gy++)for(let gx=cx-5;gx<=cx+5;gx++)if(gx>=0&&gy>=0&&gx<WORLD_GRID&&gy<WORLD_GRID)cells.push(generateWorldCell(seed,gx,gy));
-    const houses=db.prepare('SELECT id,owner_id,price,x,y FROM world_houses WHERE x BETWEEN ? AND ? AND y BETWEEN ? AND ?').all(x-2400,x+2400,y-2400,y+2400);
-    return {cells,houses,extent:WORLD_EXTENT,tile:WORLD_TILE,cars:worldTraffic.filter(c=>Math.abs(c.x-x)<2600&&Math.abs(c.y-y)<2600),citizens:worldCitizens.filter(c=>Math.abs(c.x-x)<2200&&Math.abs(c.y-y)<2200)};
+
+// ---- progress / persistence ------------------------------------------------------------------
+function worldApplyProgress(ent, prog) {
+    ent.score = Math.max(0, prog.score || 0);
+    let lvl = 1;
+    while (lvl < MAX_LEVEL && ent.score >= LEVEL_REQUIREMENTS[lvl + 1]) lvl++;
+    ent.level = lvl; ent.maxHp = 100 + 15 * (lvl - 1); ent.radius = lvl > 1 ? 20 + lvl * 0.3 : 20;
+    ent.stats = Array.isArray(prog.stats) && prog.stats.length === 8 ? prog.stats.map(n => clamp(n | 0, 0, 7)) : [0, 0, 0, 0, 0, 0, 0, 0];
+    ent.statPoints = Math.max(0, prog.statPoints | 0);
+    ent.tankType = TANK_SPECS[prog.tankType] ? prog.tankType : 'Basic';
+    ent.xp = lvl >= MAX_LEVEL ? 0 : ent.score - LEVEL_REQUIREMENTS[lvl];
+    ent.hp = ent.getEffectiveMaxHp(); ent.barrelTimers = [];
 }
-let worldTraffic=[],worldCitizens=[];
-function seedWorldTraffic(){
-    if(worldTraffic.length)return;const seed=ensureWorld();
-    for(let i=0;i<110;i++){
-        const horizontal=i%2===0,lane=(i%20-10)*WORLD_TILE*5;
-        worldTraffic.push({id:'car'+i,x:horizontal?worldRand(seed,i,2)*WORLD_EXTENT-WORLD_EXTENT/2:lane,y:horizontal?lane:worldRand(seed,i,3)*WORLD_EXTENT-WORLD_EXTENT/2,dir:horizontal?1:2,speed:6.0+(i%4)*1.45,kind:'traffic',color:['#e2e7e9','#286da5','#b84e46','#d0ad58','#5c6975','#f1f0e9'][i%6]});
+function worldSnapshot(client) {
+    const w = client.world, p = client.player; if (!w || !p || w.dead) return;   // a dead tank must not overwrite the reset progress
+    w.prog = { score: p.score, level: p.level, statPoints: p.statPoints, stats: [...p.stats], tankType: p.tankType };
+}
+function worldSave(client) {
+    const w = client.world; if (!client.dbId || !w) return;
+    worldSnapshot(client);
+    const now = Date.now(), p = client.player;
+    let ex = w.ext; if (p && w.scene === 'ext' && !p.vehicle) ex = { x: p.x, y: p.y };
+    const pc = parkedCars.get(client.dbId); let cx = pc?.x ?? null, cy = pc?.y ?? null, ca = pc?.a ?? null;
+    if (p?.vehicle) { cx = p.x; cy = p.y; ca = p.vehicle.a; if (w.scene === 'ext') ex = { x: p.x, y: p.y }; }
+    w.ext = ex;
+    db.prepare(`INSERT INTO world_players(user_id,x,y,upgrades,updated_at,last_seen,owned_car,session_coins,score,level,tank_type,stat_points,car_x,car_y,car_a,job,job_last,play_ms,job_cd)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(user_id) DO UPDATE SET x=excluded.x,y=excluded.y,upgrades=excluded.upgrades,updated_at=excluded.updated_at,last_seen=excluded.last_seen,owned_car=excluded.owned_car,
+        session_coins=excluded.session_coins,score=excluded.score,level=excluded.level,tank_type=excluded.tank_type,stat_points=excluded.stat_points,car_x=excluded.car_x,car_y=excluded.car_y,car_a=excluded.car_a,
+        job=excluded.job,job_last=excluded.job_last,play_ms=excluded.play_ms,job_cd=excluded.job_cd`)
+        .run(client.dbId, ex.x - W_C, ex.y - W_C, JSON.stringify({ stats: w.prog.stats }), now, now, w.car || null, Math.max(0, Math.floor(w.sessionCoins || 0)),
+            w.prog.score, w.prog.level, w.prog.tankType, w.prog.statPoints, cx, cy, ca, w.job?.co || null, Math.floor(w.jobLast || 0), Math.floor(w.playMs || 0), Math.floor(w.jobCd || 0));
+    db.prepare('UPDATE world_houses SET last_seen=? WHERE owner_id=?').run(now, client.dbId);
+    w.lastSave = now;
+}
+function worldBankCoins(client) { return db.prepare('SELECT coins FROM users WHERE id=?').get(client.dbId)?.coins || 0; }
+function worldPushProfile(client) { sendWorld(client, 'profile_update', { profile: db.prepare('SELECT * FROM users WHERE id=?').get(client.dbId) }); }
+function worldFirstHouse(uid) { return db.prepare('SELECT id FROM world_houses WHERE owner_id=? ORDER BY purchased_at LIMIT 1').get(uid)?.id || null; }
+function worldPushState(client) {
+    const w = client.world; if (!w) return;
+    const co = w.job ? W_COMPANIES.find(c => c.id === w.job.co) : null, pc = parkedCars.get(client.dbId);
+    sendWorld(client, 'world_state', {
+        sessionCoins: Math.floor(w.sessionCoins || 0), bank: w.bankCoins || 0, scene: w.scene,
+        job: co ? { co: co.id, name: co.name, role: co.role, pay: co.pay, left: Math.max(0, WORLD_FIRE_MS - (w.playMs - w.jobLast)) } : null,
+        car: w.car ? { model: w.car, driven: !!client.player?.vehicle, x: pc?.x ?? null, y: pc?.y ?? null, a: pc?.a ?? 0 } : null,
+        house: worldFirstHouse(client.dbId)
+    });
+}
+
+// ---- interiors ------------------------------------------------------------------------------
+function worldInteriorDef(scene) {
+    let d = interiorDefs.get(scene); if (d) return d;
+    const [kind, key] = scene.split(':');
+    if (kind === 'work') { const b = WL.buildingById.get(Number(key)); const co = W_COMPANIES.find(c => c.id === b?.work) || W_COMPANIES[0]; d = buildOfficeInterior(co); d.coId = co.id; d.bid = b ? b.id : 0; }
+    else { const h = WL.houseById.get(key); d = buildHouseInterior(h ? h.tier : 0); d.hid = key; }
+    d.colliders = interiorColliders(d);
+    interiorDefs.set(scene, d); return d;
+}
+function worldGetInterior(scene) {
+    let room = interiorRooms[scene];
+    if (room) { room.emptySince = null; return room; }
+    const def = worldInteriorDef(scene);
+    room = new Room('INT:' + scene, 'WORLD', { shapeCount: 0, botCount: 0, shapeRespawn: false });
+    room.worldKind = 'interior'; room.worldExtent = INT_EXT; room.grid = new SpatialGrid(INT_EXT, 250);
+    room.noCombat = true; room.def = def; room.colliders = def.colliders; room.scene = scene; room.emptySince = null;
+    interiorRooms[scene] = room; return room;
+}
+function worldPublicInterior(def) { const { colliders, ...rest } = def; return rest; }
+
+// ---- scene changes -----------------------------------------------------------------------
+function worldDetach(client) {
+    const room = client.room, p = client.player;
+    if (p) { p.markedForDeletion = true; if (room) { room.entities = room.entities.filter(e => e !== p); room.drones = room.drones.filter(d => d.owner !== p); } client.player = null; }
+    if (room) { room.clients = room.clients.filter(c => c !== client); if (room.worldKind === 'interior' && !room.clients.length) room.emptySince = Date.now(); }
+    client.room = null;
+}
+function worldGoto(client, scene, x, y) {
+    const w = client.world; if (!w) return;
+    if (client.player) worldSnapshot(client);
+    worldDetach(client);
+    const room = scene === 'ext' ? worldRoom : worldGetInterior(scene);
+    const user = db.prepare('SELECT username, selected_color FROM users WHERE id=?').get(client.dbId);
+    const ent = new Entity(room, x, y, 'tank', user?.username || 'Player', 0, true, client.ws);
+    ent.nameColor = user?.selected_color || '#ffffff';
+    worldApplyProgress(ent, w.prog);
+    if (scene === 'ext' && WL) { const pos = { x, y }; layoutPushOut(WL, pos, ent.radius); ent.x = pos.x; ent.y = pos.y; }
+    room.entities.push(ent); room.clients.push(client);
+    client.room = room; client.player = ent; client.spectatingId = null;
+    w.scene = scene; w.dead = false; w.task = null; w.promptKey = null; w.invulnerableUntil = Date.now() + 2500;
+    if (scene === 'ext') w.ext = { x: ent.x, y: ent.y };
+    sendWorld(client, 'world_scene', { scene: scene === 'ext' ? 'ext' : 'int', key: scene, interior: scene === 'ext' ? null : worldPublicInterior(room.def), x: ent.x, y: ent.y });
+    client.ws.send(JSON.stringify({ type: 'init', id: ent.id, team: 0, nc: ent.nameColor, name1: ent.name }));
+    w.bankCoins = worldBankCoins(client);
+    worldPushState(client);
+    if (scene === 'ext') worldStreamChunks(client, true);
+}
+function worldGotoExterior(client, x, y) { worldGoto(client, 'ext', x, y); }
+// Standing point just outside a building door.
+function worldOutsideDoor(b, extra = 46) {
+    const d = b.door; return { x: d.x + (d.dir === 'E' ? extra : d.dir === 'W' ? -extra : 0), y: d.y + (d.dir === 'S' ? extra : d.dir === 'N' ? -extra : 0) };
+}
+function worldHomeSpawn(uid) {
+    const hid = worldFirstHouse(uid); if (!hid || !WL.houseById.has(hid)) return null;
+    return { scene: 'house:' + hid, def: worldInteriorDef('house:' + hid) };
+}
+function worldSpawnNewlyOrAfterDeath(client) {
+    const home = worldHomeSpawn(client.dbId);
+    if (home) worldGoto(client, home.scene, home.def.spawn.x, home.def.spawn.y);
+    else worldGoto(client, 'ext', WL.spawn.x + (Math.random() - 0.5) * 60, WL.spawn.y);
+}
+
+// ---- chunk streaming ---------------------------------------------------------------------------
+function worldViewScale(p) { return Math.max(1, (1 + ((p.level || 1) - 1) * 0.011) * (p.vehicle ? 1.5 : 1) * (p.getPowerupActive('fov') ? 1.3 : 1)); }
+function worldStreamChunks(client, force) {
+    const w = client.world, p = client.player; if (!w || !p || w.scene !== 'ext' || !WL) return;
+    const cx = clamp(Math.floor(p.x / W_CHUNK), 0, W_NCH - 1), cy = clamp(Math.floor(p.y / W_CHUNK), 0, W_NCH - 1);
+    const R = worldViewScale(p) > 1.35 ? 2 : 1;
+    for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) {
+        const x = cx + dx, y = cy + dy; if (x < 0 || y < 0 || x >= W_NCH || y >= W_NCH) continue;
+        const key = x + y * W_NCH; if (w.sentChunks.has(key)) continue;
+        w.sentChunks.add(key);
+        if (client.ws.readyState === WebSocket.OPEN) client.ws.send('{"type":"world_chunk","c":' + layoutChunkJson(WL, x, y) + '}');
     }
-    for(let i=0;i<90;i++)worldCitizens.push({id:'npc'+i,x:worldRand(seed,i,4)*WORLD_EXTENT-WORLD_EXTENT/2,y:worldRand(seed,i,5)*WORLD_EXTENT-WORLD_EXTENT/2,angle:worldRand(seed,i,6)*Math.PI*2,speed:.45+worldRand(seed,i,7)*.35});
 }
-function sendWorld(client,type,extra={}){if(client.ws.readyState===WebSocket.OPEN)client.ws.send(JSON.stringify({type,...extra}));}
-function worldSave(client){
-    if(!client.dbId||!client.world)return;const now=Date.now();
-    if(client.player&&client.room===worldRoom){
-        client.world.x=client.player.x-WORLD_EXTENT/2;client.world.y=client.player.y-WORLD_EXTENT/2;
-        client.world.stats=[...client.player.stats];client.world.upgrades.stats=client.world.stats;
+function worldSendStatic(client) {
+    const bld = b => b && { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h, door: b.door };
+    sendWorld(client, 'world_static', {
+        center: W_C, extent: W_EXT, chunk: W_CHUNK, nch: W_NCH, roads: WL.roads, cars: WORLD_CARS, carColors: WORLD_CAR_COLORS,
+        companies: W_COMPANIES, spawn: WL.spawn, bank: bld(WL.bank), dealer: bld(WL.dealer), fireMs: WORLD_FIRE_MS, taskMs: WORLD_TASK_MS
+    });
+    sendWorld(client, 'world_houses', { list: [...houseOwner].map(([hid, o]) => [hid, o.name, o.owner_id === client.dbId ? 1 : 0]) });
+}
+
+// ---- jobs / banking / houses / cars -------------------------------------------------------------
+function worldEmployer(w) { return w.job ? W_COMPANIES.find(c => c.id === w.job.co) : null; }
+function worldFire(client, reason) {
+    const w = client.world, co = worldEmployer(w); if (!co) return;
+    w.job = null; w.task = null; w.jobCd = Date.now() + WORLD_REHIRE_MS;
+    worldNotice(client, reason || `You were fired from ${co.name} for not working.`, { level: 'bad' });
+    worldPushState(client); worldSave(client);
+}
+function worldDeposit(client) {
+    const w = client.world, amt = Math.max(0, Math.floor(w.sessionCoins || 0));
+    if (!amt) { worldNotice(client, 'You have no unbanked cash to deposit.'); return; }
+    db.prepare('UPDATE users SET coins=coins+? WHERE id=?').run(amt, client.dbId);
+    w.sessionCoins = 0; w.bankCoins = worldBankCoins(client);
+    worldSave(client); worldPushProfile(client); worldPushState(client);
+    worldNotice(client, `Deposited ${fmtMoney(amt)} coins into your account.`, { level: 'good', sessionCoins: 0 });
+}
+function worldBuyHouse(client, b) {
+    const w = client.world;
+    if (houseOwner.has(b.hid)) { worldNotice(client, 'Someone already owns this house.'); return; }
+    const price = b.price;
+    let ok = false;
+    try {
+        db.transaction(() => {
+            const u = db.prepare('SELECT coins FROM users WHERE id=?').get(client.dbId);
+            if (!u || u.coins < price) throw new Error('funds');
+            if (db.prepare('SELECT owner_id FROM world_houses WHERE id=? AND owner_id IS NOT NULL').get(b.hid)) throw new Error('taken');
+            const now = Date.now();
+            db.prepare('INSERT OR REPLACE INTO world_houses(id,owner_id,price,x,y,purchased_at,last_seen) VALUES(?,?,?,?,?,?,?)').run(b.hid, client.dbId, price, b.x + b.w / 2, b.y + b.h / 2, now, now);
+            db.prepare('UPDATE users SET coins=coins-? WHERE id=?').run(price, client.dbId);
+            ok = true;
+        })();
+    } catch (err) { worldNotice(client, err.message === 'funds' ? `You need ${fmtMoney(price)} coins in your account. Deposit your cash at the bank first.` : 'That house is no longer available.'); return; }
+    if (!ok) return;
+    const name = db.prepare('SELECT username FROM users WHERE id=?').get(client.dbId)?.username || 'Resident';
+    houseOwner.set(b.hid, { owner_id: client.dbId, name, purchased_at: Date.now() });
+    w.bankCoins = worldBankCoins(client);
+    for (const c of worldClients) sendWorld(c, 'world_house', { hid: b.hid, o: name, m: c.dbId === client.dbId ? 1 : 0 });
+    worldPushProfile(client); worldPushState(client);
+    worldNotice(client, 'You bought a house! It is now your spawn point. Walk to the door and press F to go inside.', { level: 'good' });
+}
+function worldExpireHouses() {
+    const cutoff = Date.now() - 7 * 86400000;
+    const expired = db.prepare('SELECT * FROM world_houses WHERE owner_id IS NOT NULL AND COALESCE(last_seen,purchased_at)< ?').all(cutoff);
+    for (const h of expired) {
+        db.transaction(() => { db.prepare('UPDATE users SET coins=coins+? WHERE id=?').run(Math.floor(h.price / 2), h.owner_id); db.prepare('DELETE FROM world_houses WHERE id=?').run(h.id); })();
+        houseOwner.delete(h.id);
+        for (const c of worldClients) sendWorld(c, 'world_house', { hid: h.id, o: null, m: 0 });
     }
-    db.prepare(`INSERT INTO world_players(user_id,x,y,upgrades,updated_at,last_seen,owned_car,session_coins) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET x=excluded.x,y=excluded.y,upgrades=excluded.upgrades,updated_at=excluded.updated_at,last_seen=excluded.last_seen,owned_car=excluded.owned_car,session_coins=excluded.session_coins`).run(client.dbId,client.world.x,client.world.y,JSON.stringify(client.world.upgrades),now,now,client.world.car||null,Math.max(0,Math.floor(client.world.sessionCoins||0)));
-    db.prepare('UPDATE world_houses SET last_seen=? WHERE owner_id=?').run(now,client.dbId);
 }
-function expireWorldHouses(){
-    const cutoff=Date.now()-7*86400000;
-    const expired=db.prepare('SELECT * FROM world_houses WHERE owner_id IS NOT NULL AND COALESCE(last_seen,purchased_at)< ?').all(cutoff);
-    for(const h of expired){const refund=Math.floor(h.price/2);const tx=db.transaction(()=>{db.prepare('UPDATE users SET coins=coins+? WHERE id=?').run(refund,h.owner_id);db.prepare('UPDATE world_houses SET owner_id=NULL,purchased_at=NULL,last_seen=NULL WHERE id=?').run(h.id);});tx();}
+function worldBuyCar(client, model) {
+    const w = client.world, spec = WORLD_CARS.find(c => c.id === model);
+    if (!spec) return;
+    if (w.car === spec.id) { worldNotice(client, `You already own a ${spec.name}.`); return; }
+    const old = w.car ? WORLD_CARS.find(c => c.id === w.car) : null, cost = spec.price - (old ? Math.floor(old.price * 0.5) : 0);
+    const u = db.prepare('SELECT coins FROM users WHERE id=?').get(client.dbId);
+    if (!u || u.coins < cost) { worldNotice(client, `The ${spec.name} costs ${fmtMoney(cost)} coins${old ? ' after trade-in' : ''}. Deposit cash at the bank first.`); return; }
+    db.prepare('UPDATE users SET coins=coins-? WHERE id=?').run(cost, client.dbId);
+    const bay = worldFindFreeBay(client.dbId);
+    w.car = spec.id; parkedCars.set(client.dbId, { uid: client.dbId, model: spec.id, x: bay.x, y: bay.y, a: bay.a, driven: false, pid: parkedCars.get(client.dbId)?.pid || worldPidSeq++ });
+    w.bankCoins = worldBankCoins(client);
+    worldSave(client); worldPushProfile(client); worldPushState(client);
+    worldNotice(client, `Purchased ${spec.name}${old ? ' (old car traded in)' : ''}. It is parked in the dealership car park – walk to it and press F to drive.`, { level: 'good' });
 }
-const worldClients=new Set();
-function ensureWorldShapes(x,y){
-    if(Math.hypot(x,y)<5200||Math.hypot(x,y)>13500)return;
-    const total=worldRoom.entities.filter(e=>['square','triangle','pentagon','hexagon','powerup'].includes(e.type)).length;
-    if(total>=1200)return;
-    const px=WORLD_EXTENT/2+x,py=WORLD_EXTENT/2+y;
-    const count=worldRoom.entities.filter(e=>['square','triangle','pentagon','hexagon','powerup'].includes(e.type)&&Math.hypot(e.x-px,e.y-py)<2600).length;
-    for(let i=count;i<90&&total+i-count<1200;i++){
-        const a=Math.random()*Math.PI*2,d=250+Math.random()*2300;
-        const sx=Math.max(0,Math.min(WORLD_EXTENT,px+Math.cos(a)*d)),sy=Math.max(0,Math.min(WORLD_EXTENT,py+Math.sin(a)*d));
-        const type=Math.random()<.68?'square':(Math.random()<.72?'triangle':'pentagon');
-        const shape=new Entity(worldRoom,sx,sy,type);
-        // Match the arena's rare high-value powerup shape spawn as well.
-        if(Math.random()<POWERUP_SPAWN_CHANCE){
-            shape.type='powerup';shape.powerupType=POWERUP_TYPES[Math.floor(Math.random()*POWERUP_TYPES.length)];
-            shape.hp=550;shape.maxHp=550;shape.radius=30;shape.xpVal=4000;
+function worldEnterCar(client) {
+    const w = client.world, p = client.player, pc = parkedCars.get(client.dbId);
+    if (!w || !p || !pc || pc.driven || w.scene !== 'ext') return;
+    if (Math.hypot(pc.x - p.x, pc.y - p.y) > 95) { worldNotice(client, 'Walk up to your car first.'); return; }
+    const spec = WORLD_CARS.find(c => c.id === pc.model);
+    pc.driven = true; p.vehicle = { spec, a: pc.a, v: 0, model: spec.id }; p.ghost = true; p.x = pc.x; p.y = pc.y; p.vx = p.vy = 0;
+    p.inputs = { up: false, down: false, left: false, right: false, shooting: false, angle: p.inputs?.angle || 0, repel: false };
+    worldPushState(client);
+}
+function worldExitCar(client, force) {
+    const w = client.world, p = client.player; if (!w || !p || !p.vehicle) return;
+    const v = p.vehicle, pc = parkedCars.get(client.dbId);
+    if (!force && Math.abs(v.v) > 3.5) { worldNotice(client, 'Slow down before getting out.'); return; }
+    let cx = p.x, cy = p.y, ca = v.a;
+    const bay = worldSnapToBay(cx, cy, client.dbId); if (bay) { cx = bay.x; cy = bay.y; ca = bay.a; }
+    if (pc) { pc.x = cx; pc.y = cy; pc.a = ca; pc.driven = false; }
+    else parkedCars.set(client.dbId, { uid: client.dbId, model: v.model, x: cx, y: cy, a: ca, driven: false, pid: worldPidSeq++ });
+    p.vehicle = null; p.ghost = false; p.vx = p.vy = 0;
+    const lx = Math.sin(ca), ly = -Math.cos(ca);
+    for (const side of [1, -1]) { const pos = { x: cx + lx * 48 * side, y: cy + ly * 48 * side }; if (!layoutPushOut(WL, pos, p.radius + 2)) { p.x = pos.x; p.y = pos.y; break; } p.x = pos.x; p.y = pos.y; }
+    w.ext = { x: p.x, y: p.y };
+    worldPushState(client); worldSave(client);
+}
+function worldDoRest(client) {
+    const p = client.player, w = client.world; if (!p || Date.now() < (w.restUntil || 0)) { worldNotice(client, 'You are already well rested.'); return; }
+    w.restUntil = Date.now() + 20000; p.hp = p.getEffectiveMaxHp(); worldSave(client); worldNotice(client, 'You rest in bed. Health restored and progress saved.', { level: 'good' });
+}
+
+// ---- interaction prompts ----------------------------------------------------------------------
+// A prompt is what the player can currently interact with. The client anchors the bubble to
+// (ax, ay) – e.g. on top of the bank building – and F triggers the first enabled action.
+function worldComputePrompt(client) {
+    const w = client.world, p = client.player; if (!w || !p || !WL) return null;
+    if (w.scene !== 'ext') return worldInteriorPrompt(client);
+    if (p.vehicle) {
+        const spec = p.vehicle.spec, slow = Math.abs(p.vehicle.v) <= 3.5;
+        return { id: 'exitcar', kind: 'exitcar', ax: p.x, ay: p.y - 56, title: spec.name, lines: [slow ? 'Park up and get out' : 'Slow down to get out'], actions: [{ a: 'exit', label: 'Get out', on: slow }], mini: true };
+    }
+    let best = null, bd = Infinity;
+    const consider = (d, pr) => { if (d < bd) { bd = d; best = pr; } };
+    const bank = WL.bank, dlr = WL.dealer;
+    const dist = (pt) => Math.hypot(pt.x - p.x, pt.y - p.y);
+    const coins = w.bankCoins || 0, cash = Math.floor(w.sessionCoins || 0);
+    if (dist(bank.door) < 130) consider(dist(bank.door), { id: 'bank', kind: 'bank', ax: bank.x + bank.w / 2, ay: bank.y + bank.h / 2, title: 'Central Bank', lines: [`Unbanked cash: ${fmtMoney(cash)}`, `Account balance: ${fmtMoney(coins)}`, cash > 0 ? 'Deposit it before you lose it!' : 'Nothing to deposit'], actions: [{ a: 'deposit', label: 'Deposit all', on: cash > 0 }] });
+    if (dist(dlr.door) < 150) {
+        const old = w.car ? WORLD_CARS.find(c => c.id === w.car) : null;
+        consider(dist(dlr.door), { id: 'dealer', kind: 'dealer', ax: dlr.x + dlr.w / 2, ay: dlr.y + dlr.h / 2, title: 'Car Dealership', lines: [`Account balance: ${fmtMoney(coins)}`, old ? `Trade-in: ${old.name} for ${fmtMoney(old.price * 0.5)}` : 'Cars are parked in the car park next door'],
+            actions: WORLD_CARS.map(c => { const cost = c.price - (old ? Math.floor(old.price * 0.5) : 0); return { a: 'buy:' + c.id, label: c.id === w.car ? c.name + ' (owned)' : `${c.name} – ${fmtMoney(cost)}`, on: c.id !== w.car && coins >= cost }; }) });
+    }
+    const cx = clamp(Math.floor(p.x / W_CHUNK), 0, W_NCH - 1), cy = clamp(Math.floor(p.y / W_CHUNK), 0, W_NCH - 1);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        const ch = WL.chunks.get((cx + dx) + (cy + dy) * W_NCH); if (!ch) continue;
+        for (const b of ch.buildings) {
+            if (!b.work && !b.hid) continue;
+            const d = dist(b.door); if (d > 100 || d >= bd) continue;
+            const ax = b.x + b.w / 2, ay = b.y + b.h / 2;
+            if (b.work) {
+                const co = W_COMPANIES.find(c => c.id === b.work), mine = w.job?.co === co.id;
+                consider(d, { id: 'work:' + b.id, kind: 'work', ctx: b, ax, ay, title: co.name, lines: [mine ? `You work here as ${co.role}` : `Hiring: ${co.role} · ${co.pay} coins per shift`, 'Staff entrance – office floor inside'], actions: [{ a: 'enter', label: 'Go inside', on: true }] });
+            } else {
+                const o = houseOwner.get(b.hid);
+                if (!o) consider(d, { id: 'house:' + b.hid, kind: 'house', ctx: b, ax, ay, title: 'House for sale', lines: [`${['Cosy', 'Family', 'Large'][b.tier || 0]} home · ${fmtMoney(b.price)} coins`, `Account balance: ${fmtMoney(coins)}`], actions: [{ a: 'buy', label: `Buy for ${fmtMoney(b.price)}`, on: coins >= b.price }] });
+                else if (o.owner_id === client.dbId) consider(d, { id: 'house:' + b.hid, kind: 'house', ctx: b, ax, ay, title: 'Your house', lines: ['Your private home – only you can enter'], actions: [{ a: 'enter', label: 'Go inside', on: true }] });
+                else consider(d, { id: 'house:' + b.hid, kind: 'house', ctx: b, ax, ay, title: `${o.name}'s house`, lines: ['Locked'], actions: [] });
+            }
         }
-        worldRoom.entities.push(shape);
+    }
+    const pc = parkedCars.get(client.dbId);
+    if (pc && !pc.driven) { const d = Math.hypot(pc.x - p.x, pc.y - p.y); if (d < 85) { const spec = WORLD_CARS.find(c => c.id === pc.model); consider(d - 40, { id: 'car', kind: 'car', ax: pc.x, ay: pc.y - 50, title: 'Your ' + spec.name, lines: ['Press F to get in'], actions: [{ a: 'drive', label: 'Get in', on: true }], mini: true }); } }
+    return best;
+}
+function worldInteriorPrompt(client) {
+    const w = client.world, p = client.player, room = client.room, def = room.def; if (!def) return null;
+    const near = (o, r) => Math.hypot(o.x - p.x, o.y - p.y) < (r || o.r || 90);
+    const exitD = Math.hypot(def.door.px - p.x, def.door.py - p.y);
+    let best = null, bd = Infinity;
+    const consider = (d, pr) => { if (d < bd) { bd = d; best = pr; } };
+    if (exitD < def.door.r) consider(exitD, { id: 'exit', kind: 'exit', ax: def.door.px, ay: def.door.py - 40, title: def.kind === 'house' ? 'Front door' : 'Exit building', lines: ['Back to the street'], actions: [{ a: 'exit', label: 'Go outside', on: true }], mini: true });
+    if (def.kind === 'office') {
+        const co = W_COMPANIES.find(c => c.id === def.coId), emp = worldEmployer(w), mine = emp && emp.id === co.id, now = Date.now();
+        if (near(def.reception)) {
+            const lines = [co.name, `${co.role} · ${co.pay} coins per shift`]; const actions = [];
+            if (mine) { lines.push(`Shift due in ${worldFmtMs(WORLD_FIRE_MS - (w.playMs - w.jobLast))}`); actions.push({ a: 'quit', label: 'Resign', on: true }); }
+            else if (emp) lines.push(`Resign from ${emp.name} first`);
+            else if (now < (w.jobCd || 0)) lines.push(`Recently fired – retry in ${worldFmtMs((w.jobCd || 0) - now)}`);
+            else { lines.push(`Work a task every ${Math.round(WORLD_FIRE_MS / 60000)} min of play or you will be fired`); actions.push({ a: 'apply', label: 'Apply for the job', on: true }); }
+            consider(Math.hypot(def.reception.x - p.x, def.reception.y - p.y) - 60, { id: 'reception', kind: 'reception', ax: def.reception.x, ay: def.reception.y - 90, title: 'Reception', lines, actions });
+        }
+        for (const s of def.stations) if (near(s)) {
+            const t = w.task && w.task.desk === s.id;
+            const lines = mine ? (t ? ['Working…'] : [`Earn ${co.pay} coins · takes ${WORLD_TASK_MS / 1000}s`, 'Stay at your desk until finished']) : ['You need a job here – apply at reception'];
+            consider(Math.hypot(s.x - p.x, s.y - p.y) - 30, { id: s.id, kind: 'desk', ctx: s, ax: s.x, ay: s.y - 70, title: 'Work station', lines, actions: mine ? [t ? { a: 'cancel', label: 'Stop', on: true } : { a: 'work', label: 'Start work', on: true }] : [] });
+        }
+    } else {
+        for (const s of def.stations) if (s.id === 'bed' && near(s)) consider(Math.hypot(s.x - p.x, s.y - p.y) - 30, { id: 'bed', kind: 'bed', ax: s.x, ay: s.y - 90, title: 'Bed', lines: ['Rest to restore health and save your progress'], actions: [{ a: 'rest', label: 'Rest', on: true }] });
+    }
+    return best;
+}
+function worldFmtMs(ms) { ms = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(ms / 60) + ':' + String(ms % 60).padStart(2, '0'); }
+function worldPromptForSend(pr) { if (!pr) return null; const { ctx, ...rest } = pr; return rest; }
+
+function worldInteract(client, d) {
+    const w = client.world, p = client.player; if (!w || !p || w.dead) return;
+    const pr = worldComputePrompt(client); if (!pr || pr.id !== d.id) return;
+    const act = (pr.actions || []).find(a => a.a === d.a); if (!act || act.on === false) return;
+    switch (pr.kind) {
+        case 'bank': worldDeposit(client); break;
+        case 'dealer': if (act.a.startsWith('buy:')) worldBuyCar(client, act.a.slice(4)); break;
+        case 'work': { const def = worldInteriorDef('work:' + pr.ctx.id); worldGoto(client, 'work:' + pr.ctx.id, def.spawn.x, def.spawn.y); break; }
+        case 'house':
+            if (act.a === 'buy') worldBuyHouse(client, pr.ctx);
+            else { const def = worldInteriorDef('house:' + pr.ctx.hid); w.homeDoor = worldOutsideDoor(pr.ctx); worldGoto(client, 'house:' + pr.ctx.hid, def.spawn.x, def.spawn.y); }
+            break;
+        case 'car': worldEnterCar(client); break;
+        case 'exitcar': worldExitCar(client, false); break;
+        case 'exit': {
+            const def = client.room.def, b = def.kind === 'house' ? WL.houseById.get(def.hid) : WL.buildingById.get(def.bid);
+            const pos = b ? worldOutsideDoor(b) : WL.spawn; worldGoto(client, 'ext', pos.x, pos.y); break;
+        }
+        case 'reception': {
+            const def = client.room.def, co = W_COMPANIES.find(c => c.id === def.coId);
+            if (act.a === 'apply') { w.job = { co: co.id }; w.jobLast = w.playMs; worldNotice(client, `You're hired at ${co.name}! Complete a task at any desk at least every ${Math.round(WORLD_FIRE_MS / 60000)} minutes of play.`, { level: 'good' }); }
+            else if (act.a === 'quit') { w.job = null; w.task = null; worldNotice(client, `You resigned from ${co.name}.`); }
+            worldPushState(client); worldSave(client); break;
+        }
+        case 'desk':
+            if (act.a === 'work') { w.task = { desk: pr.id, start: Date.now(), x: p.x, y: p.y }; }
+            else w.task = null;
+            break;
+        case 'bed': worldDoRest(client); break;
+    }
+    w.promptKey = null;
+}
+
+// ---- join / leave / message router ---------------------------------------------------------
+function worldJoin(client) {
+    if (!client.dbId) { sendWorld(client, 'world_error', { message: 'Log in to play World Mode.' }); return; }
+    ensureWorld();
+    if (client.world) { worldSave(client); worldDetach(client); worldClients.delete(client); }
+    else {
+        if (client.room) client.room.clients = client.room.clients.filter(c => c !== client);
+        if (client.player) { const old = client.player; if (client.room) { client.room.entities = client.room.entities.filter(e => e !== old); client.room.drones = client.room.drones.filter(d => d.owner !== old); } old.markedForDeletion = true; client.player = null; }
+    }
+    const saved = db.prepare('SELECT * FROM world_players WHERE user_id=?').get(client.dbId);
+    let stats = [0, 0, 0, 0, 0, 0, 0, 0];
+    try { const u = JSON.parse(saved?.upgrades || '{}'); if (Array.isArray(u.stats) && u.stats.length === 8) stats = u.stats; } catch { }
+    const car = saved?.owned_car && WORLD_CARS.find(c => c.id === saved.owned_car) ? saved.owned_car : null;
+    client.world = {
+        prog: { score: saved?.score || 0, level: saved?.level || 1, statPoints: saved?.stat_points || 0, stats, tankType: saved?.tank_type || 'Basic' },
+        sessionCoins: saved?.session_coins || 0, car, playMs: saved?.play_ms || 0, jobLast: saved?.job_last || 0, jobCd: saved?.job_cd || 0,
+        job: saved?.job && W_COMPANIES.find(c => c.id === saved.job) ? { co: saved.job } : null,
+        ext: saved ? { x: W_C + saved.x, y: W_C + saved.y } : { x: WL.spawn.x, y: WL.spawn.y },
+        scene: 'ext', sentChunks: new Set(), lastTick: Date.now(), lastSave: Date.now(), bankCoins: 0, task: null, dead: false
+    };
+    // a player who left mid-shift while far over their deadline gets the usual grace, never an instant firing
+    if (client.world.job) client.world.jobLast = Math.max(client.world.jobLast, client.world.playMs - (WORLD_FIRE_MS - 2 * 60 * 1000));
+    worldClients.add(client);
+    worldSendStatic(client);
+    const home = worldHomeSpawn(client.dbId);
+    if (home) worldGoto(client, home.scene, home.def.spawn.x, home.def.spawn.y);
+    else if (saved) worldGoto(client, 'ext', client.world.ext.x, client.world.ext.y);
+    else worldGoto(client, 'ext', WL.spawn.x + (Math.random() - 0.5) * 60, WL.spawn.y);
+    worldRoom.worldKind = 'exterior';
+    db.prepare('UPDATE world_houses SET last_seen=? WHERE owner_id=?').run(Date.now(), client.dbId);
+}
+function worldOnDisconnect(client) {
+    const w = client.world; if (!w) return;
+    if (client.player?.vehicle) worldExitCar(client, true);
+    worldSave(client); worldClients.delete(client);
+    worldDetach(client); client.world = null;
+}
+function worldHandle(client, d) {
+    const w = client.world; if (!w || !client.dbId) return;
+    if (d.type === 'world_interact') worldInteract(client, { id: String(d.id), a: String(d.a) });
+    else if (d.type === 'world_leave') { worldOnDisconnect(client); }
+}
+function worldOnPlayerDeath(owner, e) {
+    const w = owner.world; if (!w || w.dead) return;
+    w.dead = true; w.task = null; w.sessionCoins = 0;
+    if (e.vehicle) { e.vehicle = null; e.ghost = false; const pc = parkedCars.get(owner.dbId); if (pc) pc.driven = false; }
+    // Progress resets on death (permanent stat upgrades are kept, as before); unbanked cash is lost.
+    w.prog = { score: 0, level: 1, statPoints: 0, stats: [...e.stats], tankType: 'Basic' };
+    w.respawnAt = Date.now() + 60;
+    sendWorld(owner, 'world_death', { reason: 'Your tank was destroyed. Unbanked cash lost.' });
+}
+
+// ---- farms: shapes only exist inside designated fields ------------------------------------------
+const FARM_SHAPE_WEIGHTS = { farm: [['square', 62], ['triangle', 28], ['pentagon', 9], ['hexagon', 1]], ranch: [['square', 40], ['triangle', 35], ['pentagon', 22], ['hexagon', 3]] };
+function worldPickShape(kind) { const t = FARM_SHAPE_WEIGHTS[kind] || FARM_SHAPE_WEIGHTS.farm; let r = Math.random() * 100; for (const [n, wgt] of t) { if ((r -= wgt) < 0) return n; } return 'square'; }
+const fieldLastActive = new Map();
+function worldFarmTick() {
+    if (!WL) return;
+    const now = Date.now(), active = new Set();
+    for (const c of worldClients) {
+        const p = c.player; if (!p || c.world?.scene !== 'ext') continue;
+        const cx = clamp(Math.floor(p.x / W_CHUNK), 0, W_NCH - 1), cy = clamp(Math.floor(p.y / W_CHUNK), 0, W_NCH - 1);
+        for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) {
+            const ch = WL.chunks.get((cx + dx) + (cy + dy) * W_NCH); if (!ch) continue;
+            for (const f of ch.fields) if ((f.kind === 'farm' || f.kind === 'ranch') && rectDist(p.x, p.y, f) < 2400) { active.add(f.id); fieldLastActive.set(f.id, now); }
+        }
+    }
+    const counts = new Map(); let total = 0;
+    for (const e of worldRoom.entities) if (e.fieldId) { counts.set(e.fieldId, (counts.get(e.fieldId) || 0) + 1); total++; }
+    // spawn into active fields (a few per second so shapes appear gradually, never in a burst)
+    for (const id of active) {
+        const f = WL.fieldById.get(id), have = counts.get(id) || 0;
+        for (let i = have, n = 0; i < f.target && n < 4 && total < 1600; i++, n++, total++) {
+            const sx = f.x + 30 + Math.random() * Math.max(1, f.w - 60), sy = f.y + 30 + Math.random() * Math.max(1, f.h - 60);
+            const shape = new Entity(worldRoom, sx, sy, worldPickShape(f.kind));
+            if (Math.random() < POWERUP_SPAWN_CHANCE) { shape.type = 'powerup'; shape.powerupType = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)]; shape.hp = 550; shape.maxHp = 550; shape.radius = 30; shape.xpVal = 4000; }
+            shape.fieldId = id; worldRoom.entities.push(shape);
+        }
+    }
+    // keep shapes inside their field (knock-back can push them out) and cull fields nobody is near
+    for (const e of worldRoom.entities) {
+        if (!e.fieldId) continue;
+        const f = WL.fieldById.get(e.fieldId);
+        if (!active.has(e.fieldId) && now - (fieldLastActive.get(e.fieldId) || 0) > 25000) { e.markedForDeletion = true; e.hp = 0; e.xpAwarded = true; e.noReward = true; continue; }
+        const nx = clamp(e.x, f.x + 14, f.x + f.w - 14), ny = clamp(e.y, f.y + 14, f.y + f.h - 14);
+        if (nx !== e.x || ny !== e.y) { e.x = nx; e.y = ny; e.vx = 0; e.vy = 0; }
     }
 }
-function worldJoin(client){
-    if(!client.dbId){sendWorld(client,'world_error',{message:'Log in to play World Mode.'});return;}
-    seedWorldTraffic();
-    if(client.room)client.room.clients=client.room.clients.filter(c=>c!==client);
-    if(client.player){const oldPlayer=client.player;if(client.room){client.room.entities=client.room.entities.filter(e=>e!==oldPlayer);client.room.drones=client.room.drones.filter(d=>d.owner!==oldPlayer);}oldPlayer.markedForDeletion=true;client.player=null;}
-    let saved=db.prepare('SELECT * FROM world_players WHERE user_id=?').get(client.dbId),upgrades={};
-    try{upgrades=JSON.parse(saved?.upgrades||'{}')}catch{}
-    if(!upgrades||typeof upgrades!=='object')upgrades={};
-    const stats=Array.isArray(upgrades.stats)&&upgrades.stats.length===8?upgrades.stats:[0,0,0,0,0,0,0,0];
-    client.world={level:0,x:saved?.x??180,y:saved?.y??180,invulnerableUntil:Date.now()+4000,upgrades,stats:[...stats],sessionCoins:saved?.session_coins||0,car:saved?.owned_car||null,inCar:false,lastJob:0};
-    client.room=worldRoom;worldRoom.clients.push(client);client.spectatingId=null;
-    ensureWorldShapes(client.world.x,client.world.y);
-    const user=db.prepare('SELECT username,selected_color FROM users WHERE id=?').get(client.dbId);
-    client.player=new Entity(worldRoom,WORLD_EXTENT/2+client.world.x,WORLD_EXTENT/2+client.world.y,'tank',user?.username||'Player',0,true,client.ws);
-    client.player.level=1;client.player.score=0;client.player.xp=0;client.player.statPoints=0;client.player.stats=[...client.world.stats];
-    client.player.nameColor=user?.selected_color||'#ffffff';client.player.worldInCar=false;
-    client.player.worldCarSpeed=WORLD_CARS.find(v=>v.id===client.world.car)?.speed||1.35;
-    worldRoom.entities.push(client.player);worldClients.add(client);
-    db.prepare('UPDATE world_houses SET last_seen=? WHERE owner_id=?').run(Date.now(),client.dbId);
-    sendWorld(client,'world_joined',{playerId:client.player.id,world:client.world,view:getWorldView(client.world.x,client.world.y),cars:WORLD_CARS,jobs:WORLD_JOBS});
-    client.ws.send(JSON.stringify({type:'init',id:client.player.id,team:0,nc:client.player.nameColor,name1:client.player.name}));
+
+// ---- NPC traffic and pedestrians --------------------------------------------------------------------
+function worldChunkList(x, y, R, name) {
+    const cx = clamp(Math.floor(x / W_CHUNK), 0, W_NCH - 1), cy = clamp(Math.floor(y / W_CHUNK), 0, W_NCH - 1), out = [];
+    for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) { const ch = WL.chunks.get((cx + dx) + (cy + dy) * W_NCH); if (ch) for (const o of ch[name]) out.push(o); }
+    return out;
 }
-function worldHandle(client,d){
-    const w=client.world;if(!w||!client.dbId)return;
-    if(d.type==='world_work'){
-        const now=Date.now();if(Math.hypot(w.x,w.y)>6500){sendWorld(client,'world_notice',{message:'Jobs are available in the city centre.'});return;}
-        if(now-w.lastJob<10000)return;const job=WORLD_JOBS[d.job];if(!job)return;
-        w.lastJob=now;w.sessionCoins+=job;worldSave(client);sendWorld(client,'world_notice',{message:`Shift complete: +${job} session coins`,sessionCoins:w.sessionCoins});
-    }else if(d.type==='world_bank'){
-        if(Math.hypot(w.x,w.y)>6500){sendWorld(client,'world_notice',{message:'Visit the city-centre bank to deposit your session earnings.'});return;}
-        const amount=Math.max(0,Math.floor(w.sessionCoins));if(amount){db.prepare('UPDATE users SET coins=coins+? WHERE id=?').run(amount,client.dbId);w.sessionCoins=0;worldSave(client);sendWorld(client,'profile_update',{profile:db.prepare('SELECT * FROM users WHERE id=?').get(client.dbId)});sendWorld(client,'world_notice',{message:`Deposited ${amount} coins into your account.`});}
-    }else if(d.type==='world_buy_house'){
-        const h=db.prepare('SELECT * FROM world_houses WHERE id=?').get(String(d.houseId)),u=db.prepare('SELECT coins FROM users WHERE id=?').get(client.dbId);
-        if(!h||!u||h.owner_id||u.coins<h.price||Math.hypot(h.x-w.x,h.y-w.y)>260)return;
-        const tx=db.transaction(()=>{const claimed=db.prepare('UPDATE world_houses SET owner_id=?,purchased_at=?,last_seen=? WHERE id=? AND owner_id IS NULL').run(client.dbId,Date.now(),Date.now(),h.id);if(!claimed.changes)return false;const debited=db.prepare('UPDATE users SET coins=coins-? WHERE id=? AND coins>=?').run(h.price,client.dbId,h.price);if(!debited.changes)throw new Error('Insufficient funds');return true;});
-        try{if(!tx())return;}catch(err){return;}w.promptedHouse=null;sendWorld(client,'profile_update',{profile:db.prepare('SELECT * FROM users WHERE id=?').get(client.dbId)});sendWorld(client,'world_view',{view:getWorldView(w.x,w.y)});
-    }else if(d.type==='world_buy_car'){
-        if(Math.hypot(w.x,w.y)>6500){sendWorld(client,'world_notice',{message:'Visit a city-centre dealership to buy a car.'});return;}
-        const car=WORLD_CARS.find(v=>v.id===d.carId),u=db.prepare('SELECT coins FROM users WHERE id=?').get(client.dbId);
-        if(!car||!u||w.car||u.coins<car.price)return;db.prepare('UPDATE users SET coins=coins-? WHERE id=?').run(car.price,client.dbId);w.car=car.id;worldSave(client);sendWorld(client,'profile_update',{profile:db.prepare('SELECT * FROM users WHERE id=?').get(client.dbId)});sendWorld(client,'world_position',{x:w.x,y:w.y,sessionCoins:w.sessionCoins,car:w.car,inCar:false});sendWorld(client,'world_notice',{message:`Purchased ${car.name}. Press G near a road to enter or leave it.`});
-    }else if(d.type==='world_enter_car'){
-        if(!w.car||!client.player)return;const onRoad=(Math.abs(w.x%2100)<100||Math.abs(w.y%2100)<100);
-        if(!w.inCar&&!onRoad){sendWorld(client,'world_notice',{message:'Move onto a road before entering your car.'});return;}
-        w.inCar=!w.inCar;client.player.worldInCar=w.inCar;
-        sendWorld(client,'world_position',{x:w.x,y:w.y,sessionCoins:w.sessionCoins,car:w.car,inCar:w.inCar});
-    }else if(d.type==='world_refresh'){
-        sendWorld(client,'world_view',{view:getWorldView(w.x,w.y)});
-    }else if(d.type==='world_leave'){
-        worldSave(client);worldClients.delete(client);if(client.player){client.room.entities=client.room.entities.filter(e=>e!==client.player);client.player=null;}if(client.room)client.room.clients=client.room.clients.filter(c=>c!==client);client.world=null;client.room=null;
+function worldAssignRoad(car, road, dir, fromS) {
+    car.road = road; car.dir = dir;
+    const hv = road.hw, lane = road.ln === 4 ? (Math.random() < 0.5 ? 0.3 : 0.72) : 0.5; car.off = hv * lane;
+    const nodes = roadNodes.get(road.a + road.k); let next = null;
+    if (dir > 0) { for (let i = 0; i < nodes.length; i++) if (nodes[i] > fromS + 8) { next = nodes[i]; break; } }
+    else for (let i = nodes.length - 1; i >= 0; i--) if (nodes[i] < fromS - 8) { next = nodes[i]; break; }
+    car.nextS = next;
+    if (next == null) return false;
+    // plan the manoeuvre at the next junction now, so the car can slow for a turn
+    const jx = road.a === 'v' ? road.k : Math.round((next - W_C) / W_S), jy = road.a === 'v' ? Math.round((next - W_C) / W_S) : road.k;
+    const j = junctionMap.get(jx + ',' + jy); const opts = [];
+    if (j) {
+        const hx = road.a === 'v' ? 0 : dir, hy = road.a === 'v' ? dir : 0;
+        const arms = [{ dx: 0, dy: -1, ok: j.n > 0 }, { dx: 0, dy: 1, ok: j.s > 0 }, { dx: -1, dy: 0, ok: j.w > 0 }, { dx: 1, dy: 0, ok: j.e > 0 }];
+        for (const a of arms) { if (!a.ok || (a.dx === -hx && a.dy === -hy && (a.dx || a.dy))) continue; opts.push({ dx: a.dx, dy: a.dy, wgt: (a.dx === hx && a.dy === hy) ? 6 : 2 }); }
+        if (!opts.length) opts.push({ dx: -hx, dy: -hy, wgt: 1 });
+        let r = Math.random() * opts.reduce((s, o) => s + o.wgt, 0), pick = opts[0];
+        for (const o of opts) { if ((r -= o.wgt) < 0) { pick = o; break; } }
+        car.plan = pick; car.jx = jx; car.jy = jy; car.turning = !(pick.dx === hx && pick.dy === hy);
+    } else car.plan = null;
+    return true;
+}
+function worldSpawnTraffic(client) {
+    const p = client.player; if (!p) return;
+    const zone = worldZone(p.x, p.y), want = [18, 14, 8, 3][zone];
+    let near = 0; for (const t of traffic) if (Math.abs(t.x - p.x) < 2800 && Math.abs(t.y - p.y) < 2800) near++;
+    if (near >= want || traffic.length >= 110) return;
+    const cands = worldChunkList(p.x, p.y, 2, 'junctions').filter(j => { const d = Math.hypot(j.x - p.x, j.y - p.y); return d > 1500 && d < 2900; });
+    if (!cands.length) return;
+    const j = cands[Math.floor(Math.random() * cands.length)];
+    const arms = [{ dx: 0, dy: -1, ok: j.n > 0 }, { dx: 0, dy: 1, ok: j.s > 0 }, { dx: -1, dy: 0, ok: j.w > 0 }, { dx: 1, dy: 0, ok: j.e > 0 }].filter(a => a.ok);
+    if (!arms.length) return;
+    const a = arms[Math.floor(Math.random() * arms.length)];
+    const kx = Math.round((j.x - W_C) / W_S), ky = Math.round((j.y - W_C) / W_S);
+    const road = a.dx ? WL.rh[ky] : WL.rv[kx], dir = a.dx ? a.dx : a.dy, fromS = a.dx ? j.x : j.y;
+    const car = { id: worldNextDyn++, x: 0, y: 0, a: Math.atan2(a.dy, a.dx), v: 0, max: 3.4 + Math.random() * 1.9, c: Math.floor(Math.random() * WORLD_CAR_COLORS.length), t: Math.floor(Math.random() * 3), stuck: 0, lastHit: 0 };
+    if (!worldAssignRoad(car, road, dir, fromS + dir * 150)) return;
+    const hx = a.dx, hy = a.dy, off = car.off;
+    car.x = j.x + hx * 150 + (-hy) * off; car.y = j.y + hy * 150 + hx * off;
+    for (const t of traffic) if (Math.hypot(t.x - car.x, t.y - car.y) < 110) return;
+    traffic.push(car);
+}
+function worldTrafficStep() {
+    const clients = [...worldClients].filter(c => c.player && c.world && c.world.scene === 'ext');
+    if (!clients.length) { traffic.length = 0; peds.length = 0; return; }
+    if (Math.random() < 0.5) for (const c of clients) worldSpawnTraffic(c);
+    const now = Date.now(), STEP = 3;
+    // obstacles cars must brake for: tanks on foot, driven cars, other owners' parked cars
+    const obs = [];
+    for (const c of clients) { const p = c.player; obs.push({ x: p.x, y: p.y, r: p.vehicle ? 24 : p.radius + 4, tank: p.vehicle ? null : p }); }
+    for (const pc of parkedCars.values()) if (!pc.driven) obs.push({ x: pc.x, y: pc.y, r: 22 });
+    for (let i = traffic.length - 1; i >= 0; i--) {
+        const car = traffic[i];
+        if (!clients.some(c => Math.abs(c.player.x - car.x) < 3800 && Math.abs(c.player.y - car.y) < 3800) || car.stuck > 200 || car.nextS == null) { traffic.splice(i, 1); continue; }
+        const road = car.road, axis = road.a, hx = axis === 'v' ? 0 : car.dir, hy = axis === 'v' ? car.dir : 0;
+        // steer toward the lane centre-line a little way ahead
+        const s = axis === 'v' ? car.y : car.x, ahead = s + car.dir * 80;
+        const tx = axis === 'v' ? road.p + (-hy) * car.off : ahead, ty = axis === 'v' ? ahead : road.p + hx * car.off;
+        const want = Math.atan2(ty - car.y, tx - car.x);
+        car.a += clamp(angDiff(want, car.a), -0.16, 0.16);
+        // speed: slow for turns and for anything in front
+        let target = car.max; const distNode = Math.abs(car.nextS - s);
+        if (car.turning && distNode < 150) target = Math.min(target, 1.6 + distNode * 0.012);
+        const cs = Math.cos(car.a), sn = Math.sin(car.a);
+        const check = (ox, oy, r) => {
+            const dx = ox - car.x, dy = oy - car.y; if (dx * dx + dy * dy > 40000) return;
+            const f = dx * cs + dy * sn, l = Math.abs(-dx * sn + dy * cs);
+            if (f > 0 && f < 60 + car.v * 22 && l < r + 22) { const gap = f - (r + 26); target = Math.min(target, gap < 6 ? 0 : gap * 0.09); }
+        };
+        for (const o of obs) check(o.x, o.y, o.r);
+        for (const t of traffic) if (t !== car) check(t.x, t.y, 20);
+        car.v += (target - car.v) * (target < car.v ? 0.35 : 0.08);
+        if (car.v < 0.05 && target < 0.1) car.stuck++; else car.stuck = 0;
+        car.x += cs * car.v * STEP; car.y += sn * car.v * STEP;
+        // hit someone on foot
+        if (car.v > 1.2 && now - car.lastHit > 600) {
+            for (const o of obs) if (o.tank && Math.hypot(o.x - car.x, o.y - car.y) < o.r + 22 && now > (o.tank.lastCarHit || 0) + 700) {
+                o.tank.lastCarHit = now; o.tank.hp -= 14 + car.v * 5; o.tank.lastDamageTime = now; o.tank.vx += cs * car.v; o.tank.vy += sn * car.v; car.v = 0; car.lastHit = now;
+            }
+        }
+        // reached the junction: commit to the planned manoeuvre
+        const sNow = axis === 'v' ? car.y : car.x;
+        if ((sNow - car.nextS) * car.dir >= 0) {
+            const plan = car.plan;
+            if (!plan) { traffic.splice(i, 1); continue; }
+            const nroad = plan.dx ? WL.rh[car.jy] : WL.rv[car.jx];
+            const ndir = plan.dx ? plan.dx : plan.dy, from = plan.dx ? car.nextS : car.nextS;
+            const jxS = plan.dx ? (W_C + car.jx * W_S) : (W_C + car.jy * W_S);
+            if (!nroad || !worldAssignRoad(car, nroad, ndir, jxS)) traffic.splice(i, 1);
+        }
+    }
+    // pedestrians walk along pavements
+    for (let i = peds.length - 1; i >= 0; i--) {
+        const pd = peds[i];
+        if (!clients.some(c => Math.abs(c.player.x - pd.x) < 2800 && Math.abs(c.player.y - pd.y) < 2800)) { peds.splice(i, 1); continue; }
+        pd.t += pd.dir * pd.sp * STEP; if (Math.random() < 0.004) pd.dir *= -1;
+        const q = worldLoopPos(pd.blk, pd.t); pd.x = q[0]; pd.y = q[1];
+    }
+    if (Math.random() < 0.6) for (const c of clients) worldSpawnPed(c);
+}
+function worldLoopPos(b, t) {
+    const o = b.sw / 2, x0 = b.x + o, y0 = b.y + o, w = b.w - 2 * o, h = b.h - 2 * o, P = 2 * (w + h);
+    t = ((t % P) + P) % P;
+    if (t < w) return [x0 + t, y0]; t -= w; if (t < h) return [x0 + w, y0 + t]; t -= h; if (t < w) return [x0 + w - t, y0 + h]; t -= w; return [x0, y0 + h - t];
+}
+function worldSpawnPed(client) {
+    const p = client.player, zone = worldZone(p.x, p.y), want = [20, 14, 8, 0][zone];
+    if (!want || peds.length >= 160) return;
+    let near = 0; for (const q of peds) if (Math.abs(q.x - p.x) < 2200 && Math.abs(q.y - p.y) < 2200) near++;
+    if (near >= want) return;
+    const blocks = worldChunkList(p.x, p.y, 1, 'blocks').filter(b => b.sw > 0 && b.g !== 'farm' && Math.hypot(b.x + b.w / 2 - p.x, b.y + b.h / 2 - p.y) > 700);
+    if (!blocks.length) return;
+    const blk = blocks[Math.floor(Math.random() * blocks.length)], P = 2 * (blk.w + blk.h - 2 * blk.sw), t = Math.random() * P, q = worldLoopPos(blk, t);
+    peds.push({ id: worldNextDyn++, blk, t, dir: Math.random() < 0.5 ? 1 : -1, sp: 0.35 + Math.random() * 0.4, skin: Math.floor(Math.random() * 8), x: q[0], y: q[1] });
+}
+function worldBroadcastDyn() {
+    for (const c of worldClients) {
+        const p = c.player; if (!p || !c.world || c.world.scene !== 'ext' || c.ws.readyState !== WebSocket.OPEN) continue;
+        const R = 2600 * Math.max(1, worldViewScale(p) / 1.5 + 0.35), cars = [], pd = [];
+        for (const t of traffic) if (Math.abs(t.x - p.x) < R && Math.abs(t.y - p.y) < R) cars.push([t.id, Math.round(t.x), Math.round(t.y), Math.round(t.a * 100) / 100, t.c, t.t]);
+        for (const pc of parkedCars.values()) if (!pc.driven && Math.abs(pc.x - p.x) < R && Math.abs(pc.y - p.y) < R)
+            cars.push([-pc.pid, Math.round(pc.x), Math.round(pc.y), Math.round(pc.a * 100) / 100, WORLD_CARS.findIndex(m => m.id === pc.model), 3 + (pc.uid === c.dbId ? 1 : 0)]);
+        for (const q of peds) if (Math.abs(q.x - p.x) < R && Math.abs(q.y - p.y) < R) pd.push([q.id, Math.round(q.x), Math.round(q.y), q.skin]);
+        c.ws.send(JSON.stringify({ type: 'world_dyn', cars, peds: pd }));
     }
 }
-// Traffic/NPC simulation and persistence; player movement itself is exclusively
-// the standard arena Entity.update() input/physics path.
-setInterval(()=>{
-    seedWorldTraffic();expireWorldHouses();
-    for(const c of worldTraffic){if(c.dir===1){c.x+=c.speed;if(c.x>WORLD_EXTENT/2)c.x=-WORLD_EXTENT/2;}else{c.y+=c.speed;if(c.y>WORLD_EXTENT/2)c.y=-WORLD_EXTENT/2;}}
-    for(const n of worldCitizens){n.x+=Math.cos(n.angle)*n.speed;n.y+=Math.sin(n.angle)*n.speed;if(Math.random()<.015)n.angle+=(Math.random()-.5)*1.5;}
-    for(const c of worldClients){
-        if(!c.world||!c.player||c.room!==worldRoom)continue;const w=c.world;w.x=c.player.x-WORLD_EXTENT/2;w.y=c.player.y-WORLD_EXTENT/2;
-        ensureWorldShapes(w.x,w.y);
-        if(Date.now()>(w.invulnerableUntil||0)&&worldTraffic.some(v=>Math.hypot(v.x-w.x,v.y-w.y)<54))c.player.hp=0;
-        if(!w.inCar){const plot=db.prepare('SELECT id,price FROM world_houses WHERE owner_id IS NULL AND x BETWEEN ? AND ? AND y BETWEEN ? AND ? ORDER BY ((x-?)*(x-?)+(y-?)*(y-?)) LIMIT 1').get(w.x-90,w.x+90,w.y-90,w.y+90,w.x,w.x,w.y,w.y);if(plot&&w.promptedHouse!==plot.id){w.promptedHouse=plot.id;sendWorld(c,'world_house_prompt',{houseId:plot.id,price:plot.price});}else if(!plot)w.promptedHouse=null;}
-        if(Date.now()-(w.lastSave||0)>5000){w.lastSave=Date.now();worldSave(c);}
+
+// ---- main world loop (20 Hz) ------------------------------------------------------------------------
+let worldTickN = 0;
+setInterval(() => {
+    if (!WL) return;
+    worldTickN++;
+    const now = Date.now();
+    worldTrafficStep();
+    if (worldTickN % 2 === 0) worldBroadcastDyn();
+    if (worldTickN % 20 === 0) { worldFarmTick(); }
+    if (worldTickN % 1200 === 0) worldExpireHouses();
+    if (worldTickN % 100 === 0) for (const [k, r] of Object.entries(interiorRooms)) if (!r.clients.length && r.emptySince && now - r.emptySince > 20000) delete interiorRooms[k];
+    for (const c of [...worldClients]) {
+        const w = c.world; if (!w) continue;
+        const dt = now - w.lastTick; w.lastTick = now; w.playMs += dt;
+        if (w.dead && now >= w.respawnAt) { worldSpawnNewlyOrAfterDeath(c); worldSave(c); continue; }
+        const p = c.player; if (!p) continue;
+        // work task progress
+        if (w.task) {
+            const def = c.room.def, st = def?.stations.find(s => s.id === w.task.desk), co = worldEmployer(w);
+            if (!st || !co || Math.hypot(st.x - p.x, st.y - p.y) > st.r + 30) { w.task = null; worldNotice(c, 'You left your desk – task cancelled.'); sendWorld(c, 'world_task', { p: -1 }); }
+            else {
+                const prog = (now - w.task.start) / WORLD_TASK_MS;
+                if (prog >= 1) { w.task = null; w.sessionCoins += co.pay; w.jobLast = w.playMs; sendWorld(c, 'world_task', { p: -1 }); worldNotice(c, `Task complete: +${co.pay} coins (unbanked)`, { level: 'good', sessionCoins: w.sessionCoins }); worldPushState(c); worldSave(c); }
+                else if (worldTickN % 2 === 0) sendWorld(c, 'world_task', { p: Math.round(prog * 100) / 100 });
+            }
+        }
+        // prompts
+        if (worldTickN % 3 === 0) {
+            const pr = worldPromptForSend(worldComputePrompt(c)), key = pr ? JSON.stringify(pr) : '';
+            if (key !== (w.promptKey || '')) { w.promptKey = key; sendWorld(c, 'world_prompt', { p: pr }); }
+        }
+        // job deadline
+        const co = worldEmployer(w);
+        if (co && worldTickN % 20 === 0) {
+            const left = WORLD_FIRE_MS - (w.playMs - w.jobLast);
+            if (left <= 0) worldFire(c);
+            else for (const th of WORLD_WARN_MS) if (left <= th && (w.warned || Infinity) > th) { w.warned = th; worldNotice(c, `Warning: you will be fired from ${co.name} in ${worldFmtMs(left)} unless you complete a task at your desk.`, { level: 'warn' }); }
+            if (left > WORLD_WARN_MS[0]) w.warned = Infinity;
+        }
+        if (worldTickN % 20 === 0) { w.bankCoins = worldBankCoins(c); worldPushState(c); }
+        if (w.scene === 'ext' && !p.vehicle) w.ext = { x: p.x, y: p.y };
+        if (w.scene === 'ext' && worldTickN % 10 === 0) worldStreamChunks(c);
+        if (now - w.lastSave > WORLD_SAVE_MS) worldSave(c);
     }
-},100);
+}, 50);
+ensureWorld();
 
 // ===================== WEBSOCKET CONNECTION HANDLER =====================
 
@@ -3151,6 +4320,7 @@ wss.on('connection', (ws, req) => {
             
             player.tankType = data.tank;
             player.barrelTimers = [];
+            if (client.room?.mode === 'WORLD' && client.world) worldSave(client);
         }
         if (data.type === 'auth_login') {
             let user = db.prepare("SELECT * FROM users WHERE session_token = ?").get(data.token);
@@ -3191,7 +4361,7 @@ wss.on('connection', (ws, req) => {
     });
 
     ws.on('close', () => {
-        if (client.world) { worldSave(client); worldClients.delete(client); client.world=null; }
+        if (client.world) { worldOnDisconnect(client); }
         if (client.player) {
             // Immediately remove the player entity from the room so it leaves no hitbox
             // and doesn't appear in broadcasts or the room-players API
@@ -3223,7 +4393,7 @@ setInterval(() => {
 
     if (!shouldSend) return;
 
-    Object.values(rooms).forEach(room => {
+    allRooms().forEach(room => {
         if (room.status === 'stopped') return;
         room.clients.forEach(c => {
             if(c.ws.readyState === WebSocket.OPEN) {
@@ -3239,8 +4409,11 @@ setInterval(() => {
                 }
 
                 let payloadEntities = [], payloadBullets = [], payloadDrones = [];
+                // World mode zooms out as you grow / drive, so the area we send grows with it (and is square).
+                const VD = VIEW_DISTANCE * ((room.mode === 'WORLD' && c.player) ? worldViewScale(c.player) : 1);
+                const VDY = room.mode === 'WORLD' ? VD : VD / 1.8;
 
-                let nearby = room.grid.getNearby(focalX, focalY, VIEW_DISTANCE);
+                let nearby = room.grid.getNearby(focalX, focalY, VD);
                 let processedEntities = new Set();
 
                 for (let i = 0; i < room.entities.length; i++) {
@@ -3248,8 +4421,8 @@ setInterval(() => {
                     if (e.markedForDeletion) continue;
                     if (['tank', 'ai'].includes(e.type)) {
                         processedEntities.add(e.id);
-                        let isVisible = Math.abs(e.x - focalX) < VIEW_DISTANCE && 
-                                        Math.abs(e.y - focalY) < (VIEW_DISTANCE / 1.8);
+                        let isVisible = Math.abs(e.x - focalX) < VD && 
+                                        Math.abs(e.y - focalY) < VDY;
 
                         // Invisible Manager: hide coordinates from everyone except the player themselves.
                         // This prevents scripted clients from tracking the manager's position.
@@ -3266,7 +4439,8 @@ setInterval(() => {
                             name: e.name, score: e.score, nameColor: e.nameColor,
                             inView: isVisible && !isInvisible,
                             opacity: (e.opacity !== undefined) ? Math.round(e.opacity * 100) / 100 : 1,
-                            powerups: getActivePowerups(e)
+                            powerups: getActivePowerups(e),
+                            veh: e.vehicle ? { a: Math.round(e.vehicle.a * 100) / 100, v: Math.round(e.vehicle.v * 10) / 10, m: e.vehicle.model } : undefined
                         });
                     }
                 }
@@ -3295,7 +4469,7 @@ setInterval(() => {
 
                 for(let i=0; i<nearby.bullets.length; i++) {
                     let b = nearby.bullets[i];
-                    if (Math.abs(b.y - focalY) < VIEW_DISTANCE/1.8) {
+                    if (Math.abs(b.y - focalY) < VDY) {
                         payloadBullets.push({
     id: b.id,
     x: Math.round(b.x),
@@ -3309,7 +4483,7 @@ setInterval(() => {
 
                 for(let i=0; i<nearby.drones.length; i++) {
                     let d = nearby.drones[i];
-                    if (Math.abs(d.y - focalY) < VIEW_DISTANCE/1.8) {
+                    if (Math.abs(d.y - focalY) < VDY) {
                         let droneData = { 
                             id: d.id, 
                             x: Math.round(d.x), 
@@ -3524,8 +4698,8 @@ discordClient.on('interactionCreate', async interaction => {
         if (!allowed.includes(interaction.user.id)) return interaction.reply({content:'Not authorized.',ephemeral:true});
         db.prepare('DELETE FROM world_meta WHERE id=1').run();
         db.prepare('DELETE FROM world_houses').run();
-        worldTraffic=[]; worldCitizens=[]; ensureWorld();
-        return interaction.reply({content:'World terrain seed regenerated. Existing player progress and balances were preserved; all unowned/owned house plots were cleared.',ephemeral:true});
+        worldRegenerate();
+        return interaction.reply({content:'World regenerated with a new seed. Player progress, levels and balances were preserved; all house ownership was cleared. Connected players were told to reload.',ephemeral:true});
     }
 
     // ======================
