@@ -4176,7 +4176,7 @@ function worldMetroDests(from) {
         if (st === from) continue;
         const same = st.city === from.city; if (!same && !(from.hub && st.hub)) continue;     // intercity express runs hub to hub
         const d = Math.hypot(st.x - from.x, st.y - from.y);
-        out.push({ id: st.id, name: st.name, city: st.city, line: st.line, hub: st.hub, fare: same ? 8 + Math.round(d / 1500) : 60 + Math.round(d / 6000), secs: same ? Math.round(5 + d / 1800) : Math.round(20 + d / 3500) });
+        out.push({ id: st.id, name: st.name, city: st.city, line: st.line, hub: st.hub, fare: same ? 8 + Math.round(d / 1500) : 60 + Math.round(d / 6000), secs: 120, waitSecs: 10 + Math.floor(Math.random() * 16) });
     }
     return out;
 }
@@ -4185,8 +4185,10 @@ function worldMetroGo(client, d) {
     const pr = worldComputePrompt(client); if (!pr || pr.kind !== 'metro') return;
     const to = WL.stationById.get(String(d.to)), opt = to && worldMetroDests(pr.ctx).find(o => o.id === to.id); if (!opt) return;
     if (!worldPayToll(client, opt.fare)) { worldNotice(client, `A ticket to ${to.name} costs ${opt.fare} coins (cash or bank).`, { level: 'bad' }); return; }
-    w.ride = { to: to.id, end: Date.now() + opt.secs * 1000, fx: p.x, fy: p.y };
-    sendWorld(client, 'world_ride', { from: pr.ctx.name, to: to.name, line: to.line, secs: opt.secs, fare: opt.fare, intercity: to.city !== pr.ctx.city });
+    const now = Date.now(), waitSecs = 10 + Math.floor(Math.random() * 16);
+    w.ride = { phase: 'waiting', from: pr.ctx.id, to: to.id, boardAt: now + waitSecs * 1000,
+        startAt: 0, end: 0, fx: p.x, fy: p.y, sx: pr.ctx.ex, sy: pr.ctx.ey };
+    sendWorld(client, 'world_ride', { from: pr.ctx.name, to: to.name, line: to.line, secs: 120, waitSecs, fare: opt.fare, intercity: to.city !== pr.ctx.city });
 }
 function worldMapPlaces() {
     if (WL.mapJ) return WL.mapJ;
@@ -4414,12 +4416,30 @@ setInterval(() => {
         const dt = now - w.lastTick; w.lastTick = now; w.playMs += dt;
         if (w.dead && now >= w.respawnAt) { worldSpawnNewlyOrAfterDeath(c); worldSave(c); continue; }
         const p = c.player; if (!p) continue;
-        if (w.ride) {                                                   // on the train: held at the station until the ride ends
-            const r = w.ride; w.invulnerableUntil = now + 1500; p.x = r.fx; p.y = r.fy; p.vx = p.vy = 0;
-            if (now >= r.end) {
-                const st = WL.stationById.get(r.to), pos = { x: st.ex, y: st.ey }; layoutPushOut(WL, pos, p.radius);
-                w.ride = null; p.x = pos.x; p.y = pos.y; w.ext = { x: p.x, y: p.y }; w.invulnerableUntil = now + 2500;
-                sendWorld(c, 'world_ride_end', {}); worldNotice(c, `Arrived at ${st.name}.`, { level: 'good' }); worldSave(c);
+        if (w.ride) {
+            const r = w.ride; w.invulnerableUntil = now + 1500; p.vx = p.vy = 0;
+            if (r.phase === 'waiting') {
+                p.x = r.fx; p.y = r.fy;
+                if (now >= r.boardAt) {
+                    r.phase = 'travelling'; r.startAt = now; r.end = now + 120000;
+                    sendWorld(c, 'world_train_depart', { secs: 120 });
+                    worldNotice(c, 'Train doors closing. Departing now.', { level: 'good' });
+                }
+            } else {
+                const from = WL.stationById.get(r.from), to = WL.stationById.get(r.to);
+                const progress = Math.max(0, Math.min(1, (now - r.startAt) / 120000));
+                if (from && to) {
+                    // Server-authoritative passenger position follows the underground rail corridor.
+                    const dx = to.ex - from.ex, dy = to.ey - from.ey;
+                    const bend = Math.sin(progress * Math.PI) * 180;
+                    p.x = from.ex + dx * progress + (Math.abs(dx) > Math.abs(dy) ? 0 : bend);
+                    p.y = from.ey + dy * progress + (Math.abs(dx) > Math.abs(dy) ? bend : 0);
+                }
+                if (now >= r.end) {
+                    const st = WL.stationById.get(r.to), pos = { x: st.ex, y: st.ey }; layoutPushOut(WL, pos, p.radius);
+                    w.ride = null; p.x = pos.x; p.y = pos.y; w.ext = { x: p.x, y: p.y }; w.invulnerableUntil = now + 2500;
+                    sendWorld(c, 'world_ride_end', {}); worldNotice(c, `Arrived at ${st.name}. Follow the exit stairs to street level.`, { level: 'good' }); worldSave(c);
+                }
             }
             continue;
         }
