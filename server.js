@@ -2831,7 +2831,7 @@ setInterval(() => {
 //      slots (rows of house lots, grids of towers, car-park bays, field tiles),
 //      so nothing inside a block can overlap anything else.
 // ---------------------------------------------------------------------------
-const W_GAP = 450000;                  // distance between city centres (multiple of 600); raise it for even longer drives
+const W_GAP = 450000;                  // preserve established city coordinates; populate the regional corridors between them
 const W_C = 25200, W_S = 600, W_EXT = 2 * W_C + W_GAP;
 const W_NB = Math.ceil(W_EXT / 600);   // collision-bucket row stride
 const W_CORE = 3600, W_INNER = 9600, W_SUB = 18000;
@@ -3295,11 +3295,62 @@ function buildWorldLayout(seed) {
     const L = buildCityLayout(seed);
     L.xroads = []; L.xjunctions = []; L.highways = []; L.cities = W_CITIES;
     W_CITIES.forEach((city, idx) => { if (!city.home) mergeCity(L, buildCityLayout(seed + city.seedAdd), city, idx - 1); });
-    const R = W_CITIES[1].R, B = W_C + W_GAP, add = (a, p, s0, s1) => {
+    const B = W_C + W_GAP;
+    // Two smaller settlements along each of the four inter-city corridors.
+    // These are generated with the same deterministic town layout as the cities.
+    const ruralTowns = [];
+    const addTown = (cx, cy, seedAdd, priceMul) => ruralTowns.push({ cx, cy, R: 5600, seedAdd, priceMul });
+    const corridorA = 2 * W_C, corridorB = B - W_CITIES[1].R;
+    for (const t of [1 / 3, 2 / 3]) {
+        const d = corridorA + (corridorB - corridorA) * t;
+        addTown(d, W_C, 401 + ruralTowns.length, 0.82);
+        addTown(W_C, d, 401 + ruralTowns.length, 0.78);
+        const edgeD = W_C + W_CITIES[1].R + (corridorB - (W_C + W_CITIES[1].R)) * t;
+        addTown(B, edgeD, 401 + ruralTowns.length, 0.86);
+        addTown(edgeD, B, 401 + ruralTowns.length, 0.80);
+    }
+    ruralTowns.forEach((town, i) => mergeCity(L, buildCityLayout(seed + town.seedAdd), town, i + 3));
+    // Countryside tree belts and copses fill the long gaps while leaving safe
+    // shoulders and sight lines beside the highways.
+    const treeStep = 2600;
+    for (let x = W_SHORE + 1200; x < W_EXT - W_SHORE - 1200; x += treeStep) {
+        for (let y = W_SHORE + 1200; y < W_EXT - W_SHORE - 1200; y += treeStep) {
+            const nearMajorCity = W_CITIES.some(c => Math.max(Math.abs(x - c.cx), Math.abs(y - c.cy)) < c.border + 2600);
+            const nearTown = ruralTowns.some(c => Math.max(Math.abs(x - c.cx), Math.abs(y - c.cy)) < c.R + 1700);
+            if (nearMajorCity || nearTown) continue;
+            const highwayDist = Math.min(Math.abs(y - W_C), Math.abs(x - W_C), Math.abs(x - B), Math.abs(y - B));
+            if (highwayDist < 850) continue;
+            const treeChance = highwayDist < 3200 ? 0.18 : 0.34;
+            if (wHash(seed, x + 991, y) > treeChance) continue;
+            const jx = (wHash(seed, x + 992, y) - 0.5) * 900;
+            const jy = (wHash(seed, x, y + 993) - 0.5) * 900;
+            L.props.push({ k: 'tree', x: Math.round(x + jx), y: Math.round(y + jy), v: Math.floor(wHash(seed, x, y + 994) * 8), r: 24 });
+        }
+    }
+    const add = (a, p, s0, s1) => {
         L.xroads.push({ a, k: 'hw' + L.highways.length, p, c: 'x', hw: 130, ln: 4, e: (s1 - s0) / 2, o: (s0 + s1) / 2, f: 1 }); L.highways.push({ a, p, s0, s1 });
     };
+    const R = W_CITIES[1].R;
     add('h', W_C, 2 * W_C, B - R);  add('v', W_C, 2 * W_C, B - R);       // Central City -> Port Aldren / Highmoor
     add('v', B, W_C + R, B - R);    add('h', B, W_C + R, B - R);         // Port Aldren -> Solana / Highmoor -> Solana
+    // Parallel access roads and short connector ramps create exits, merges
+    // and alternate local routes instead of a single isolated highway line.
+    const frontage = (axis, base, start, end, offset, suffix) => {
+        const mid = (start + end) / 2, half = (end - start) / 2;
+        L.xroads.push({ a: axis, k: 'front' + suffix, p: base + offset, c: 'street', hw: 52, ln: 2, e: half, o: mid, f: 1 });
+        for (let i = 1; i <= 3; i++) {
+            const along = start + (end - start) * i / 4;
+            L.xroads.push({ a: axis === 'h' ? 'v' : 'h', k: 'ramp' + suffix + i, p: along, c: 'lane', hw: 38, ln: 2, e: Math.abs(offset) / 2, o: base + offset / 2, f: 1 });
+        }
+    };
+    frontage('h', W_C, 2 * W_C, B - R, -650, 'a');
+    frontage('h', W_C, 2 * W_C, B - R, 650, 'b');
+    frontage('v', W_C, 2 * W_C, B - R, -650, 'c');
+    frontage('v', W_C, 2 * W_C, B - R, 650, 'd');
+    frontage('v', B, W_C + R, B - R, -650, 'e');
+    frontage('v', B, W_C + R, B - R, 650, 'f');
+    frontage('h', B, W_C + R, B - R, -650, 'g');
+    frontage('h', B, W_C + R, B - R, 650, 'h');
     L.allRoads = L.roads.concat(L.xroads);
     indexLayout(L);
     return L;
@@ -3444,7 +3495,7 @@ function interiorColliders(def) {
 // ===================== PERSISTENT WORLD MODE =====================
 // The exterior (WORLD room) is the city + suburbs + farmland built by buildWorldLayout().
 // Houses and workplaces are separate interior Rooms players are teleported into.
-const WORLD_LAYOUT_VERSION = 2;
+const WORLD_LAYOUT_VERSION = 3;
 const WORLD_CARS = [
     { id: 'compact', name: 'Compact', price: 2500,  speed: 6.2,  accel: 0.15, turn: 0.052, color: '#e4e7eb' },
     { id: 'sedan',   name: 'Sedan',   price: 6500,  speed: 8.0,  accel: 0.19, turn: 0.046, color: '#2684d9' },
@@ -3486,6 +3537,11 @@ function rectDist(x, y, r) { const dx = Math.max(r.x - x, 0, x - (r.x + r.w)), d
 // ---- world bootstrap -------------------------------------------------------------------
 function ensureWorld() {
     if (WL) return WSEED;
+    // The legacy arena grid was only 50,400 units wide. World Mode is generated
+    // from W_EXT, so retaining that grid silently buckets distant players and
+    // entities into its final edge cell. Use the same scale as the world map.
+    worldRoom.worldExtent = W_EXT;
+    worldRoom.grid = new SpatialGrid(W_EXT, W_CHUNK);
     let row = db.prepare('SELECT seed, layout_version FROM world_meta WHERE id=1').get();
     if (!row) {
         const seed = crypto.randomInt(1, 0x7fffffff);
@@ -4589,8 +4645,8 @@ setInterval(() => {
         room.clients.forEach(c => {
             if(c.ws.readyState === WebSocket.OPEN) {
                 
-                let focalX = room.mode === 'WORLD' ? WORLD_EXTENT / 2 : WORLD_SIZE / 2;
-                let focalY = room.mode === 'WORLD' ? WORLD_EXTENT / 2 : WORLD_SIZE / 2;
+                let focalX = room.mode === 'WORLD' ? (room.worldExtent || WORLD_EXTENT) / 2 : WORLD_SIZE / 2;
+                let focalY = room.mode === 'WORLD' ? (room.worldExtent || WORLD_EXTENT) / 2 : WORLD_SIZE / 2;
 
                 if (c.player && !c.player.markedForDeletion) {
                     focalX = c.player.x; focalY = c.player.y;
