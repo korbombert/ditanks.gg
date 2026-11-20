@@ -970,6 +970,28 @@ class SpatialGrid {
     }
 }
 
+class SparseGrid extends SpatialGrid {
+    constructor(size, cellSize) { super(1, cellSize); this.cols = this.rows = Math.ceil(size / cellSize); this.map = new Map(); }
+    clear() { this.map.clear(); }
+    insert(obj, type) {
+        const col = Math.max(0, Math.min(this.cols - 1, Math.floor(obj.x / this.cellSize))), row = Math.max(0, Math.min(this.rows - 1, Math.floor(obj.y / this.cellSize))), key = col + row * this.cols;
+        let cell = this.map.get(key); if (!cell) this.map.set(key, cell = { entities: [], bullets: [], drones: [] });
+        cell[type].push(obj);
+    }
+    getNearby(x, y, range) {
+        const result = { entities: [], bullets: [], drones: [] };
+        const c0 = Math.max(0, Math.floor((x - range) / this.cellSize)), c1 = Math.min(this.cols - 1, Math.floor((x + range) / this.cellSize));
+        const r0 = Math.max(0, Math.floor((y - range) / this.cellSize)), r1 = Math.min(this.rows - 1, Math.floor((y + range) / this.cellSize));
+        for (let c = c0; c <= c1; c++) for (let r = r0; r <= r1; r++) {
+            const cell = this.map.get(c + r * this.cols); if (!cell) continue;
+            for (let i = 0; i < cell.entities.length; i++) result.entities.push(cell.entities[i]);
+            for (let i = 0; i < cell.bullets.length; i++) result.bullets.push(cell.bullets[i]);
+            for (let i = 0; i < cell.drones.length; i++) result.drones.push(cell.drones[i]);
+        }
+        return result;
+    }
+}
+
 class Room {
     constructor(id, mode, config = {}) {
         this.id = id;
@@ -2831,12 +2853,13 @@ setInterval(() => {
 //      slots (rows of house lots, grids of towers, car-park bays, field tiles),
 //      so nothing inside a block can overlap anything else.
 // ---------------------------------------------------------------------------
-const W_GAP = 450000;                  // preserve established city coordinates; populate the regional corridors between them
+const W_GAP = 450000;                  // distance between city centres (multiple of 600); raise it for even longer drives
 const W_C = 25200, W_S = 600, W_EXT = 2 * W_C + W_GAP;
 const W_NB = Math.ceil(W_EXT / 600);   // collision-bucket row stride
 const W_CORE = 3600, W_INNER = 9600, W_SUB = 18000;
 const W_SW = 26;                       // pavement width inside a block
 const W_BORDER = 19500, W_TOLL = 20;       // city limit (Chebyshev radius from centre) and toll per crossing
+worldRoom.worldExtent = W_EXT; worldRoom.grid = new SparseGrid(W_EXT, 500);   // the world room spans every city, not just the original 50 km square
 const W_CITIES = [                      // home city first; the others are other seeds of the same generator, clipped to radius R (houses, shops, offices)
     { id: 'central', name: 'Central City', cx: W_C, cy: W_C, border: W_BORDER, home: true, theme: 'home', wageMul: 1, priceMul: 1, toll: 20 },
     { id: 'port',    name: 'Port Aldren',  cx: W_C + W_GAP, cy: W_C, border: 19500, R: 18000, seedAdd: 101, theme: 'port', wageMul: 1.25, priceMul: 0.9, toll: 30 },
@@ -3291,67 +3314,44 @@ function mergeCity(L, F, city, idx) {
     for (const j of F.junctions) if (inb(j.x, j.y)) L.xjunctions.push(sh(j, { id: j.id + off, f: 1 }));
     for (const r of F.roads) if (Math.abs(r.k) * W_S <= R) L.xroads.push(Object.assign({}, r, { p: r.p + (r.a === 'v' ? ox : oy), e: Math.min(r.e, R), o: r.a === 'v' ? city.cy : city.cx, f: 1 }));
 }
+// Subway: ticket kiosks on the pavement beside each city's two central avenues (line 1 east-west, line 2 north-south).
+const W_STATION_NAMES = ['Old Town', 'Riverside', 'Market Square', 'Cathedral', 'University', 'Harbour View', 'Museum', 'Park Lane', 'Union Hall', 'Fairview', 'Stadium', 'Tech Quarter', 'Garden Row', 'Lakeside', 'Kingsway', 'Westbrook', 'Eastgate', 'Southfield', 'Northpoint', 'Highbury', 'Castle Hill', 'Mill Road', 'Bridge Street', 'Library', 'Observatory', 'Chapel Court', 'Foundry', 'Orchard', 'Rosewood', 'Silver Lane'];
+function addSubway(L) {
+    L.stations = []; L.stationById = new Map();
+    W_CITIES.forEach((city, ci) => {
+        const used = new Set(); let n = 0;
+        for (const line of [1, 2]) {
+            const cand = L.blocks.filter(B => B.sw && (line === 1 ? (B.y >= city.cy && B.y - city.cy <= 220) : (B.x >= city.cx && B.x - city.cx <= 220)) && (line === 1 ? Math.abs(B.x + B.w / 2 - city.cx) : Math.abs(B.y + B.h / 2 - city.cy)) < 16500);
+            const taken = new Set();
+            for (let t = -15000; t <= 15000; t += 3000) {
+                if (line === 2 && t === 0) continue;                   // the central hub sits on line 1
+                let best = null, bd = 1800;
+                for (const B of cand) { if (taken.has(B)) continue; const d = Math.abs((line === 1 ? B.x + B.w / 2 - city.cx : B.y + B.h / 2 - city.cy) - t); if (d < bd) { bd = d; best = B; } }
+            if (!best) continue;
+            const B = best, hub = line === 1 && t === 0;
+            const k = line === 1 ? { x: Math.round(B.x + B.w * 0.62 - 20), y: B.y + 2, w: 40, h: 22 } : { x: B.x + 2, y: Math.round(B.y + B.h * 0.62 - 20), w: 22, h: 40 };
+            let ni = (ci * 7 + n * 5 + line * 3) % W_STATION_NAMES.length; while (used.has(ni)) ni = (ni + 1) % W_STATION_NAMES.length; used.add(ni); n++;
+            const st = { id: city.id + '-' + line + '-' + (t / 3000), name: hub ? city.name + ' Station' : W_STATION_NAMES[ni], city: city.id, line, hub,
+                x: k.x + k.w / 2, y: k.y + k.h / 2, ex: line === 1 ? k.x - 16 : B.x + 13, ey: line === 1 ? B.y + 13 : k.y - 16 };
+            L.stations.push(st); L.stationById.set(st.id, st);
+            L.props.push({ k: 'metro', x: k.x, y: k.y, w: k.w, h: k.h, sid: st.id, line, name: st.name });
+            L.colliders.push({ t: 0, x: k.x, y: k.y, w: k.w, h: k.h });
+            taken.add(B);
+            }
+        }
+    });
+}
 function buildWorldLayout(seed) {
     const L = buildCityLayout(seed);
     L.xroads = []; L.xjunctions = []; L.highways = []; L.cities = W_CITIES;
     W_CITIES.forEach((city, idx) => { if (!city.home) mergeCity(L, buildCityLayout(seed + city.seedAdd), city, idx - 1); });
-    const B = W_C + W_GAP;
-    // Two smaller settlements along each of the four inter-city corridors.
-    // These are generated with the same deterministic town layout as the cities.
-    const ruralTowns = [];
-    const addTown = (cx, cy, seedAdd, priceMul) => ruralTowns.push({ cx, cy, R: 5600, seedAdd, priceMul });
-    const corridorA = 2 * W_C, corridorB = B - W_CITIES[1].R;
-    for (const t of [1 / 3, 2 / 3]) {
-        const d = corridorA + (corridorB - corridorA) * t;
-        addTown(d, W_C, 401 + ruralTowns.length, 0.82);
-        addTown(W_C, d, 401 + ruralTowns.length, 0.78);
-        const edgeD = W_C + W_CITIES[1].R + (corridorB - (W_C + W_CITIES[1].R)) * t;
-        addTown(B, edgeD, 401 + ruralTowns.length, 0.86);
-        addTown(edgeD, B, 401 + ruralTowns.length, 0.80);
-    }
-    ruralTowns.forEach((town, i) => mergeCity(L, buildCityLayout(seed + town.seedAdd), town, i + 3));
-    // Countryside tree belts and copses fill the long gaps while leaving safe
-    // shoulders and sight lines beside the highways.
-    const treeStep = 2600;
-    for (let x = W_SHORE + 1200; x < W_EXT - W_SHORE - 1200; x += treeStep) {
-        for (let y = W_SHORE + 1200; y < W_EXT - W_SHORE - 1200; y += treeStep) {
-            const nearMajorCity = W_CITIES.some(c => Math.max(Math.abs(x - c.cx), Math.abs(y - c.cy)) < c.border + 2600);
-            const nearTown = ruralTowns.some(c => Math.max(Math.abs(x - c.cx), Math.abs(y - c.cy)) < c.R + 1700);
-            if (nearMajorCity || nearTown) continue;
-            const highwayDist = Math.min(Math.abs(y - W_C), Math.abs(x - W_C), Math.abs(x - B), Math.abs(y - B));
-            if (highwayDist < 850) continue;
-            const treeChance = highwayDist < 3200 ? 0.18 : 0.34;
-            if (wHash(seed, x + 991, y) > treeChance) continue;
-            const jx = (wHash(seed, x + 992, y) - 0.5) * 900;
-            const jy = (wHash(seed, x, y + 993) - 0.5) * 900;
-            L.props.push({ k: 'tree', x: Math.round(x + jx), y: Math.round(y + jy), v: Math.floor(wHash(seed, x, y + 994) * 8), r: 24 });
-        }
-    }
-    const add = (a, p, s0, s1) => {
+    const R = W_CITIES[1].R, B = W_C + W_GAP, add = (a, p, s0, s1) => {
         L.xroads.push({ a, k: 'hw' + L.highways.length, p, c: 'x', hw: 130, ln: 4, e: (s1 - s0) / 2, o: (s0 + s1) / 2, f: 1 }); L.highways.push({ a, p, s0, s1 });
     };
-    const R = W_CITIES[1].R;
     add('h', W_C, 2 * W_C, B - R);  add('v', W_C, 2 * W_C, B - R);       // Central City -> Port Aldren / Highmoor
     add('v', B, W_C + R, B - R);    add('h', B, W_C + R, B - R);         // Port Aldren -> Solana / Highmoor -> Solana
-    // Parallel access roads and short connector ramps create exits, merges
-    // and alternate local routes instead of a single isolated highway line.
-    const frontage = (axis, base, start, end, offset, suffix) => {
-        const mid = (start + end) / 2, half = (end - start) / 2;
-        L.xroads.push({ a: axis, k: 'front' + suffix, p: base + offset, c: 'street', hw: 52, ln: 2, e: half, o: mid, f: 1 });
-        for (let i = 1; i <= 3; i++) {
-            const along = start + (end - start) * i / 4;
-            L.xroads.push({ a: axis === 'h' ? 'v' : 'h', k: 'ramp' + suffix + i, p: along, c: 'lane', hw: 38, ln: 2, e: Math.abs(offset) / 2, o: base + offset / 2, f: 1 });
-        }
-    };
-    frontage('h', W_C, 2 * W_C, B - R, -650, 'a');
-    frontage('h', W_C, 2 * W_C, B - R, 650, 'b');
-    frontage('v', W_C, 2 * W_C, B - R, -650, 'c');
-    frontage('v', W_C, 2 * W_C, B - R, 650, 'd');
-    frontage('v', B, W_C + R, B - R, -650, 'e');
-    frontage('v', B, W_C + R, B - R, 650, 'f');
-    frontage('h', B, W_C + R, B - R, -650, 'g');
-    frontage('h', B, W_C + R, B - R, 650, 'h');
     L.allRoads = L.roads.concat(L.xroads);
+    addSubway(L);
     indexLayout(L);
     return L;
 }
@@ -3495,7 +3495,7 @@ function interiorColliders(def) {
 // ===================== PERSISTENT WORLD MODE =====================
 // The exterior (WORLD room) is the city + suburbs + farmland built by buildWorldLayout().
 // Houses and workplaces are separate interior Rooms players are teleported into.
-const WORLD_LAYOUT_VERSION = 3;
+const WORLD_LAYOUT_VERSION = 2;
 const WORLD_CARS = [
     { id: 'compact', name: 'Compact', price: 2500,  speed: 6.2,  accel: 0.15, turn: 0.052, color: '#e4e7eb' },
     { id: 'sedan',   name: 'Sedan',   price: 6500,  speed: 8.0,  accel: 0.19, turn: 0.046, color: '#2684d9' },
@@ -3537,11 +3537,6 @@ function rectDist(x, y, r) { const dx = Math.max(r.x - x, 0, x - (r.x + r.w)), d
 // ---- world bootstrap -------------------------------------------------------------------
 function ensureWorld() {
     if (WL) return WSEED;
-    // The legacy arena grid was only 50,400 units wide. World Mode is generated
-    // from W_EXT, so retaining that grid silently buckets distant players and
-    // entities into its final edge cell. Use the same scale as the world map.
-    worldRoom.worldExtent = W_EXT;
-    worldRoom.grid = new SpatialGrid(W_EXT, W_CHUNK);
     let row = db.prepare('SELECT seed, layout_version FROM world_meta WHERE id=1').get();
     if (!row) {
         const seed = crypto.randomInt(1, 0x7fffffff);
@@ -3981,6 +3976,15 @@ function worldComputePrompt(client) {
             consider(d, { id: 'atm:' + a.x + ',' + a.y, kind: 'atm', ax: a.x + 13, ay: a.y - 36, title: 'ATM', lines: [`Unbanked cash: ${fmtMoney(cash)}`, `Account balance: ${fmtMoney(coins)}`], actions: [{ a: 'deposit', label: cash > 0 ? `Deposit ${fmtMoney(cash)}` : 'Nothing to deposit', on: cash > 0 }], mini: true });
         }
     }
+    if (!p.vehicle) for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        const ch = WL.chunks.get((cx + dx) + (cy + dy) * W_NCH); if (!ch) continue;
+        for (const m of ch.props) {
+            if (m.k !== 'metro') continue;
+            const d = Math.hypot(m.x + m.w / 2 - p.x, m.y + m.h / 2 - p.y); if (d > 85) continue;
+            const st = WL.stationById.get(m.sid), cn = W_CITIES.find(c => c.id === st.city).name;
+            consider(d, { id: 'metro:' + st.id, kind: 'metro', ctx: st, ax: st.x, ay: st.y - 40, title: st.name, lines: [`${cn} · Subway line ${st.line}${st.hub ? ' · Intercity express' : ''}`], actions: [{ a: 'ride', label: 'Buy a ticket', on: true }], mini: true });
+        }
+    }
     const pc = parkedCars.get(client.dbId);
     if (pc && !pc.driven) { const d = Math.hypot(pc.x - p.x, pc.y - p.y); if (d < 85) { const spec = WORLD_CARS.find(c => c.id === pc.model); consider(d - 40, { id: 'car', kind: 'car', ax: pc.x, ay: pc.y - 50, title: 'Your ' + spec.name, lines: ['Press F to get in'], actions: [{ a: 'drive', label: 'Get in', on: true }], mini: true }); } }
     return best;
@@ -4017,10 +4021,12 @@ function worldPromptForSend(pr) { if (!pr) return null; const { ctx, ...rest } =
 
 function worldInteract(client, d) {
     const w = client.world, p = client.player; if (!w || !p || w.dead) return;
+    if (w.ride) return;
     const pr = worldComputePrompt(client); if (!pr || pr.id !== d.id) return;
     const act = (pr.actions || []).find(a => a.a === d.a); if (!act || act.on === false) return;
     switch (pr.kind) {
         case 'bank': case 'atm': worldDeposit(client); break;
+        case 'metro': sendWorld(client, 'world_metro_open', { from: { id: pr.ctx.id, name: pr.ctx.name, city: pr.ctx.city, line: pr.ctx.line, hub: pr.ctx.hub }, dests: worldMetroDests(pr.ctx) }); break;
         case 'dealer': if (act.a.startsWith('buy:')) worldBuyCar(client, act.a.slice(4)); break;
         case 'work': { const def = worldInteriorDef('work:' + pr.ctx.id); worldGoto(client, 'work:' + pr.ctx.id, def.spawn.x, def.spawn.y); break; }
         case 'house':
@@ -4081,6 +4087,7 @@ function worldJoin(client) {
 }
 function worldOnDisconnect(client) {
     const w = client.world; if (!w) return;
+    if (w.ride && client.player && WL) { const st = WL.stationById.get(w.ride.to); if (st) { client.player.x = st.ex; client.player.y = st.ey; w.ext = { x: st.ex, y: st.ey }; } w.ride = null; }   // finish the trip if you log off mid-ride
     if (client.player?.vehicle) worldExitCar(client, true);
     worldSave(client); worldClients.delete(client);
     worldDetach(client); client.world = null;
@@ -4090,6 +4097,7 @@ function worldHandle(client, d) {
     if (d.type === 'world_interact') worldInteract(client, { id: String(d.id), a: String(d.a) });
     else if (d.type === 'world_leave') { worldOnDisconnect(client); }
     else if (d.type === 'world_nav') worldNav(client, String(d.t), d);
+    else if (d.type === 'world_metro') worldMetroGo(client, d);
     else if (d.type === 'world_map' && WL) sendWorld(client, 'world_map', { p: worldMapPlaces() });
 }
 // Road graph for the satnav: nodes are junctions, edges join neighbouring junctions on the same road line.
@@ -4162,6 +4170,24 @@ function worldRoute(from, to) {
     return { pts, turns: tn, len: Math.round(len) };
 }
 // Satnav: nearest workplace of your employer (any company if unemployed), your first house, or your parked car.
+function worldMetroDests(from) {
+    const out = [];
+    for (const st of WL.stations) {
+        if (st === from) continue;
+        const same = st.city === from.city; if (!same && !(from.hub && st.hub)) continue;     // intercity express runs hub to hub
+        const d = Math.hypot(st.x - from.x, st.y - from.y);
+        out.push({ id: st.id, name: st.name, city: st.city, line: st.line, hub: st.hub, fare: same ? 8 + Math.round(d / 1500) : 60 + Math.round(d / 6000), secs: same ? Math.round(5 + d / 1800) : Math.round(20 + d / 3500) });
+    }
+    return out;
+}
+function worldMetroGo(client, d) {
+    const w = client.world, p = client.player; if (!w || !p || w.dead || w.ride || p.vehicle || w.scene !== 'ext' || !WL) return;
+    const pr = worldComputePrompt(client); if (!pr || pr.kind !== 'metro') return;
+    const to = WL.stationById.get(String(d.to)), opt = to && worldMetroDests(pr.ctx).find(o => o.id === to.id); if (!opt) return;
+    if (!worldPayToll(client, opt.fare)) { worldNotice(client, `A ticket to ${to.name} costs ${opt.fare} coins (cash or bank).`, { level: 'bad' }); return; }
+    w.ride = { to: to.id, end: Date.now() + opt.secs * 1000, fx: p.x, fy: p.y };
+    sendWorld(client, 'world_ride', { from: pr.ctx.name, to: to.name, line: to.line, secs: opt.secs, fare: opt.fare, intercity: to.city !== pr.ctx.city });
+}
 function worldMapPlaces() {
     if (WL.mapJ) return WL.mapJ;
     const P = [], names = { bank: 'Central Bank', dealer: 'Car Dealership', hall: 'City Hall', mall: 'Shopping Mall', school: 'School' };
@@ -4170,6 +4196,7 @@ function worldMapPlaces() {
         else if (names[b.k]) P.push([b.k, b.door.x, b.door.y, names[b.k]]);
     }
     for (const p of WL.props) if (p.k === 'atm') P.push(['a', p.x + 13, p.y + 7, 'ATM']);
+    for (const st of WL.stations) P.push(['m', st.x, st.y, st.name, st.line, st.city, st.hub ? 1 : 0]);
     return (WL.mapJ = P);
 }
 function worldNav(client, t, d = {}) {
@@ -4387,6 +4414,15 @@ setInterval(() => {
         const dt = now - w.lastTick; w.lastTick = now; w.playMs += dt;
         if (w.dead && now >= w.respawnAt) { worldSpawnNewlyOrAfterDeath(c); worldSave(c); continue; }
         const p = c.player; if (!p) continue;
+        if (w.ride) {                                                   // on the train: held at the station until the ride ends
+            const r = w.ride; w.invulnerableUntil = now + 1500; p.x = r.fx; p.y = r.fy; p.vx = p.vy = 0;
+            if (now >= r.end) {
+                const st = WL.stationById.get(r.to), pos = { x: st.ex, y: st.ey }; layoutPushOut(WL, pos, p.radius);
+                w.ride = null; p.x = pos.x; p.y = pos.y; w.ext = { x: p.x, y: p.y }; w.invulnerableUntil = now + 2500;
+                sendWorld(c, 'world_ride_end', {}); worldNotice(c, `Arrived at ${st.name}.`, { level: 'good' }); worldSave(c);
+            }
+            continue;
+        }
         // work task progress
         if (w.task) {
             const def = c.room.def, st = def?.stations.find(s => s.id === w.task.desk), co = worldEmployer(w);
@@ -4645,8 +4681,8 @@ setInterval(() => {
         room.clients.forEach(c => {
             if(c.ws.readyState === WebSocket.OPEN) {
                 
-                let focalX = room.mode === 'WORLD' ? (room.worldExtent || WORLD_EXTENT) / 2 : WORLD_SIZE / 2;
-                let focalY = room.mode === 'WORLD' ? (room.worldExtent || WORLD_EXTENT) / 2 : WORLD_SIZE / 2;
+                let focalX = room.mode === 'WORLD' ? W_C : WORLD_SIZE / 2;
+                let focalY = room.mode === 'WORLD' ? W_C : WORLD_SIZE / 2;
 
                 if (c.player && !c.player.markedForDeletion) {
                     focalX = c.player.x; focalY = c.player.y;
