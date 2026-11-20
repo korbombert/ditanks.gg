@@ -3484,6 +3484,59 @@ function buildHouseInterior(tier) {
     if (tier >= 2) { f.push({ k: 'bath', x: X0 + sx - 170, y: Y0 + 24, w: 140, h: 70, solid: 1 }, { k: 'plant', x: X0 + sx - 40, y: Y0 + 180, r: 18, solid: 1 }); }
     return D;
 }
+
+function buildMetroInterior(st) {
+    const W = 1500, H = 1900, X0 = (INT_EXT - W) / 2, Y0 = (INT_EXT - H) / 2;
+    const fl = { x: X0, y: Y0, w: W, h: H }, cx = X0 + W / 2;
+    const D = { kind: 'metro', ext: INT_EXT, floor: fl, theme: { accent: st.line === 1 ? '#e63946' : '#2a9d8f', name: st.name },
+        metro: { stationId: st.id, name: st.name, line: st.line, city: st.city, hub: !!st.hub, elevation: -1 },
+        furn: [], stations: [], rooms: [{ x: X0 + 80, y: Y0 + 80, w: W - 160, h: 470, c: 'lobby' },
+        { x: X0 + 80, y: Y0 + 590, w: W - 160, h: 1220, c: 'platform' }],
+        walls: [
+            { x: X0, y: Y0, w: W / 2 - 75, h: 20 }, { x: cx + 75, y: Y0, w: W / 2 - 75, h: 20 },
+            { x: X0, y: Y0, w: 20, h: H }, { x: X0 + W - 20, y: Y0, w: 20, h: H },
+            { x: X0, y: Y0 + H - 20, w: W, h: 20 }
+        ],
+        door: { x: cx - 75, y: Y0, w: 150, h: INT_WALL, px: cx, py: Y0 + 36, r: 105 },
+        spawn: { x: cx, y: Y0 + 110 },
+        stair: { x: cx - 115, y: Y0 + 520, w: 230, h: 500, topZ: 0, bottomZ: -1 },
+        board: { x: cx, y: Y0 + 1120, r: 115 },
+        platform: { x: X0 + 130, y: Y0 + 1290, w: W - 260, h: 390 },
+        trainDoor: { x: cx, y: Y0 + 1510, r: 145 }
+    };
+    // Open central corridor through the concourse into the stairwell and platform.
+    D.walls = D.walls.filter(w => !(w.y > Y0 + H - 50 && w.x < cx + 100 && w.x + w.w > cx - 100));
+    D.furn.push({ k: 'metro_gate', x: X0 + 170, y: Y0 + 230, w: W - 340, h: 34 });
+    D.furn.push({ k: 'metro_board', x: X0 + 240, y: Y0 + 1000, w: 210, h: 74 });
+    D.furn.push({ k: 'metro_bench', x: X0 + 210, y: Y0 + 1420, w: 170, h: 48 });
+    D.furn.push({ k: 'metro_bench', x: X0 + W - 380, y: Y0 + 1420, w: 170, h: 48 });
+    D.furn.push({ k: 'metro_pillar', x: X0 + 560, y: Y0 + 1260, w: 42, h: 300 });
+    D.furn.push({ k: 'metro_pillar', x: X0 + W - 602, y: Y0 + 1260, w: 42, h: 300 });
+    D.stations.push({ id: 'metro_exit', x: cx, y: Y0 + H - 130, r: 115 });
+    D.stations.push({ id: 'metro_board', x: D.board.x, y: D.board.y, r: D.board.r });
+    D.stations.push({ id: 'metro_train', x: D.trainDoor.x, y: D.trainDoor.y, r: D.trainDoor.r });
+    return D;
+}
+function buildTrainInterior(from, to) {
+    const W = 1160, H = 680, X0 = (INT_EXT - W) / 2, Y0 = (INT_EXT - H) / 2;
+    const fl = { x: X0, y: Y0, w: W, h: H }, cx = X0 + W / 2;
+    const D = { kind: 'train', ext: INT_EXT, floor: fl, theme: { accent: '#467a9d', name: 'METRO TRAIN' },
+        train: { from: from.id, to: to.id, line: from.line, fromName: from.name, toName: to.name },
+        furn: [], stations: [], rooms: [{ x: X0 + 20, y: Y0 + 20, w: W - 40, h: H - 40, c: 'carriage' }],
+        walls: intWallsAround(fl, cx, 0, 20),
+        door: { x: cx - 80, y: Y0 + H, w: 160, h: INT_WALL, px: cx, py: Y0 + H - 36, r: 70 },
+        spawn: { x: cx, y: Y0 + H / 2 }
+    };
+    // Open-plan carriage aisle, with fixed seat banks along both sides.
+    for (let y = Y0 + 105; y < Y0 + H - 120; y += 145) {
+        D.furn.push({ k: 'train_seat', x: X0 + 95, y, w: 250, h: 70, solid: 1 });
+        D.furn.push({ k: 'train_seat', x: X0 + W - 345, y, w: 250, h: 70, solid: 1 });
+        D.furn.push({ k: 'train_pole', x: cx - 10, y: y + 15, w: 20, h: 42 });
+    }
+    D.furn.push({ k: 'train_route', x: X0 + 390, y: Y0 + 35, w: 380, h: 42 });
+    return D;
+}
+
 function interiorColliders(def) {
     const out = [];
     for (const w of def.walls) out.push({ t: 0, x: w.x, y: w.y, w: w.w, h: w.h });
@@ -3750,6 +3803,8 @@ function worldInteriorDef(scene) {
     let d = interiorDefs.get(scene); if (d) return d;
     const [kind, key] = scene.split(':');
     if (kind === 'work') { const b = WL.buildingById.get(Number(key)); const co = W_COMPANIES.find(c => c.id === b?.work) || W_COMPANIES[0]; d = buildOfficeInterior(co); d.coId = co.id; d.bid = b ? b.id : 0; }
+    else if (kind === 'metro') { const st = WL.stationById.get(key); d = buildMetroInterior(st || WL.stations[0]); d.stationId = (st || WL.stations[0]).id; }
+    else if (kind === 'train') { const [fromId, toId] = key.split('|'); const from = WL.stationById.get(fromId) || WL.stations[0], to = WL.stationById.get(toId) || from; d = buildTrainInterior(from, to); d.fromId = from.id; d.toId = to.id; }
     else { const h = WL.houseById.get(key); d = buildHouseInterior(h ? h.tier : 0); d.hid = key; }
     d.colliders = interiorColliders(d);
     interiorDefs.set(scene, d); return d;
@@ -3784,7 +3839,7 @@ function worldGoto(client, scene, x, y) {
     if (scene === 'ext' && WL) { const pos = { x, y }; layoutPushOut(WL, pos, ent.radius); ent.x = pos.x; ent.y = pos.y; }
     room.entities.push(ent); room.clients.push(client);
     client.room = room; client.player = ent; client.spectatingId = null;
-    w.scene = scene; w.dead = false; w.task = null; w.promptKey = null; w.invulnerableUntil = Date.now() + 2500;
+    w.scene = scene; w.elevation = scene.startsWith('metro:') || scene.startsWith('train:') ? -1 : 0; ent.z = w.elevation; w.dead = false; w.task = null; w.promptKey = null; w.invulnerableUntil = Date.now() + 2500;
     if (scene === 'ext') w.ext = { x: ent.x, y: ent.y };
     sendWorld(client, 'world_scene', { scene: scene === 'ext' ? 'ext' : 'int', key: scene, interior: scene === 'ext' ? null : worldPublicInterior(room.def), x: ent.x, y: ent.y });
     client.ws.send(JSON.stringify({ type: 'init', id: ent.id, team: 0, nc: ent.nameColor, name1: ent.name }));
@@ -3995,8 +4050,22 @@ function worldInteriorPrompt(client) {
     const exitD = Math.hypot(def.door.px - p.x, def.door.py - p.y);
     let best = null, bd = Infinity;
     const consider = (d, pr) => { if (d < bd) { bd = d; best = pr; } };
-    if (exitD < def.door.r) consider(exitD, { id: 'exit', kind: 'exit', ax: def.door.px, ay: def.door.py - 40, title: def.kind === 'house' ? 'Front door' : 'Exit building', lines: ['Back to the street'], actions: [{ a: 'exit', label: 'Go outside', on: true }], mini: true });
-    if (def.kind === 'office') {
+    if (exitD < def.door.r && def.kind !== 'train') consider(exitD, { id: 'exit', kind: 'exit', ax: def.door.px, ay: def.door.py - 40, title: def.kind === 'house' ? 'Front door' : def.kind === 'metro' ? 'Station exit' : 'Exit building', lines: ['Climb the stairs to street level'], actions: [{ a: 'exit', label: 'Go outside', on: true }], mini: true });
+    if (def.kind === 'metro') {
+        const st = WL.stationById.get(def.metro.stationId);
+        if (st && near(def.board)) {
+            const dests = worldMetroDests(st);
+            consider(Math.hypot(def.board.x - p.x, def.board.y - p.y), { id: 'metro_board', kind: 'metro_board', ax: def.board.x, ay: def.board.y - 65, title: 'Departure board', lines: [`Line ${st.line} · ${st.name}`, 'Choose a destination at the platform'], actions: dests.slice(0, 8).map(o => ({ a: 'dest:' + o.id, label: o.name, on: true })) });
+        }
+        if (st && near(def.trainDoor)) {
+            const phase = Date.now() % 90000, present = phase < 22000;
+            const dests = worldMetroDests(st);
+            consider(Math.hypot(def.trainDoor.x - p.x, def.trainDoor.y - p.y), { id: 'metro_train', kind: 'metro_train', ctx: st, ax: def.trainDoor.x, ay: def.trainDoor.y - 90, title: present ? 'Train at platform' : 'Platform', lines: [present ? 'Doors open · Board now' : `Next train in ${Math.ceil((90000 - phase) / 1000)} seconds`, w.metroDestination ? `Selected: ${WL.stationById.get(w.metroDestination)?.name || 'Destination'}` : 'Select a destination on the departure board first'], actions: present && w.metroDestination ? [{ a: 'board', label: 'Board train', on: true }] : [] });
+        }
+    } else if (def.kind === 'train') {
+        const to = WL.stationById.get(def.train.to);
+        if (to) consider(0, { id: 'train_info', kind: 'train_info', ax: p.x, ay: p.y - 65, title: 'On board', lines: [`Destination: ${to.name}`, 'Please remain on the train until it arrives'], actions: [] });
+    } else if (def.kind === 'office') {
         const co = W_COMPANIES.find(c => c.id === def.coId), emp = worldEmployer(w), mine = emp && emp.id === co.id, now = Date.now();
         if (near(def.reception)) {
             const lines = [co.name, `${co.role} · ${worldPayFor(co, w.ext)} coins per shift`]; const actions = [];
@@ -4026,7 +4095,7 @@ function worldInteract(client, d) {
     const act = (pr.actions || []).find(a => a.a === d.a); if (!act || act.on === false) return;
     switch (pr.kind) {
         case 'bank': case 'atm': worldDeposit(client); break;
-        case 'metro': sendWorld(client, 'world_metro_open', { from: { id: pr.ctx.id, name: pr.ctx.name, city: pr.ctx.city, line: pr.ctx.line, hub: pr.ctx.hub }, dests: worldMetroDests(pr.ctx) }); break;
+        case 'metro': { const def = worldInteriorDef('metro:' + pr.ctx.id); worldGoto(client, 'metro:' + pr.ctx.id, def.spawn.x, def.spawn.y); break; }
         case 'dealer': if (act.a.startsWith('buy:')) worldBuyCar(client, act.a.slice(4)); break;
         case 'work': { const def = worldInteriorDef('work:' + pr.ctx.id); worldGoto(client, 'work:' + pr.ctx.id, def.spawn.x, def.spawn.y); break; }
         case 'house':
@@ -4037,7 +4106,19 @@ function worldInteract(client, d) {
         case 'exitcar': worldExitCar(client, false); break;
         case 'exit': {
             const def = client.room.def, b = def.kind === 'house' ? WL.houseById.get(def.hid) : WL.buildingById.get(def.bid);
-            const pos = b ? worldOutsideDoor(b) : WL.spawn; worldGoto(client, 'ext', pos.x, pos.y); break;
+            if (def.kind === 'metro') { const st = WL.stationById.get(def.metro.stationId); if (st) worldGoto(client, 'ext', st.x, st.y + 55); }
+            else { const pos = b ? worldOutsideDoor(b) : WL.spawn; worldGoto(client, 'ext', pos.x, pos.y); }
+            break;
+        }
+        case 'metro_board': {
+            const toId = String(act.a).slice(5), st = WL.stationById.get(client.room.def.metro.stationId);
+            if (st && worldMetroDests(st).some(o => o.id === toId)) { w.metroDestination = toId; worldNotice(client, `Destination selected. Walk to the train doors to board for ${WL.stationById.get(toId).name}.`, { level: 'good' }); }
+            break;
+        }
+        case 'metro_train': {
+            if (!w.metroDestination) { worldNotice(client, 'Choose your destination at the departure board first.', { level: 'bad' }); break; }
+            worldMetroGo(client, { to: w.metroDestination });
+            break;
         }
         case 'reception': {
             const def = client.room.def, co = W_COMPANIES.find(c => c.id === def.coId);
@@ -4087,7 +4168,7 @@ function worldJoin(client) {
 }
 function worldOnDisconnect(client) {
     const w = client.world; if (!w) return;
-    if (w.ride && client.player && WL) { const st = WL.stationById.get(w.ride.to); if (st) { client.player.x = st.ex; client.player.y = st.ey; w.ext = { x: st.ex, y: st.ey }; } w.ride = null; }   // finish the trip if you log off mid-ride
+    if (w.ride && client.player && WL) { const st = WL.stationById.get(w.ride.to); if (st) { const def = worldInteriorDef('metro:' + st.id); client.player.x = def.platform.x + def.platform.w / 2; client.player.y = def.platform.y + 110; } w.ride = null; }   // finish the trip if you log off mid-ride
     if (client.player?.vehicle) worldExitCar(client, true);
     worldSave(client); worldClients.delete(client);
     worldDetach(client); client.world = null;
@@ -4176,19 +4257,28 @@ function worldMetroDests(from) {
         if (st === from) continue;
         const same = st.city === from.city; if (!same && !(from.hub && st.hub)) continue;     // intercity express runs hub to hub
         const d = Math.hypot(st.x - from.x, st.y - from.y);
-        out.push({ id: st.id, name: st.name, city: st.city, line: st.line, hub: st.hub, fare: same ? 8 + Math.round(d / 1500) : 60 + Math.round(d / 6000), secs: 120, waitSecs: 10 + Math.floor(Math.random() * 16) });
+        out.push({ id: st.id, name: st.name, city: st.city, line: st.line, hub: st.hub, fare: same ? 8 + Math.round(d / 1500) : 60 + Math.round(d / 6000), secs: same ? Math.round(5 + d / 1800) : Math.round(20 + d / 3500) });
     }
     return out;
 }
 function worldMetroGo(client, d) {
-    const w = client.world, p = client.player; if (!w || !p || w.dead || w.ride || p.vehicle || w.scene !== 'ext' || !WL) return;
-    const pr = worldComputePrompt(client); if (!pr || pr.kind !== 'metro') return;
-    const to = WL.stationById.get(String(d.to)), opt = to && worldMetroDests(pr.ctx).find(o => o.id === to.id); if (!opt) return;
+    const w = client.world, p = client.player; if (!w || !p || w.dead || w.ride || p.vehicle || !WL) return;
+    if (!w.scene.startsWith('metro:')) return;
+    const from = WL.stationById.get(w.scene.slice(6));
+    const to = WL.stationById.get(String(d.to));
+    if (!from || !to) return;
+    const opt = worldMetroDests(from).find(o => o.id === to.id);
+    if (!opt) return;
+    const def = worldInteriorDef(w.scene);
+    if (Math.hypot(def.trainDoor.x - p.x, def.trainDoor.y - p.y) > def.trainDoor.r + 35) return;
+    const cycle = 90000, phase = Date.now() % cycle, trainPresent = phase < 22000;
+    if (!trainPresent) { worldNotice(client, `Next ${from.line === to.line ? 'Line ' + from.line : 'Express'} train arrives in ${Math.ceil((cycle - phase) / 1000)} seconds. Please wait on the platform.`); return; }
     if (!worldPayToll(client, opt.fare)) { worldNotice(client, `A ticket to ${to.name} costs ${opt.fare} coins (cash or bank).`, { level: 'bad' }); return; }
-    const now = Date.now(), waitSecs = 10 + Math.floor(Math.random() * 16);
-    w.ride = { phase: 'waiting', from: pr.ctx.id, to: to.id, boardAt: now + waitSecs * 1000,
-        startAt: 0, end: 0, fx: p.x, fy: p.y, sx: pr.ctx.ex, sy: pr.ctx.ey };
-    sendWorld(client, 'world_ride', { from: pr.ctx.name, to: to.name, line: to.line, secs: 120, waitSecs, fare: opt.fare, intercity: to.city !== pr.ctx.city });
+    const trainScene = 'train:' + from.id + '|' + to.id;
+    w.ride = { from: from.id, to: to.id, end: Date.now() + 120000, scene: trainScene, started: Date.now() };
+    const td = worldInteriorDef(trainScene);
+    worldGoto(client, trainScene, td.spawn.x, td.spawn.y);
+    worldNotice(client, `Doors closing. Your train to ${to.name} will take two minutes.`, { level: 'good' });
 }
 function worldMapPlaces() {
     if (WL.mapJ) return WL.mapJ;
@@ -4416,32 +4506,19 @@ setInterval(() => {
         const dt = now - w.lastTick; w.lastTick = now; w.playMs += dt;
         if (w.dead && now >= w.respawnAt) { worldSpawnNewlyOrAfterDeath(c); worldSave(c); continue; }
         const p = c.player; if (!p) continue;
+        if (w.scene.startsWith('metro:') && c.room?.def?.stair) {
+            const ramp = c.room.def.stair, t = clamp((p.y - ramp.y) / ramp.h, 0, 1);
+            w.elevation = t < 0.05 ? 0 : t > 0.95 ? -1 : -t; p.z = w.elevation;
+        } else { w.elevation = w.scene.startsWith('train:') ? -1 : 0; p.z = w.elevation; }
         if (w.ride) {
-            const r = w.ride; w.invulnerableUntil = now + 1500; p.vx = p.vy = 0;
-            if (r.phase === 'waiting') {
-                p.x = r.fx; p.y = r.fy;
-                if (now >= r.boardAt) {
-                    r.phase = 'travelling'; r.startAt = now; r.end = now + 120000;
-                    sendWorld(c, 'world_train_depart', { secs: 120 });
-                    worldNotice(c, 'Train doors closing. Departing now.', { level: 'good' });
-                }
-            } else {
-                const from = WL.stationById.get(r.from), to = WL.stationById.get(r.to);
-                const progress = Math.max(0, Math.min(1, (now - r.startAt) / 120000));
-                if (from && to) {
-                    // Server-authoritative passenger position follows the underground rail corridor.
-                    const dx = to.ex - from.ex, dy = to.ey - from.ey;
-                    const bend = Math.sin(progress * Math.PI) * 180;
-                    p.x = from.ex + dx * progress + (Math.abs(dx) > Math.abs(dy) ? 0 : bend);
-                    p.y = from.ey + dy * progress + (Math.abs(dx) > Math.abs(dy) ? bend : 0);
-                }
-                if (now >= r.end) {
-                    const st = WL.stationById.get(r.to), pos = { x: st.ex, y: st.ey }; layoutPushOut(WL, pos, p.radius);
-                    w.ride = null; p.x = pos.x; p.y = pos.y; w.ext = { x: p.x, y: p.y }; w.invulnerableUntil = now + 2500;
-                    sendWorld(c, 'world_ride_end', {}); worldNotice(c, `Arrived at ${st.name}. Follow the exit stairs to street level.`, { level: 'good' }); worldSave(c);
-                }
+            const r = w.ride; w.invulnerableUntil = now + 1500;
+            if (now >= r.end) {
+                const st = WL.stationById.get(r.to), scene = 'metro:' + r.to, def = worldInteriorDef(scene);
+                w.ride = null;
+                worldGoto(c, scene, def.platform.x + def.platform.w / 2, def.platform.y + 110);
+                worldNotice(c, `Arrived at ${st.name}. Walk up the stairs to street level.`, { level: 'good' }); worldSave(c);
+                continue;
             }
-            continue;
         }
         // work task progress
         if (w.task) {
