@@ -2075,7 +2075,10 @@ function handleWorldMessage(d) {
         case 'world_notice':
             if (d.sessionCoins !== undefined) worldState.sessionCoins = d.sessionCoins;
             if (d.message) wcToast(d.message, d.level); updateWorldHud(); return true;
-        case 'world_map': WC.mapPlaces = d.p; wcMapDraw(); return true;
+        case 'world_map': WC.mapPlaces = d.p; wcMapGroups(); wcMapDraw(); return true;
+        case 'world_metro_open': wcMetroOpen(d); return true;
+        case 'world_ride': wcRideStart(d); return true;
+        case 'world_ride_end': wcRideEnd(); return true;
         case 'world_nav': WC.nav = d.tgt ? { t: d.t, ...d.tgt, route: d.route } : null; if (!d.tgt) wcToast({ work: 'No workplace found.', home: 'You do not own a house yet.', car: 'Your car is not parked anywhere.', pin: 'Cannot route there.' }[d.t] || 'No destination.', 'bad'); return true;
         case 'world_death': wcToast(d.reason || 'You died.', 'bad'); return true;
         case 'world_prompt': WC.prompt = d.p; wcRenderPrompt(); return true;
@@ -2505,7 +2508,17 @@ function wcDrawProp(p, s, pass) {
             ctx.fillStyle = '#c9c3b2'; ctx.beginPath(); ctx.arc(cx, cy, r * .2, 0, 7); ctx.fill();
         } else if (p.k === 'silo') { const cx = X(p.x + p.w / 2), cy = Y(p.y + p.h / 2), r = p.w / 2 * s; ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(cx + 5 * s, cy + 6 * s, r, 0, 7); ctx.fill(); const gr = ctx.createRadialGradient(cx - r * .3, cy - r * .3, r * .1, cx, cy, r); gr.addColorStop(0, '#e9ecef'); gr.addColorStop(1, '#8a949c'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = Math.max(1, 1.5 * s); ctx.stroke(); }
     } else if (pass === 1) {
-        if (p.k === 'atm') { const x = X(p.x), y = Y(p.y), w = p.w * s, h = p.h * s; ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(x + 2 * s, y + 3 * s, w, h); ctx.fillStyle = '#2d6a4f'; ctx.fillRect(x, y, w, h); ctx.fillStyle = '#9fe8c4'; ctx.fillRect(x + w * .12, y + h * .18, w * .5, h * .38); ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.max(6, 7 * s)}px sans-serif`; ctx.fillText('ATM', x + w * .66, y + h * .62); }
+        if (p.k === 'metro') {
+            const x = X(p.x), y = Y(p.y), w = p.w * s, h = p.h * s, col = p.line === 1 ? '#e63946' : '#2a9d8f', horiz = p.w > p.h;
+            ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.fillRect(x + 2 * s, y + 3 * s, w, h);
+            ctx.fillStyle = '#26323f'; ctx.fillRect(x, y, w, h); ctx.fillStyle = col; ctx.fillRect(x, y, horiz ? w : Math.max(2, 5 * s), horiz ? Math.max(2, 5 * s) : h);
+            ctx.fillStyle = '#10161d'; for (let i = 1; i < 5; i++) { if (horiz) ctx.fillRect(x + w * 0.1, y + h * (0.3 + i * 0.12), w * 0.45, Math.max(1, 2 * s)); else ctx.fillRect(x + w * (0.3 + i * 0.12), y + h * 0.1, Math.max(1, 2 * s), h * 0.45); }
+            const rx = x + (horiz ? w * 0.78 : w * 0.55), ry = y + (horiz ? h * 0.58 : h * 0.78), rr = Math.min(w, h) * 0.3;
+            ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(rx, ry, rr + 1.5 * s, 0, 7); ctx.fill(); ctx.fillStyle = col; ctx.beginPath(); ctx.arc(rx, ry, rr, 0, 7); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.max(6, rr * 1.25)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('M', rx, ry + rr * 0.42);
+            if (s > 0.3) { ctx.font = `bold ${Math.max(9, 12 * s)}px sans-serif`; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.strokeText(p.name, x + w / 2, y - 5 * s); ctx.fillStyle = '#fff'; ctx.fillText(p.name, x + w / 2, y - 5 * s); }
+        }
+        else if (p.k === 'atm') { const x = X(p.x), y = Y(p.y), w = p.w * s, h = p.h * s; ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(x + 2 * s, y + 3 * s, w, h); ctx.fillStyle = '#2d6a4f'; ctx.fillRect(x, y, w, h); ctx.fillStyle = '#9fe8c4'; ctx.fillRect(x + w * .12, y + h * .18, w * .5, h * .38); ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.max(6, 7 * s)}px sans-serif`; ctx.fillText('ATM', x + w * .66, y + h * .62); }
         else if (p.k === 'lamp') { const x = X(p.x), y = Y(p.y); ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.beginPath(); ctx.ellipse(x + 3 * s, y + 4 * s, 5 * s, 3 * s, 0, 0, 7); ctx.fill(); ctx.fillStyle = '#2f383d'; ctx.beginPath(); ctx.arc(x, y, 3.4 * s, 0, 7); ctx.fill(); ctx.fillStyle = '#f6e3a4'; ctx.beginPath(); ctx.arc(x, y, 1.8 * s, 0, 7); ctx.fill(); }
         else if (p.k === 'bench') { const x = X(p.x), y = Y(p.y), w = p.w * s, h = p.h * s; ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fillRect(x + 2 * s, y + 3 * s, w, h); ctx.fillStyle = '#5e432c'; ctx.fillRect(x, y, w, h); ctx.fillStyle = '#a47b4f'; if (p.w > p.h) { for (let i = 0; i < 4; i++) ctx.fillRect(x + 2 * s, y + (1.5 + i * 4.5) * s, w - 4 * s, 3 * s); } else { for (let i = 0; i < 4; i++) ctx.fillRect(x + (1.5 + i * 4.5) * s, y + 2 * s, 3 * s, h - 4 * s); } }
     }
@@ -2567,7 +2580,7 @@ function wcDrawExterior() {
     }
     for (const c of list) for (const p of c.props) if (p.k === 'silo' && vis(p.x, p.y, p.w, p.h) && once('s' + p.x + ',' + p.y)) wcDrawProp(p, s, 0);
     wcUpdateDyn(); wcDrawDyn(vx0, vy0, vx1, vy1, s);
-    for (const c of list) for (const p of c.props) if ((p.k === 'lamp' || p.k === 'bench' || p.k === 'atm') && vis(p.x - 10, p.y - 10, (p.w || 0) + 20, (p.h || 0) + 20) && once('q' + p.k + p.x + ',' + p.y)) wcDrawProp(p, s, 1);
+    for (const c of list) for (const p of c.props) if ((p.k === 'lamp' || p.k === 'bench' || p.k === 'atm' || p.k === 'metro') && vis(p.x - 10, p.y - 10, (p.w || 0) + 20, (p.h || 0) + 20) && once('q' + p.k + p.x + ',' + p.y)) wcDrawProp(p, s, 1);
     for (const c of list) for (const p of c.props) if (p.k === 'tree' && p.x > vx0 - 60 && p.x < vx1 + 60 && p.y > vy0 - 60 && p.y < vy1 + 60) wcDrawTree(p, s);
     wcDrawBorder(s, W, H); wcDrawWater(s, W, H); wcDrawDayNight(W, H); wcDrawNav(s, W, H);
 }
@@ -2729,10 +2742,19 @@ function wcMapDraw() {
     g.setLineDash([6, 5]); g.strokeStyle = '#e8c53a'; g.lineWidth = 2; for (const q of WC.cities) g.strokeRect(MX(q.cx - q.border), MY(q.cy - q.border), S(q.border * 2), S(q.border * 2)); g.setLineDash([]);
     g.textAlign = 'center'; g.font = 'bold 14px sans-serif';
     for (const q of WC.cities) { const x = MX(q.cx), y = MY(q.cy); if (x > -50 && x < N + 50 && y > -50 && y < N + 50) { g.fillStyle = '#000'; g.fillText(q.name, x + 1, y + 1); g.fillStyle = '#fff'; g.fillText(q.name, x, y); } }
+    for (const gr of Object.values(WC.mapLines || {})) { g.strokeStyle = WC_LINE_COL[gr.line]; g.lineWidth = 2.5; g.beginPath(); gr.pts.forEach((q, i) => i ? g.lineTo(MX(q[1]), MY(q[2])) : g.moveTo(MX(q[1]), MY(q[2]))); g.stroke(); }
+    g.setLineDash([8, 6]); g.strokeStyle = '#8e44ad'; g.lineWidth = 2.5; const H = WC.mapHubs || {};
+    for (const [a, b] of [['central', 'port'], ['central', 'highmoor'], ['port', 'solana'], ['highmoor', 'solana']]) if (H[a] && H[b]) { g.beginPath(); g.moveTo(MX(H[a][1]), MY(H[a][2])); g.lineTo(MX(H[b][1]), MY(H[b][2])); g.stroke(); }
+    g.setLineDash([]);
     const showA = v.half < 40000, showW = v.half < 150000; g.font = '15px sans-serif';
     for (const q of WC.mapPlaces || []) {
         const x = MX(q[1]), y = MY(q[2]); if (x < -10 || y < -10 || x > N + 10 || y > N + 10) continue;
         if (q[0] === 'w') { if (!showW) continue; g.fillStyle = q[4] || '#c33'; g.fillRect(x - 2.5, y - 2.5, 5, 5); }
+        else if (q[0] === 'm') {
+            if (!showA && !q[6]) continue;
+            g.fillStyle = '#fff'; g.beginPath(); g.arc(x, y, q[6] ? 6 : 4, 0, 7); g.fill(); g.fillStyle = WC_LINE_COL[q[4]]; g.beginPath(); g.arc(x, y, q[6] ? 4.5 : 2.8, 0, 7); g.fill();
+            if (v.half < 9000 || (q[6] && v.half < 150000)) { g.font = 'bold 11px sans-serif'; g.fillStyle = '#000'; g.fillText(q[3], x + 1, y - 7); g.fillStyle = '#fff'; g.fillText(q[3], x, y - 8); g.font = '15px sans-serif'; }
+        }
         else if (q[0] === 'a') { if (!showA) continue; g.fillStyle = '#1b7a3d'; g.fillRect(x - 1.5, y - 1.5, 3, 3); }
         else if (showW) g.fillText({ bank: '🏦', dealer: '🚘', hall: '🏛', mall: '🛍', school: '🏫' }[q[0]] || '•', x, y + 5);
     }
@@ -2742,6 +2764,51 @@ function wcMapDraw() {
     if (pin) { g.font = '22px sans-serif'; g.fillText('📍', MX(pin.x), MY(pin.y)); g.font = 'bold 13px sans-serif'; g.fillStyle = '#000'; g.fillText(pin.label || '', MX(pin.x) + 1, MY(pin.y) - 22); g.fillStyle = '#fff'; g.fillText(pin.label || '', MX(pin.x), MY(pin.y) - 23); }
     const px = camera.x + canvas.width * fov / 2, py = camera.y + canvas.height * fov / 2;
     g.fillStyle = '#fff'; g.strokeStyle = '#e22'; g.lineWidth = 3; g.beginPath(); g.arc(MX(px), MY(py), 6, 0, 7); g.fill(); g.stroke();
+}
+// ---- subway: ticket screen + ride screen -------------------------------------------------------------------------
+const WC_LINE_COL = { 1: '#e63946', 2: '#2a9d8f' };
+function wcEl(tag, css, text) { const e = document.createElement(tag); if (css) e.style.cssText = css; if (text != null) e.textContent = text; return e; }
+let wcMetroEl = null;
+function wcMetroClose() { if (wcMetroEl) wcMetroEl.style.display = 'none'; }
+function wcMetroOpen(d) {
+    if (!wcMetroEl) { wcMetroEl = wcEl('div', 'position:fixed;inset:0;z-index:80;background:rgba(5,10,20,.8);display:none;align-items:center;justify-content:center;font-family:sans-serif'); document.body.appendChild(wcMetroEl); }
+    wcMetroEl.innerHTML = ''; wcMetroEl.style.display = 'flex';
+    const cityName = id => (WC.cities.find(q => q.id === id) || {}).name || id;
+    const box = wcEl('div', 'background:#101c2b;border:2px solid #fff;border-radius:12px;padding:16px 18px;max-width:780px;width:92vw;max-height:86vh;overflow:auto;color:#fff');
+    const head = wcEl('div', 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px');
+    head.appendChild(wcEl('div', 'font:bold 20px sans-serif', '🚇 ' + d.from.name + ' · ' + cityName(d.from.city)));
+    const x = wcEl('button', 'border:0;border-radius:8px;background:#444;color:#fff;font:bold 14px sans-serif;padding:6px 12px;cursor:pointer', 'Close'); x.onclick = wcMetroClose; head.appendChild(x); box.appendChild(head);
+    box.appendChild(wcEl('div', 'color:#9fd8ff;font-size:13px;margin-bottom:10px', 'Choose a destination. Tickets are paid from your cash first, then your bank balance.'));
+    const section = (title, col, list) => {
+        if (!list.length) return; box.appendChild(wcEl('div', `margin:10px 0 6px;font:bold 15px sans-serif;color:${col}`, title));
+        const grid = wcEl('div', 'display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px');
+        for (const o of list) { const b = wcEl('button', `border:0;border-left:5px solid ${col};border-radius:6px;background:#1b2e45;color:#fff;font:13px sans-serif;padding:8px 10px;text-align:left;cursor:pointer`, `${o.name}${o.city !== d.from.city ? ' (' + cityName(o.city) + ')' : ''}  ·  ${o.fare} coins · ${o.secs}s`); b.onclick = () => { worldSend('world_metro', { to: o.id }); wcMetroClose(); }; grid.appendChild(b); }
+        box.appendChild(grid);
+    };
+    const same = d.dests.filter(o => o.city === d.from.city);
+    section('Line 1 (red)', WC_LINE_COL[1], same.filter(o => o.line === 1)); section('Line 2 (green)', WC_LINE_COL[2], same.filter(o => o.line === 2));
+    section('Intercity Express', '#8e44ad', d.dests.filter(o => o.city !== d.from.city));
+    wcMetroEl.appendChild(box);
+}
+let wcRideEl = null, wcRideT = null;
+function wcRideStart(d) {
+    wcMetroClose();
+    if (!wcRideEl) {
+        wcRideEl = wcEl('div', 'position:fixed;inset:0;z-index:85;background:#0b1220;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;font-family:sans-serif');
+        wcRideEl.innerHTML = '<div id="rd-t" style="font:bold 26px sans-serif"></div><div id="rd-s" style="color:#9fd8ff"></div><div id="rd-w" style="width:min(520px,80vw);height:64px;border-radius:10px;border:3px solid #6b7c93;background:repeating-linear-gradient(90deg,#1c2a3d 0 46px,#14202f 46px 92px)"></div><div style="width:min(520px,80vw);height:10px;background:#223;border-radius:6px;overflow:hidden"><div id="rd-b" style="height:100%;width:0;background:#2fa8f0"></div></div><div id="rd-l" style="font:15px sans-serif;color:#cde"></div>';
+        document.body.appendChild(wcRideEl);
+    }
+    const q = id => wcRideEl.querySelector(id);
+    q('#rd-t').textContent = (d.intercity ? '🚄 Intercity Express → ' : '🚇 Line ' + d.line + ' → ') + d.to; q('#rd-t').style.color = d.intercity ? '#c58bff' : WC_LINE_COL[d.line];
+    q('#rd-s').textContent = 'From ' + d.from + ' · ticket ' + d.fare + ' coins'; wcRideEl.style.display = 'flex';
+    const t0 = Date.now(); clearInterval(wcRideT);
+    wcRideT = setInterval(() => { const e = (Date.now() - t0) / 1000; q('#rd-b').style.width = Math.min(100, e / d.secs * 100) + '%'; q('#rd-w').style.backgroundPositionX = -(Date.now() / (d.intercity ? 2 : 6)) + 'px'; q('#rd-l').textContent = e < d.secs ? Math.ceil(d.secs - e) + ' s to go' : 'Arriving…'; }, 50);
+}
+function wcRideEnd() { clearInterval(wcRideT); if (wcRideEl) wcRideEl.style.display = 'none'; }
+function wcMapGroups() {
+    WC.mapLines = {}; WC.mapHubs = {};
+    for (const q of WC.mapPlaces || []) if (q[0] === 'm') { (WC.mapLines[q[5] + q[4]] = WC.mapLines[q[5] + q[4]] || { line: q[4], pts: [] }).pts.push(q); if (q[6]) WC.mapHubs[q[5]] = q; }
+    for (const g of Object.values(WC.mapLines)) g.pts.sort((a, b) => g.line === 1 ? a[1] - b[1] : a[2] - b[2]);
 }
 function wcDayPhase(px) { return (((Date.now() % WC_DAY_MS) / WC_DAY_MS + (px - WC.center) / 450000 * 0.25) % 1 + 1) % 1; }   // east = later in the day
 function wcClock(px) { const h = (6 + wcDayPhase(px) * 24) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); }
