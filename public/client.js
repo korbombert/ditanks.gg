@@ -2120,7 +2120,7 @@ function updateWorldHud() {
 function wcRenderChip() {
     const chip = document.getElementById('world-chip'); if (!chip) return;
     const j = worldState.job, left = j ? Math.max(0, wcJobBase.left - (performance.now() - wcJobBase.t)) : 0;
-    let html = `<div class="wc-row"><span class="wc-ico">🪙</span><span><small>UNBANKED</small><b>${numberWithCommas(Math.floor(worldState.sessionCoins || 0))}</b></span></div>`;
+    let html = `<div class="wc-row"><span class="wc-ico">🪙</span><span><small>UNBANKED</small><b>${numberWithCommas(Math.floor(worldState.sessionCoins || 0))}</b></span></div>`; if (WC.scene !== 'ext') html += `<div class="wc-row"><span class="wc-ico">↕</span><span><small>LEVEL</small><b>${WC.scene.startsWith('train:') ? 'UNDERGROUND · TRAIN' : 'UNDERGROUND · ' + (WC.scene.startsWith('metro:') ? 'PLATFORM' : 'INTERIOR')}</b></span></div>`;
     if (j) html += `<div class="wc-row${left < 180000 ? ' wc-warn' : ''}"><span class="wc-ico">💼</span><span><small>${escapeHTML(j.name)}</small><b>Shift due ${wcFmtMs(left)}</b></span></div>`;
     if (worldState.car) html += `<div class="wc-row"><span class="wc-ico">🚗</span><span><small>CAR</small><b>${worldState.car.driven ? 'Driving' : 'Parked'}</b></span></div>`;
     if (chip.dataset.h !== html) { chip.dataset.h = html; chip.innerHTML = html; }
@@ -2794,71 +2794,17 @@ let wcRideEl = null, wcRideT = null;
 function wcRideStart(d) {
     wcMetroClose();
     if (!wcRideEl) {
-        wcRideEl = wcEl('div', 'position:fixed;inset:0;z-index:85;background:#080d16;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#fff;font-family:sans-serif;overflow:hidden');
-        wcRideEl.innerHTML = `
-          <div id="rd-t" style="font:bold 25px sans-serif;z-index:2;text-align:center"></div>
-          <div id="rd-s" style="color:#b9dfff;z-index:2"></div>
-          <div id="rd-scene" style="position:relative;width:min(760px,94vw);height:min(390px,52vh);background:linear-gradient(#111d2c 0 58%,#202b37 58% 100%);border:3px solid #60748b;border-radius:12px;overflow:hidden;box-shadow:0 18px 60px #000">
-            <div id="rd-sign" style="position:absolute;top:12px;left:14px;background:#07111d;border:1px solid #60748b;padding:7px 12px;border-radius:5px;color:#a9dfff;font:bold 13px sans-serif">NEXT TRAIN · PLATFORM</div>
-            <div id="rd-tunnel" style="display:none;position:absolute;inset:0;background:repeating-linear-gradient(90deg,#101923 0 70px,#263746 71px 75px,#101923 76px 145px)"></div>
-            <div id="rd-rails" style="display:none;position:absolute;left:0;right:0;bottom:32px;height:18px;background:repeating-linear-gradient(90deg,#c2ccd5 0 32px,#3d4c5b 33px 58px)"></div>
-            <div id="rd-train" style="display:none;position:absolute;left:50%;top:25%;transform:translateX(-50%);width:76%;height:62%;background:linear-gradient(#dce8ef,#8296a7 60%,#344555);border:5px solid #d7e4ed;border-radius:22px 22px 12px 12px;box-shadow:0 12px 35px #000">
-              <div style="height:24px;background:#172b3b;border-radius:12px 12px 0 0"></div>
-              <div style="display:flex;gap:8px;padding:14px;height:calc(100% - 40px);box-sizing:border-box">
-                <div style="flex:1;background:#172c3d;border:3px solid #b8c9d4;border-radius:7px"></div>
-                <div style="width:23%;background:#d2e0e8;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#152535;font-size:38px">●</div>
-                <div style="flex:1;background:#172c3d;border:3px solid #b8c9d4;border-radius:7px"></div>
-              </div>
-            </div>
-            <div id="rd-platform" style="position:absolute;left:0;right:0;bottom:0;height:42%;background:linear-gradient(90deg,#394956,#202d39);border-top:5px solid #d6c66a"></div>
-            <div id="rd-person" style="position:absolute;left:50%;bottom:18%;font-size:35px;transform:translateX(-50%);z-index:3">🧍</div>
-            <div id="rd-stairs" style="position:absolute;right:18px;bottom:20px;color:#fff;background:#101c2b;padding:8px 10px;border-radius:5px;font-size:12px">↑ STREET EXIT</div>
-          </div>
-          <div id="rd-b" style="width:min(620px,86vw);height:9px;background:#243446;border-radius:8px;overflow:hidden"><div style="height:100%;width:0;background:#43b5ef"></div></div>
-          <div id="rd-l" style="font:14px sans-serif;color:#d5e7f5;text-align:center;z-index:2"></div>`;
+        wcRideEl = wcEl('div', 'position:fixed;inset:0;z-index:85;background:#0b1220;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;font-family:sans-serif');
+        wcRideEl.innerHTML = '<div id="rd-t" style="font:bold 26px sans-serif"></div><div id="rd-s" style="color:#9fd8ff"></div><div id="rd-w" style="width:min(520px,80vw);height:64px;border-radius:10px;border:3px solid #6b7c93;background:repeating-linear-gradient(90deg,#1c2a3d 0 46px,#14202f 46px 92px)"></div><div style="width:min(520px,80vw);height:10px;background:#223;border-radius:6px;overflow:hidden"><div id="rd-b" style="height:100%;width:0;background:#2fa8f0"></div></div><div id="rd-l" style="font:15px sans-serif;color:#cde"></div>';
         document.body.appendChild(wcRideEl);
     }
     const q = id => wcRideEl.querySelector(id);
-    q('#rd-t').textContent = (d.intercity ? '🚆 Intercity Express' : '🚇 Line ' + d.line) + ' · ' + d.to;
-    q('#rd-t').style.color = d.intercity ? '#c58bff' : WC_LINE_COL[d.line];
-    q('#rd-s').textContent = 'Ticket paid · ' + d.fare + ' coins';
-    wcRideEl.style.display = 'flex';
-    const waitMs = Math.max(0, (d.waitSecs || 12) * 1000), rideMs = 120000, t0 = Date.now();
-    clearInterval(wcRideT);
-    wcRideT = setInterval(() => {
-        const elapsed = Date.now() - t0, waiting = elapsed < waitMs;
-        const train = q('#rd-train'), tunnel = q('#rd-tunnel'), rails = q('#rd-rails'), person = q('#rd-person');
-        if (waiting) {
-            q('#rd-sign').textContent = 'NEXT TRAIN · ' + Math.ceil((waitMs-elapsed)/1000) + ' SECONDS';
-            q('#rd-l').textContent = 'Please stand behind the yellow line. The train is approaching.';
-            train.style.display = 'none'; tunnel.style.display = 'none'; rails.style.display = 'none'; person.style.display = 'block';
-            q('#rd-platform').style.display = 'block'; q('#rd-stairs').style.display = 'block';
-            q('#rd-b').firstElementChild.style.width = (elapsed / waitMs * 100) + '%';
-        } else {
-            const trip = Math.min(1, (elapsed-waitMs)/rideMs);
-            q('#rd-sign').textContent = 'ON BOARD · ' + Math.ceil((rideMs-(elapsed-waitMs))/1000) + ' SECONDS';
-            q('#rd-l').textContent = trip < 1 ? 'Travelling through the underground tunnel · Please remain on board.' : 'Arriving at destination · Please prepare to exit.';
-            tunnel.style.display = 'block'; rails.style.display = 'block'; train.style.display = 'block'; person.style.display = 'none';
-            q('#rd-platform').style.display = 'none'; q('#rd-stairs').style.display = 'none';
-            tunnel.style.backgroundPositionX = -(elapsed * 0.75) + 'px';
-            train.style.left = (50 + Math.sin(elapsed/450) * 1.2) + '%';
-            q('#rd-b').firstElementChild.style.width = (trip * 100) + '%';
-        }
-    }, 100);
+    q('#rd-t').textContent = (d.intercity ? '🚄 Intercity Express → ' : '🚇 Line ' + d.line + ' → ') + d.to; q('#rd-t').style.color = d.intercity ? '#c58bff' : WC_LINE_COL[d.line];
+    q('#rd-s').textContent = 'From ' + d.from + ' · ticket ' + d.fare + ' coins'; wcRideEl.style.display = 'flex';
+    const t0 = Date.now(); clearInterval(wcRideT);
+    wcRideT = setInterval(() => { const e = (Date.now() - t0) / 1000; q('#rd-b').style.width = Math.min(100, e / d.secs * 100) + '%'; q('#rd-w').style.backgroundPositionX = -(Date.now() / (d.intercity ? 2 : 6)) + 'px'; q('#rd-l').textContent = e < d.secs ? Math.ceil(d.secs - e) + ' s to go' : 'Arriving…'; }, 50);
 }
-function wcRideEnd() {
-    clearInterval(wcRideT);
-    if (wcRideEl) {
-        const q = id => wcRideEl.querySelector(id);
-        q('#rd-sign').textContent = 'ARRIVED · DOORS OPEN';
-        q('#rd-l').textContent = 'Leave the train and follow the stairs ↑ to street level.';
-        q('#rd-stairs').style.display = 'block';
-        q('#rd-stairs').textContent = '↑ EXIT TO STREET';
-        q('#rd-train').style.display = 'none'; q('#rd-tunnel').style.display = 'none'; q('#rd-rails').style.display = 'none';
-        q('#rd-platform').style.display = 'block'; q('#rd-person').style.display = 'block';
-        setTimeout(() => { if (wcRideEl) wcRideEl.style.display = 'none'; }, 2800);
-    }
-}
+function wcRideEnd() { clearInterval(wcRideT); if (wcRideEl) wcRideEl.style.display = 'none'; }
 function wcMapGroups() {
     WC.mapLines = {}; WC.mapHubs = {};
     for (const q of WC.mapPlaces || []) if (q[0] === 'm') { (WC.mapLines[q[5] + q[4]] = WC.mapLines[q[5] + q[4]] || { line: q[4], pts: [] }).pts.push(q); if (q[6]) WC.mapHubs[q[5]] = q; }
@@ -2896,6 +2842,13 @@ function wcPaintFurniture(g, f, D) {
     const x = f.x, y = f.y, w = f.w, h = f.h, k = f.k, acc = D.theme.accent || '#5b7fa8';
     const sh = () => { g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(x + 3, y + 4, w, h); };
     switch (k) {
+        case 'metro_gate': g.fillStyle = '#273642'; g.fillRect(x, y, w, h); g.fillStyle = acc; g.fillRect(x, y, w, 7); for (let i=0;i<7;i++){g.fillStyle='#b7c4ce';g.fillRect(x+18+i* (w-36)/7,y+7,4,h-7);} break;
+        case 'metro_board': g.fillStyle='#071722'; g.fillRect(x,y,w,h); g.strokeStyle=acc; g.lineWidth=4; g.strokeRect(x+2,y+2,w-4,h-4); g.fillStyle='#a8e7ff'; g.font='bold 18px sans-serif'; g.fillText('DEPARTURES',x+15,y+27); g.fillStyle='#f6d36b'; g.fillText('LINE  '+(D.metro?.line||1),x+15,y+53); break;
+        case 'metro_bench': g.fillStyle='#263847'; g.fillRect(x,y,w,h); g.fillStyle='#587387'; g.fillRect(x+4,y+4,w-8,h-12); g.fillStyle='#111b24'; g.fillRect(x+14,y+h-12,8,12); g.fillRect(x+w-22,y+h-12,8,12); break;
+        case 'metro_pillar': g.fillStyle='#657987'; g.fillRect(x,y,w,h); g.fillStyle='#a7b6c0'; g.fillRect(x+5,y,w-10,h); g.fillStyle=acc; g.fillRect(x,y+20,w,9); break;
+        case 'train_seat': g.fillStyle='rgba(0,0,0,.25)';g.fillRect(x+4,y+5,w,h);g.fillStyle='#263e51';wcRR(g,x,y,w,h,12);g.fill();g.fillStyle='#426b87';wcRR(g,x+8,y+7,w-16,h-14,9);g.fill();g.fillStyle='#9bb2c1';g.fillRect(x+12,y+4,w-24,5);break;
+        case 'train_pole': g.fillStyle='#aebcc5';g.fillRect(x,y,w,h);g.fillStyle='#e5edf2';g.fillRect(x+5,y,5,h);break;
+        case 'train_route': g.fillStyle='#081b29';g.fillRect(x,y,w,h);g.strokeStyle='#7fc8ef';g.lineWidth=3;g.strokeRect(x+2,y+2,w-4,h-4);g.fillStyle='#d9f1ff';g.font='bold 17px sans-serif';g.textAlign='center';g.fillText(D.train?.toName||'NEXT STATION',x+w/2,y+27);break;
         case 'rug': g.fillStyle = D.kind === 'house' ? '#8a4a4a' : '#44566c'; wcRR(g, x, y, w, h, 10); g.fill(); g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 3; wcRR(g, x + 7, y + 7, w - 14, h - 14, 7); g.stroke(); break;
         case 'desk': sh(); g.fillStyle = '#9b7248'; g.fillRect(x, y, w, h); g.fillStyle = '#b88b5a'; g.fillRect(x + 2, y + 2, w - 4, h - 4); g.fillStyle = '#2a3036'; g.fillRect(x + w / 2 - 22, y + h - 20, 44, 11); g.fillStyle = '#4a5560'; g.fillRect(x + w / 2 - 20, y + h - 18, 40, 7); g.fillStyle = '#f1f1f1'; g.fillRect(x + 12, y + 12, 18, 12); break;
         case 'monitor': g.fillStyle = '#15191d'; g.fillRect(x, y, w, h); g.fillStyle = '#5aa6d8'; g.fillRect(x + 2, y + 1.5, w - 4, h - 3); break;
@@ -2942,6 +2895,40 @@ function wcDrawInterior() {
     const I = wcGetInterior(), s = 1 / fov;
     ctx.fillStyle = '#0d1115'; ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(I.c, worldToScreenX(I.fl.x - I.M), worldToScreenY(I.fl.y - I.M), I.c.width / I.sc * s, I.c.height / I.sc * s);
+    if (WC.interior.kind === 'metro') {
+        const D = WC.interior, X = worldToScreenX, Y = worldToScreenY, sc = s, fl = D.floor, st = D.metro || {};
+        // Open stairwell: perspective treads visually descend from street level to the lower concourse.
+        const r = D.stair;
+        ctx.save(); ctx.fillStyle = '#263542'; ctx.fillRect(X(r.x),Y(r.y),r.w*sc,r.h*sc);
+        for(let i=0;i<16;i++){const yy=r.y+i*r.h/16;ctx.fillStyle=i%2?'#71818c':'#9aa8b0';ctx.fillRect(X(r.x),Y(yy),r.w*sc,(r.h/16-2)*sc);}
+        ctx.fillStyle='#d4c56b';ctx.fillRect(X(r.x),Y(r.y+r.h-12),r.w*sc,7*sc);
+        ctx.restore();
+        // Platform edge and twin rails.
+        const p=D.platform;
+        ctx.fillStyle='#e2c95f';ctx.fillRect(X(p.x),Y(p.y),p.w*sc,10*sc);
+        ctx.fillStyle='#252e36';ctx.fillRect(X(p.x),Y(p.y+45),p.w*sc,105*sc);
+        ctx.fillStyle='#aab6bd';ctx.fillRect(X(p.x),Y(p.y+65),p.w*sc,7*sc);ctx.fillRect(X(p.x),Y(p.y+122),p.w*sc,7*sc);
+        // A scheduled train occupies the track during the shared arrival window.
+        const present=(Date.now()%90000)<22000;
+        if(present){
+            const tx=X(p.x+90), ty=Y(p.y+52), tw=(p.w-180)*sc, th=92*sc;
+            ctx.fillStyle='#101b25';ctx.fillRect(tx,ty,tw,th);
+            ctx.fillStyle=st.line===1?'#c93643':'#238a7c';ctx.fillRect(tx,ty,tw,13*sc);
+            for(let i=0;i<Math.max(3,Math.floor(tw/(72*sc)));i++){ctx.fillStyle='#9ac7dc';ctx.fillRect(tx+(15+i*72*sc),ty+27*sc,48*sc,35*sc);ctx.fillStyle='#182c3c';ctx.fillRect(tx+(15+i*72*sc),ty+66*sc,48*sc,8*sc);}
+            ctx.fillStyle='#fff';ctx.font=`bold ${Math.max(10,13*sc)}px sans-serif`;ctx.fillText('TRAIN · DOORS OPEN',tx+12*sc,ty-8*sc);
+        }
+    }
+    if (WC.interior.kind === 'train') {
+        const D=WC.interior, fl=D.floor, X=worldToScreenX, Y=worldToScreenY;
+        // Moving tunnel outside carriage windows gives the passenger a sense of motion.
+        const elapsed=Date.now()%120000, offset=(elapsed*0.22)%180;
+        ctx.save();ctx.fillStyle='#07111b';ctx.fillRect(0,canvas.height*.08,canvas.width,canvas.height*.17);
+        for(let i=-2;i<canvas.width/150+3;i++){
+            const xx=i*150-offset;ctx.fillStyle=i%2?'#142535':'#203647';ctx.fillRect(xx,canvas.height*.10,95,canvas.height*.13);
+            ctx.fillStyle='#8ba8b8';ctx.fillRect(xx+92,canvas.height*.10,5,canvas.height*.13);
+        }
+        ctx.restore();
+    }
     if (WC.interior.kind === 'office') {   // the desk you are at lights up when you work
         const me = gameState.entities.find(e => e.id === myId);
         for (const st of WC.interior.stations) if (me && Math.hypot(st.x - me.x, st.y - me.y) < st.r) { ctx.strokeStyle = 'rgba(255,230,120,.55)'; ctx.lineWidth = Math.max(2, 3 * s); ctx.beginPath(); ctx.arc(worldToScreenX(st.x), worldToScreenY(st.y), 26 * s, 0, 7); ctx.stroke(); }
