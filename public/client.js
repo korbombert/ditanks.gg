@@ -2061,8 +2061,8 @@ function beginWorldMode() {
 function handleWorldMessage(d) {
     switch (d.type) {
         case 'world_static':
-            Object.assign(WC, { center: d.center, extent: d.extent, chunk: d.chunk, nch: d.nch, roads: d.roads, cars: d.cars, carColors: d.carColors, companies: d.companies, spawn: d.spawn, bank: d.bank, dealer: d.dealer, fireMs: d.fireMs, taskMs: d.taskMs });
-            beginWorldMode(); return true;
+            Object.assign(WC, { center: d.center, extent: d.extent, chunk: d.chunk, nch: d.nch, roads: d.roads, cities: d.cities, cars: d.cars, carColors: d.carColors, companies: d.companies, spawn: d.spawn, bank: d.bank, dealer: d.dealer, fireMs: d.fireMs, taskMs: d.taskMs });
+            beginWorldMode(); if (!wcMapEl) wcMapBuild(); return true;
         case 'world_houses': WC.houses = new Map(d.list.map(([h, o, m]) => [h, { o, m }])); return true;
         case 'world_house': if (d.o) WC.houses.set(d.hid, { o: d.o, m: d.m }); else WC.houses.delete(d.hid); wcSpriteCache.delete('hs' + d.hid); return true;
         case 'world_chunk': wcIngestChunk(d.c); return true;
@@ -2075,6 +2075,8 @@ function handleWorldMessage(d) {
         case 'world_notice':
             if (d.sessionCoins !== undefined) worldState.sessionCoins = d.sessionCoins;
             if (d.message) wcToast(d.message, d.level); updateWorldHud(); return true;
+        case 'world_map': WC.mapPlaces = d.p; wcMapDraw(); return true;
+        case 'world_nav': WC.nav = d.tgt ? { t: d.t, ...d.tgt, route: d.route } : null; if (!d.tgt) wcToast({ work: 'No workplace found.', home: 'You do not own a house yet.', car: 'Your car is not parked anywhere.', pin: 'Cannot route there.' }[d.t] || 'No destination.', 'bad'); return true;
         case 'world_death': wcToast(d.reason || 'You died.', 'bad'); return true;
         case 'world_prompt': WC.prompt = d.p; wcRenderPrompt(); return true;
         case 'world_task': WC.task = d.p; wcRenderTask(); return true;
@@ -2382,7 +2384,16 @@ function wcPaintSchool(g, b) {
     wcBanner(g, 'SCHOOL', w / 2, h * 0.14, w * 0.3, 24, '#2f5f9e'); wcDoorMark(g, b, '#2f5f9e');
 }
 const WC_PAINTERS = { tower: (g, b) => wcPaintTower(g, b, false), mid: (g, b) => wcPaintTower(g, b, true), shop: wcPaintShop, apt: wcPaintApt, mall: wcPaintMall, bank: wcPaintBank, dealer: wcPaintDealer, hall: wcPaintHall, house: wcPaintHouse, farmhouse: wcPaintHouse, barn: wcPaintBarn, shed: wcPaintShed, school: wcPaintSchool };
-function wcBuildingSprite(b) { return wcSprite('b' + b.id, b.w, b.h, g => (WC_PAINTERS[b.k] || wcPaintTower)(g, b)); }
+// Each foreign city has its own colour wash on buildings and ground, its own weather and its own time zone.
+const WC_THEME = { port: { bld: 'rgba(60,110,160,.24)', grass: 'rgba(70,110,140,.22)' }, hill: { bld: 'rgba(170,95,30,.24)', grass: 'rgba(190,120,30,.26)' }, sun: { bld: 'rgba(255,170,70,.22)', grass: 'rgba(235,190,90,.30)' } };
+function wcCityTheme(id) { const c = WC.cities && WC.cities.find(q => q.id === id); return c && WC_THEME[c.theme]; }
+function wcBuildingSprite(b) {
+    return wcSprite('b' + b.id, b.w, b.h, g => {
+        (WC_PAINTERS[b.k] || wcPaintTower)(g, b);
+        const th = b.city && wcCityTheme(b.city);
+        if (th) { g.save(); g.globalCompositeOperation = 'source-atop'; g.fillStyle = th.bld; g.fillRect(-5000, -5000, 10000, 10000); g.restore(); }
+    });
+}
 
 // lot-level house furniture: front hedge, driveway, path, mailbox and the for-sale / owner sign (drawn live: ownership changes)
 function wcHouseLot(b, s) {
@@ -2426,7 +2437,7 @@ function wcLine(x0, y0, x1, y1, color, w, dash, phase) {
 function wcDrawRoads(vx0, vy0, vx1, vy1, s) {
     const C = WC.center;
     for (const r of WC.roads) {
-        const v = r.a === 'v';
+        const v = r.a === 'v', C = r.o ?? WC.center;
         const aMin = Math.max(C - r.e, v ? vy0 : vx0), aMax = Math.min(C + r.e, v ? vy1 : vx1);
         if (aMax <= aMin) continue;
         if (v ? (r.p + r.hw < vx0 || r.p - r.hw > vx1) : (r.p + r.hw < vy0 || r.p - r.hw > vy1)) continue;
@@ -2494,7 +2505,8 @@ function wcDrawProp(p, s, pass) {
             ctx.fillStyle = '#c9c3b2'; ctx.beginPath(); ctx.arc(cx, cy, r * .2, 0, 7); ctx.fill();
         } else if (p.k === 'silo') { const cx = X(p.x + p.w / 2), cy = Y(p.y + p.h / 2), r = p.w / 2 * s; ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(cx + 5 * s, cy + 6 * s, r, 0, 7); ctx.fill(); const gr = ctx.createRadialGradient(cx - r * .3, cy - r * .3, r * .1, cx, cy, r); gr.addColorStop(0, '#e9ecef'); gr.addColorStop(1, '#8a949c'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = Math.max(1, 1.5 * s); ctx.stroke(); }
     } else if (pass === 1) {
-        if (p.k === 'lamp') { const x = X(p.x), y = Y(p.y); ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.beginPath(); ctx.ellipse(x + 3 * s, y + 4 * s, 5 * s, 3 * s, 0, 0, 7); ctx.fill(); ctx.fillStyle = '#2f383d'; ctx.beginPath(); ctx.arc(x, y, 3.4 * s, 0, 7); ctx.fill(); ctx.fillStyle = '#f6e3a4'; ctx.beginPath(); ctx.arc(x, y, 1.8 * s, 0, 7); ctx.fill(); }
+        if (p.k === 'atm') { const x = X(p.x), y = Y(p.y), w = p.w * s, h = p.h * s; ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(x + 2 * s, y + 3 * s, w, h); ctx.fillStyle = '#2d6a4f'; ctx.fillRect(x, y, w, h); ctx.fillStyle = '#9fe8c4'; ctx.fillRect(x + w * .12, y + h * .18, w * .5, h * .38); ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.max(6, 7 * s)}px sans-serif`; ctx.fillText('ATM', x + w * .66, y + h * .62); }
+        else if (p.k === 'lamp') { const x = X(p.x), y = Y(p.y); ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.beginPath(); ctx.ellipse(x + 3 * s, y + 4 * s, 5 * s, 3 * s, 0, 0, 7); ctx.fill(); ctx.fillStyle = '#2f383d'; ctx.beginPath(); ctx.arc(x, y, 3.4 * s, 0, 7); ctx.fill(); ctx.fillStyle = '#f6e3a4'; ctx.beginPath(); ctx.arc(x, y, 1.8 * s, 0, 7); ctx.fill(); }
         else if (p.k === 'bench') { const x = X(p.x), y = Y(p.y), w = p.w * s, h = p.h * s; ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fillRect(x + 2 * s, y + 3 * s, w, h); ctx.fillStyle = '#5e432c'; ctx.fillRect(x, y, w, h); ctx.fillStyle = '#a47b4f'; if (p.w > p.h) { for (let i = 0; i < 4; i++) ctx.fillRect(x + 2 * s, y + (1.5 + i * 4.5) * s, w - 4 * s, 3 * s); } else { for (let i = 0; i < 4; i++) ctx.fillRect(x + (1.5 + i * 4.5) * s, y + 2 * s, 3 * s, h - 4 * s); } }
     }
 }
@@ -2528,6 +2540,11 @@ function wcDrawExterior() {
     const s = 1 / fov, W = canvas.width, H = canvas.height;
     const vx0 = camera.x - 100, vy0 = camera.y - 100, vx1 = camera.x + W * fov + 100, vy1 = camera.y + H * fov + 100;
     wcFillTex('grass', camera.x, camera.y, W * fov, H * fov, 110);
+    for (const q of WC.cities || []) {                                    // ground wash inside each foreign city
+        const th = WC_THEME[q.theme]; if (!th) continue;
+        const x0 = Math.max(camera.x, q.cx - q.border), y0 = Math.max(camera.y, q.cy - q.border), x1 = Math.min(camera.x + W * fov, q.cx + q.border), y1 = Math.min(camera.y + H * fov, q.cy + q.border);
+        if (x1 > x0 && y1 > y0) { ctx.fillStyle = th.grass; ctx.fillRect(worldToScreenX(x0), worldToScreenY(y0), (x1 - x0) * s, (y1 - y0) * s); }
+    }
     const cx0 = Math.max(0, Math.floor(vx0 / WC.chunk)), cx1 = Math.min(WC.nch - 1, Math.floor(vx1 / WC.chunk)), cy0 = Math.max(0, Math.floor(vy0 / WC.chunk)), cy1 = Math.min(WC.nch - 1, Math.floor(vy1 / WC.chunk));
     const list = [];
     for (let cx = cx0; cx <= cx1; cx++) for (let cy = cy0; cy <= cy1; cy++) { const c = WC.chunks.get(cx + cy * WC.nch); if (c) list.push(c); }
@@ -2550,8 +2567,206 @@ function wcDrawExterior() {
     }
     for (const c of list) for (const p of c.props) if (p.k === 'silo' && vis(p.x, p.y, p.w, p.h) && once('s' + p.x + ',' + p.y)) wcDrawProp(p, s, 0);
     wcUpdateDyn(); wcDrawDyn(vx0, vy0, vx1, vy1, s);
-    for (const c of list) for (const p of c.props) if ((p.k === 'lamp' || p.k === 'bench') && vis(p.x - 10, p.y - 10, (p.w || 0) + 20, (p.h || 0) + 20) && once('q' + p.k + p.x + ',' + p.y)) wcDrawProp(p, s, 1);
+    for (const c of list) for (const p of c.props) if ((p.k === 'lamp' || p.k === 'bench' || p.k === 'atm') && vis(p.x - 10, p.y - 10, (p.w || 0) + 20, (p.h || 0) + 20) && once('q' + p.k + p.x + ',' + p.y)) wcDrawProp(p, s, 1);
     for (const c of list) for (const p of c.props) if (p.k === 'tree' && p.x > vx0 - 60 && p.x < vx1 + 60 && p.y > vy0 - 60 && p.y < vy1 + 60) wcDrawTree(p, s);
+    wcDrawBorder(s, W, H); wcDrawWater(s, W, H); wcDrawDayNight(W, H); wcDrawNav(s, W, H);
+}
+// Water beyond the shoreline (server keeps everything inside WC_SHORE) and a shared-clock day/night cycle.
+const WC_SHORE = 1800, WC_DAY_MS = 12 * 60 * 1000;
+function wcDrawWater(s, W, H) {
+    const ex = WC.extent, wob = Math.sin(Date.now() / 900) * 6;
+    const rect = (x0, y0, x1, y1, col) => {
+        const ax = Math.max(x0, camera.x), ay = Math.max(y0, camera.y), bx = Math.min(x1, camera.x + W * fov), by = Math.min(y1, camera.y + H * fov);
+        if (bx <= ax || by <= ay) return;
+        ctx.fillStyle = col; ctx.fillRect(worldToScreenX(ax), worldToScreenY(ay), (bx - ax) * s, (by - ay) * s);
+    };
+    const B = -9999, E = ex + 9999, a = WC_SHORE, z = ex - WC_SHORE, sand = 70;
+    for (const [x0, y0, x1, y1] of [[B, B, E, a], [B, z, E, E], [B, a, a, z], [z, a, E, z]]) rect(x0, y0, x1, y1, '#2b6a94');
+    // shallows + sand edge
+    for (const [x0, y0, x1, y1] of [[B, a - 90 + wob, E, a], [B, z, E, z + 90 - wob], [a - 90 + wob, a, a, z], [z, a, z + 90 - wob, z]]) rect(x0, y0, x1, y1, 'rgba(120,200,225,.45)');
+    for (const [x0, y0, x1, y1] of [[a, a, z, a + sand], [a, z - sand, z, z], [a, a, a + sand, z], [z - sand, a, z, z]]) rect(x0, y0, x1, y1, 'rgba(222,205,150,.55)');
+}
+setInterval(() => { if (isWorldMode && WC.scene === 'ext' && WC.navMode && WC.navMode !== 'off') worldSend('world_nav', { t: WC.navMode, ...(WC.navPin || {}) }); }, 1200);
+function wcDrawNav(s, W, H) {
+    const n = WC.nav; if (!n || !WC.navMode || WC.navMode === 'off') return;
+    const cx = camera.x + W * fov / 2, cy = camera.y + H * fov / 2, r = n.route, X = worldToScreenX, Y = worldToScreenY;
+    const chain = [[cx, cy]]; let man = null;
+    if (r && r.pts.length > 1) {
+        let st = 1;                                          // drop route points the player has already passed
+        while (st < r.pts.length - 1) {
+            const a = r.pts[st], b = r.pts[st + 1], dx = b[0] - a[0], dy = b[1] - a[1], t = ((cx - a[0]) * dx + (cy - a[1]) * dy) / (dx * dx + dy * dy || 1);
+            const tc = Math.max(0, Math.min(1, t));
+            if (t > 0 && Math.hypot(cx - (a[0] + dx * tc), cy - (a[1] + dy * tc)) < 90) st++; else break;
+        }
+        for (let i = st; i < r.pts.length; i++) chain.push(r.pts[i]);
+        let acc = 0;
+        for (let i = 1; i < chain.length; i++) { acc += Math.hypot(chain[i][0] - chain[i - 1][0], chain[i][1] - chain[i - 1][1]); const tn = r.turns[st + i - 1]; if (tn) { man = { turn: tn, d: acc }; break; } }
+    } else chain.push([n.x, n.y]);
+    const lw = Math.max(6, 22 * s);
+    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const trace = () => { ctx.beginPath(); chain.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1]))); };
+    trace(); ctx.strokeStyle = 'rgba(8,36,76,.8)'; ctx.lineWidth = lw * 1.5; ctx.stroke();
+    trace(); ctx.strokeStyle = '#2fa8f0'; ctx.lineWidth = lw; ctx.stroke();
+    trace(); ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = Math.max(2, lw * 0.22); ctx.setLineDash([lw * 0.9, lw * 1.6]); ctx.lineDashOffset = -performance.now() / 25; ctx.stroke(); ctx.setLineDash([]);
+    // destination pin / off-screen arrow
+    const tx = X(n.x), ty = Y(n.y), px = X(cx), py = Y(cy), ang = Math.atan2(ty - py, tx - px), on = tx > 20 && tx < W - 20 && ty > 20 && ty < H - 20;
+    const mx = on ? tx : Math.max(40, Math.min(W - 40, px + Math.cos(ang) * Math.min(W, H) * 0.42)), my = on ? ty : Math.max(40, Math.min(H - 40, py + Math.sin(ang) * Math.min(W, H) * 0.42));
+    ctx.translate(mx, my); if (!on) ctx.rotate(ang);
+    ctx.fillStyle = '#ffcf3a'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.beginPath();
+    if (on) ctx.arc(0, 0, 14, 0, 7); else { ctx.moveTo(18, 0); ctx.lineTo(-12, -13); ctx.lineTo(-6, 0); ctx.lineTo(-12, 13); ctx.closePath(); }
+    ctx.fill(); ctx.stroke(); ctx.restore();
+    // turn-by-turn banner
+    const fmt = d => { const m = Math.round(d / 10 / 10) * 10; return m >= 1000 ? (m / 1000).toFixed(1) + ' km' : (m < 10 ? 'now' : m + ' m'); };
+    const ICON = { left: '⬅', right: '➡', uturn: '↩', arrive: '🏁' }, WORD = { left: 'Turn left', right: 'Turn right', uturn: 'Make a U-turn', arrive: 'Arrive at ' + n.label };
+    let line1, line2;
+    if (man) { line1 = `${ICON[man.turn]}  ${man.d < 120 ? '' : 'In ' + fmt(man.d) + ': '}${WORD[man.turn]}`; line2 = `${n.label} · ${fmt(r && r.len ? Math.hypot(n.x - cx, n.y - cy) : Math.hypot(n.x - cx, n.y - cy))} to go`; }
+    else { line1 = `⬆  Continue to ${n.label}`; line2 = fmt(Math.hypot(n.x - cx, n.y - cy)) + ' to go'; }
+    ctx.save(); ctx.textAlign = 'center'; ctx.font = 'bold 22px sans-serif'; const bw = Math.max(260, ctx.measureText(line1).width + 50);
+    ctx.fillStyle = 'rgba(10,22,40,.88)'; ctx.fillRect(W / 2 - bw / 2, 64, bw, 62); ctx.strokeStyle = '#2fa8f0'; ctx.lineWidth = 2; ctx.strokeRect(W / 2 - bw / 2, 64, bw, 62);
+    ctx.fillStyle = '#fff'; ctx.fillText(line1, W / 2, 94); ctx.font = '14px sans-serif'; ctx.fillStyle = '#9fd8ff'; ctx.fillText(line2 + '   (N: change)', W / 2, 115); ctx.restore();
+}
+// ---- city limit + toll gates (the server charges the toll; see W_BORDER / W_TOLL) ------------------------------
+const WC_BORDER = 19500, WC_TOLL = 20;
+function wcDrawBorder(s, W, H) {
+    if (!WC.roads || !WC.cities) return;
+    const X = worldToScreenX, Y = worldToScreenY, vx0 = camera.x - 200, vy0 = camera.y - 200, vx1 = camera.x + W * fov + 200, vy1 = camera.y + H * fov + 200;
+    for (const city of WC.cities) {
+        const B = city.border, cx = city.cx, cy = city.cy;
+        if (cx + B < vx0 || cx - B > vx1 || cy + B < vy0 || cy - B > vy1) continue;
+        ctx.save(); ctx.lineWidth = Math.max(2, 8 * s); ctx.strokeStyle = '#e8c53a'; ctx.setLineDash([40 * s, 40 * s]);
+        for (const [x0, y0, x1, y1] of [[cx - B, cy - B, cx + B, cy - B], [cx - B, cy + B, cx + B, cy + B], [cx - B, cy - B, cx - B, cy + B], [cx + B, cy - B, cx + B, cy + B]]) {
+            if (Math.max(x0, x1) < vx0 || Math.min(x0, x1) > vx1 || Math.max(y0, y1) < vy0 || Math.min(y0, y1) > vy1) continue;
+            ctx.beginPath(); ctx.moveTo(X(x0), Y(y0)); ctx.lineTo(X(x1), Y(y1)); ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        for (const r of WC.roads) {
+            if (r.c !== 'a' && r.c !== 'x') continue;
+            const vert = r.a === 'v', o = r.o ?? WC.center;
+            if (Math.abs(r.p - (vert ? cx : cy)) >= B) continue;
+            for (const sd of [-1, 1]) {
+                const al = (vert ? cy : cx) + sd * B; if (al < o - r.e || al > o + r.e) continue;
+                const gx = vert ? r.p : al, gy = vert ? al : r.p;
+                if (gx < vx0 || gx > vx1 || gy < vy0 || gy > vy1) continue;
+                const hw = r.hw, px = X(gx), py = Y(gy);
+                ctx.save(); ctx.translate(px, py); if (!vert) ctx.rotate(Math.PI / 2);
+                ctx.fillStyle = '#2b3138'; ctx.fillRect(-hw * s - 14 * s, -9 * s, (hw * 2 + 28) * s, 18 * s);
+                ctx.fillStyle = '#e8c53a'; for (let i = -hw; i < hw; i += 30) ctx.fillRect(i * s, -9 * s, 15 * s, 4 * s);
+                ctx.fillStyle = '#cfd6dc'; ctx.fillRect(-14 * s, -34 * s, 28 * s, 68 * s);
+                ctx.fillStyle = '#c0392b'; ctx.fillRect(-14 * s, -34 * s, 28 * s, 8 * s);
+                for (const lane of [-0.5, 0.5]) { ctx.fillStyle = '#fff'; ctx.fillRect((lane * hw - 30) * s, 14 * s, 60 * s, 6 * s); ctx.fillStyle = '#d63a2a'; for (let i = 0; i < 3; i++) ctx.fillRect((lane * hw - 30 + i * 20 + 10) * s, 14 * s, 10 * s, 6 * s); }
+                ctx.restore();
+                if (s > 0.25) { ctx.fillStyle = '#103a6b'; ctx.fillRect(px - 62 * s, py - 62 * s, 124 * s, 22 * s); ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.max(8, 12 * s)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(city.name + ' · TOLL ' + city.toll, px, py - 46 * s); }
+            }
+        }
+        ctx.restore();
+    }
+}
+// ---- world map: pick any place (or click anywhere) and the satnav routes there --------------------------------
+function wcSetNav(mode, pin) {
+    WC.navMode = mode; WC.nav = null; WC.navPin = pin || null;
+    if (mode === 'off') { wcToast('Satnav off'); return; }
+    worldSend('world_nav', { t: mode, ...(pin || {}) });
+    wcToast('Satnav: ' + (pin ? pin.label : { work: 'nearest workplace', home: 'home', car: 'your car', atm: 'nearest ATM', bank: 'Central Bank', dealer: 'Car Dealership' }[mode]));
+}
+let wcMapEl = null, wcMapSel = null;
+function wcMapBuild() {
+    const btn = document.createElement('button'); btn.textContent = '🗺 Map';
+    btn.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:60;padding:8px 20px;border:0;border-radius:20px;background:#1d6fa5;color:#fff;font:bold 15px sans-serif;cursor:pointer;display:none;box-shadow:0 2px 8px rgba(0,0,0,.45)';
+    btn.onclick = () => wcMapToggle(true); document.body.appendChild(btn);
+    const ov = document.createElement('div'); ov.style.cssText = 'position:fixed;inset:0;z-index:70;background:rgba(5,10,20,.78);display:none;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;font-family:sans-serif';
+    ov.innerHTML = '<canvas id="wc-map-cv" style="border:3px solid #fff;border-radius:8px;cursor:crosshair;background:#2b6a94"></canvas><div id="wc-map-side" style="display:flex;flex-direction:column;gap:8px;min-width:190px"></div>';
+    document.body.appendChild(ov);
+    const side = ov.querySelector('#wc-map-side'), mk = (t, f) => { const b = document.createElement('button'); b.textContent = t; b.style.cssText = 'padding:9px 12px;border:0;border-radius:8px;background:#26496b;color:#fff;font:bold 14px sans-serif;cursor:pointer;text-align:left'; b.onclick = f; side.appendChild(b); return b; };
+    side.innerHTML = '<div style="color:#fff;font:bold 18px sans-serif">World map</div><div style="color:#9fd8ff;font-size:13px">Click anywhere to set a destination.</div>';
+    for (const [t, m] of [['🏠 Home', 'home'], ['🚗 My car', 'car'], ['💼 Nearest workplace', 'work'], ['🏧 Nearest ATM', 'atm'], ['🏦 Central Bank', 'bank'], ['🚘 Car Dealership', 'dealer']]) mk(t, () => { wcSetNav(m); wcMapToggle(false); });
+    mk('🧭 Navigate to selected point', () => { if (wcMapSel) { wcSetNav('pin', wcMapSel); wcMapToggle(false); } else wcToast('Click the map first.'); }).style.background = '#1d8a4f';
+    mk('✖ Stop satnav', () => { wcSetNav('off'); wcMapToggle(false); }); mk('Close', () => wcMapToggle(false));
+    const cv = ov.querySelector('#wc-map-cv');
+    const view = { x: WC.extent / 2, y: WC.extent / 2, half: WC.extent / 2 }; let drag = null;
+    const toWorld = ev => { const r = cv.getBoundingClientRect(), u = (ev.clientX - r.left) / r.width, w = (ev.clientY - r.top) / r.height; return [view.x - view.half + u * 2 * view.half, view.y - view.half + w * 2 * view.half]; };
+    cv.onmousedown = ev => { drag = { sx: ev.clientX, sy: ev.clientY, vx: view.x, vy: view.y, moved: false }; };
+    window.addEventListener('mouseup', () => { drag = null; });
+    cv.onmousemove = ev => { if (!drag) return; const dx = ev.clientX - drag.sx, dy = ev.clientY - drag.sy; if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true; if (!drag.moved) return; const r = cv.getBoundingClientRect(), wpp = 2 * view.half / r.width; view.x = drag.vx - dx * wpp; view.y = drag.vy - dy * wpp; wcMapDraw(); };
+    cv.onwheel = ev => { ev.preventDefault(); const [wx, wy] = toWorld(ev), f = ev.deltaY < 0 ? 0.8 : 1.25, nh = Math.max(1500, Math.min(WC.extent / 2, view.half * f)); view.x = wx - (wx - view.x) * nh / view.half; view.y = wy - (wy - view.y) * nh / view.half; view.half = nh; wcMapDraw(); };
+    cv.onclick = ev => {
+        if (drag && drag.moved) return;
+        const [mx, my] = toWorld(ev); let best = null, bd = (14 * 2 * view.half / cv.width) ** 2;
+        for (const q of WC.mapPlaces || []) { const d = (q[1] - mx) ** 2 + (q[2] - my) ** 2; if (d < bd) { bd = d; best = q; } }
+        wcMapSel = best ? { x: best[1], y: best[2], label: best[3] } : { x: Math.round(mx), y: Math.round(my), label: 'Selected point' };
+        wcMapDraw();
+    };
+    mk('🌍 Whole world', () => wcMapFocus(null)); for (const q of WC.cities) mk('📍 ' + q.name, () => wcMapFocus(q));
+    wcMapEl = { btn, ov, cv, view };
+    setInterval(() => { const bx = camera.x + canvas.width * fov / 2, by = camera.y + canvas.height * fov / 2, hc = wcCityHere(bx, by); btn.textContent = `🗺 Map · ${hc ? hc.name : 'Open road'} · ${wcClock(bx)}`; btn.style.display = isWorldMode && WC.scene === 'ext' ? 'block' : 'none'; if (!(isWorldMode && WC.scene === 'ext')) ov.style.display = 'none'; }, 400);
+}
+function wcMapFocus(city) { const v = wcMapEl.view; if (!city) { v.x = v.y = WC.extent / 2; v.half = WC.extent / 2; } else { v.x = city.cx; v.y = city.cy; v.half = city.border * 1.15; } wcMapDraw(); }
+function wcMapToggle(on) {
+    if (!wcMapEl) wcMapBuild();
+    wcMapEl.ov.style.display = on ? 'flex' : 'none';
+    if (on) {
+        const sz = Math.floor(Math.min(innerWidth - 260, innerHeight - 40, 820)); wcMapEl.cv.width = wcMapEl.cv.height = Math.max(300, sz); wcMapEl.cv.style.width = wcMapEl.cv.style.height = wcMapEl.cv.width + 'px';
+        const px = camera.x + canvas.width * fov / 2, py = camera.y + canvas.height * fov / 2, here = WC.cities.find(q => Math.max(Math.abs(px - q.cx), Math.abs(py - q.cy)) < q.border);
+        wcMapFocus(here || null); worldSend('world_map');
+    }
+}
+function wcMapDraw() {
+    if (!wcMapEl || wcMapEl.ov.style.display === 'none' || !WC.roads) return;
+    const cv = wcMapEl.cv, g = cv.getContext('2d'), N = cv.width, v = wcMapEl.view, k = N / (2 * v.half), C = WC.center;
+    const MX = x => (x - v.x + v.half) * k, MY = y => (y - v.y + v.half) * k, S = n => n * k;
+    g.fillStyle = '#2b6a94'; g.fillRect(0, 0, N, N);
+    g.fillStyle = '#7fae66'; g.fillRect(MX(1800), MY(1800), S(WC.extent - 3600), S(WC.extent - 3600));
+    for (const q of WC.cities) {
+        g.fillStyle = '#b8b7ac'; g.fillRect(MX(q.cx - q.border), MY(q.cy - q.border), S(q.border * 2), S(q.border * 2));
+        g.fillStyle = '#d4d0c2'; const m = 9600; g.fillRect(MX(q.cx - m), MY(q.cy - m), S(m * 2), S(m * 2));
+        g.fillStyle = '#e6e2d4'; g.fillRect(MX(q.cx - 3600), MY(q.cy - 3600), S(7200), S(7200));
+    }
+    for (const r of WC.roads) {
+        const o = r.o ?? C, vert = r.a === 'v'; g.strokeStyle = r.c === 'x' ? '#d98a1f' : r.c === 'a' ? '#6d7680' : r.c === 's' ? '#8d949b' : '#a5abb0';
+        g.lineWidth = r.c === 'x' ? 3.5 : r.c === 'a' ? 2.2 : 1; g.beginPath();
+        if (vert) { g.moveTo(MX(r.p), MY(o - r.e)); g.lineTo(MX(r.p), MY(o + r.e)); } else { g.moveTo(MX(o - r.e), MY(r.p)); g.lineTo(MX(o + r.e), MY(r.p)); }
+        g.stroke();
+    }
+    g.setLineDash([6, 5]); g.strokeStyle = '#e8c53a'; g.lineWidth = 2; for (const q of WC.cities) g.strokeRect(MX(q.cx - q.border), MY(q.cy - q.border), S(q.border * 2), S(q.border * 2)); g.setLineDash([]);
+    g.textAlign = 'center'; g.font = 'bold 14px sans-serif';
+    for (const q of WC.cities) { const x = MX(q.cx), y = MY(q.cy); if (x > -50 && x < N + 50 && y > -50 && y < N + 50) { g.fillStyle = '#000'; g.fillText(q.name, x + 1, y + 1); g.fillStyle = '#fff'; g.fillText(q.name, x, y); } }
+    const showA = v.half < 40000, showW = v.half < 150000; g.font = '15px sans-serif';
+    for (const q of WC.mapPlaces || []) {
+        const x = MX(q[1]), y = MY(q[2]); if (x < -10 || y < -10 || x > N + 10 || y > N + 10) continue;
+        if (q[0] === 'w') { if (!showW) continue; g.fillStyle = q[4] || '#c33'; g.fillRect(x - 2.5, y - 2.5, 5, 5); }
+        else if (q[0] === 'a') { if (!showA) continue; g.fillStyle = '#1b7a3d'; g.fillRect(x - 1.5, y - 1.5, 3, 3); }
+        else if (showW) g.fillText({ bank: '🏦', dealer: '🚘', hall: '🏛', mall: '🛍', school: '🏫' }[q[0]] || '•', x, y + 5);
+    }
+    const n = WC.nav;
+    if (n && n.route) { g.strokeStyle = '#18a0ff'; g.lineWidth = 3; g.beginPath(); n.route.pts.forEach((p, i) => i ? g.lineTo(MX(p[0]), MY(p[1])) : g.moveTo(MX(p[0]), MY(p[1]))); g.stroke(); }
+    const pin = wcMapSel || (n && { x: n.x, y: n.y });
+    if (pin) { g.font = '22px sans-serif'; g.fillText('📍', MX(pin.x), MY(pin.y)); g.font = 'bold 13px sans-serif'; g.fillStyle = '#000'; g.fillText(pin.label || '', MX(pin.x) + 1, MY(pin.y) - 22); g.fillStyle = '#fff'; g.fillText(pin.label || '', MX(pin.x), MY(pin.y) - 23); }
+    const px = camera.x + canvas.width * fov / 2, py = camera.y + canvas.height * fov / 2;
+    g.fillStyle = '#fff'; g.strokeStyle = '#e22'; g.lineWidth = 3; g.beginPath(); g.arc(MX(px), MY(py), 6, 0, 7); g.fill(); g.stroke();
+}
+function wcDayPhase(px) { return (((Date.now() % WC_DAY_MS) / WC_DAY_MS + (px - WC.center) / 450000 * 0.25) % 1 + 1) % 1; }   // east = later in the day
+function wcClock(px) { const h = (6 + wcDayPhase(px) * 24) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); }
+function wcCityHere(px, py) { return (WC.cities || []).find(q => Math.max(Math.abs(px - q.cx), Math.abs(py - q.cy)) < q.border) || null; }
+function wcWeather(px, py) {                                             // 0..1 strength, fading in over 3 km outside the border
+    const out = { rain: 0, fog: 0, heat: 0 };
+    for (const q of WC.cities || []) {
+        const k = Math.max(0, Math.min(1, (q.border + 3000 - Math.max(Math.abs(px - q.cx), Math.abs(py - q.cy))) / 3000));
+        if (q.theme === 'hill') out.rain = k; else if (q.theme === 'port') out.fog = k; else if (q.theme === 'sun') out.heat = k;
+    }
+    return out;
+}
+function wcDrawDayNight(W, H) {
+    const px = camera.x + W * fov / 2, py = camera.y + H * fov / 2, t = wcDayPhase(px), sun = Math.sin(t * Math.PI * 2);
+    const night = Math.max(0, Math.min(1, (0.2 - sun) / 0.7)) * 0.58, dusk = Math.max(0, 0.3 - Math.abs(sun)) / 0.3 * 0.16, wx = wcWeather(px, py);
+    if (dusk > 0.005) { ctx.fillStyle = `rgba(255,140,60,${dusk})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    if (wx.heat > 0.02) { ctx.fillStyle = `rgba(255,190,90,${0.12 * wx.heat * Math.max(0, sun + 0.3)})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    if (wx.fog > 0.02) { ctx.fillStyle = `rgba(210,220,230,${0.34 * wx.fog})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    if (night > 0.005) { ctx.fillStyle = `rgba(8,14,52,${night})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    if (wx.rain > 0.02) {
+        ctx.fillStyle = `rgba(40,55,80,${0.2 * wx.rain})`; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const now = performance.now(), n = Math.floor(220 * wx.rain); ctx.strokeStyle = 'rgba(190,210,240,.55)'; ctx.lineWidth = 1.5; ctx.beginPath();
+        for (let i = 0; i < n; i++) { const sx = (i * 7919) % canvas.width, sy = (i * 104729 + now * (0.7 + (i % 5) * 0.12)) % canvas.height; ctx.moveTo(sx, sy); ctx.lineTo(sx - 4, sy + 15); }
+        ctx.stroke();
+    }
 }
 
 // ---- interiors (static; rendered once into an offscreen canvas) ------------------------------------------------------------------
@@ -2642,7 +2857,7 @@ function drawWorldMinimap() {
     for (const c of list) for (const b of c.blocks) { if (seen.has('b' + b.id)) continue; seen.add('b' + b.id); mCtx.fillStyle = b.g === 'forest' ? '#4f7d47' : b.g === 'farm' ? '#9bb877' : b.g === 'park' || b.g === 'plaza' ? '#6fa062' : b.z <= 1 ? '#a9a99f' : b.z === 2 ? '#8db172' : '#8bb06d'; mCtx.fillRect(X(b.x), Y(b.y), b.w * k + .5, b.h * k + .5); }
     for (const c of list) for (const f of c.fields) { if (seen.has('f' + f.id)) continue; seen.add('f' + f.id); mCtx.fillStyle = f.kind === 'pitch' ? '#5c9a4e' : '#b89a55'; mCtx.fillRect(X(f.x), Y(f.y), f.w * k, f.h * k); }
     mCtx.fillStyle = '#39414a';
-    for (const r of WC.roads) { const w = Math.max(1, 2 * r.hw * k); if (r.a === 'v') { if (Math.abs(r.p - px) < R + 100) mCtx.fillRect(X(r.p) - w / 2, 0, w, 150); } else if (Math.abs(r.p - py) < R + 100) mCtx.fillRect(0, Y(r.p) - w / 2, 150, w); }
+    for (const r of WC.roads) { const w = Math.max(1, 2 * r.hw * k); if (Math.abs((r.a === 'v' ? py : px) - (r.o ?? WC.center)) > r.e + R + 100) continue; if (r.a === 'v') { if (Math.abs(r.p - px) < R + 100) mCtx.fillRect(X(r.p) - w / 2, 0, w, 150); } else if (Math.abs(r.p - py) < R + 100) mCtx.fillRect(0, Y(r.p) - w / 2, 150, w); }
     for (const c of list) for (const l of c.lots) { if (seen.has('l' + l.id)) continue; seen.add('l' + l.id); mCtx.fillStyle = l.dealer ? '#c9a23a' : '#4b535b'; mCtx.fillRect(X(l.x), Y(l.y), l.w * k, l.h * k); }
     for (const c of list) for (const b of c.buildings) {
         if (seen.has('B' + b.id)) continue; seen.add('B' + b.id);
@@ -4769,6 +4984,12 @@ window.onkeydown = e => {
     // Toggles
 
     if (key === 'f' && isWorldMode) { worldInteractPrimary(); return; }
+    if (key === 'n' && isWorldMode && WC.scene === 'ext') {
+        const modes = ['off', 'work', 'home', 'car'], m = modes[(modes.indexOf(WC.navMode || 'off') + 1) % modes.length];
+        WC.navMode = m; WC.nav = null; WC.navPin = null;
+        if (m === 'off') wcToast('Satnav off'); else { wcToast('Satnav: ' + { work: 'nearest workplace', home: 'home', car: 'your car' }[m]); worldSend('world_nav', { t: m }); }
+        return;
+    }
     if (key === 'e') autoFire = !autoFire;
 
     if (key === 'c') autoSpin = !autoSpin;
