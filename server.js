@@ -1513,6 +1513,7 @@ getPowerupBulletSpeedMultiplier() {
         // World mode: solid buildings/trees/benches/walls/cars for tanks on foot, car physics when driving.
         if (this.room.worldKind && this.isPlayer) {
             if (this.vehicle) worldStepVehicle(this); else worldCollideEntity(this);
+            if (this.room.worldKind !== 'interior') { this.x = Math.max(W_SHORE, Math.min(W_EXT - W_SHORE, this.x)); this.y = Math.max(W_SHORE, Math.min(W_EXT - W_SHORE, this.y)); }
         }
         const now = Date.now();
 
@@ -1538,7 +1539,7 @@ if (this.maxHealthPowerupActive &&
                     if (dx*dx + dy*dy < radSum*radSum) {
                         e.markedForDeletion = true;
                         this.room.drones.push(new Drone(this.room, e.x, e.y, this));
-                        if (typeof this.addXP === 'function') this.addXP(e.xpVal || 60);
+                        if (typeof this.addXP === 'function' && !e.noReward) this.addXP(e.xpVal || 60);
                     }
                 }
             });
@@ -2830,9 +2831,26 @@ setInterval(() => {
 //      slots (rows of house lots, grids of towers, car-park bays, field tiles),
 //      so nothing inside a block can overlap anything else.
 // ---------------------------------------------------------------------------
-const W_EXT = 50400, W_C = 25200, W_S = 600;
+const W_GAP = 450000;                  // distance between city centres (multiple of 600); raise it for even longer drives
+const W_C = 25200, W_S = 600, W_EXT = 2 * W_C + W_GAP;
+const W_NB = Math.ceil(W_EXT / 600);   // collision-bucket row stride
 const W_CORE = 3600, W_INNER = 9600, W_SUB = 18000;
 const W_SW = 26;                       // pavement width inside a block
+const W_BORDER = 19500, W_TOLL = 20;       // city limit (Chebyshev radius from centre) and toll per crossing
+const W_CITIES = [                      // home city first; the others are other seeds of the same generator, clipped to radius R (houses, shops, offices)
+    { id: 'central', name: 'Central City', cx: W_C, cy: W_C, border: W_BORDER, home: true, theme: 'home', wageMul: 1, priceMul: 1, toll: 20 },
+    { id: 'port',    name: 'Port Aldren',  cx: W_C + W_GAP, cy: W_C, border: 19500, R: 18000, seedAdd: 101, theme: 'port', wageMul: 1.25, priceMul: 0.9, toll: 30 },
+    { id: 'highmoor', name: 'Highmoor',    cx: W_C, cy: W_C + W_GAP, border: 19500, R: 18000, seedAdd: 202, theme: 'hill', wageMul: 0.85, priceMul: 0.7, toll: 15 },
+    { id: 'solana',  name: 'Solana',       cx: W_C + W_GAP, cy: W_C + W_GAP, border: 19500, R: 18000, seedAdd: 303, theme: 'sun', wageMul: 1.5, priceMul: 1.6, toll: 40 }
+];
+function worldCityAt(x, y) { for (const c of W_CITIES) if (Math.max(Math.abs(x - c.cx), Math.abs(y - c.cy)) < c.border) return c; return null; }
+function worldPayFor(co, pos) { const c = (pos && worldCityAt(pos.x, pos.y)) || W_CITIES[0]; return Math.max(1, Math.round(co.pay * c.wageMul)); }
+function worldOnHighway(x, y) {
+    if (!WL || !WL.highways) return false;
+    for (const h of WL.highways) { const along = h.a === 'h' ? x : y, perp = h.a === 'h' ? y : x; if (Math.abs(perp - h.p) < 125 && along > h.s0 - 50 && along < h.s1 + 50) return true; }
+    return false;
+}
+const W_SHORE = 1800;                  // land ends here; everything beyond is water
 const W_CHUNK = 1800;                  // streaming chunk size
 const W_NCH = Math.ceil(W_EXT / W_CHUNK);
 const ROAD_CLASSES = { avenue: { hw: 105, lanes: 4, e: W_C }, street: { hw: 60, lanes: 2, e: W_SUB }, lane: { hw: 46, lanes: 2, e: W_CORE } };
@@ -2883,7 +2901,7 @@ function lotBays(lot) {
     return out;
 }
 
-function buildWorldLayout(seed) {
+function buildCityLayout(seed) {
     const C = W_C, S = W_S;
     const L = {
         seed, roads: [], junctions: [], blocks: [], buildings: [], props: [], lots: [], fields: [], pcars: [],
@@ -2946,7 +2964,7 @@ function buildWorldLayout(seed) {
             if (rng() > fill) continue;
             const b = bays[i], vert = Math.abs(Math.sin(b.a)) > 0.5;
             L.pcars.push({ x: Math.round(b.x), y: Math.round(b.y), a: b.a, c: Math.floor(rng() * 8), t: rng() < 0.2 ? 1 : 0 });
-            rectCol(b.x - (vert ? 17 : 31), b.y - (vert ? 31 : 17), vert ? 34 : 62, vert ? 62 : 34);
+            rectCol(b.x - (vert ? 15 : 30), b.y - (vert ? 30 : 15), vert ? 30 : 60, vert ? 60 : 30);
         }
     }
     function addField(x, y, w, h, kind, crop, target) {
@@ -2960,6 +2978,7 @@ function buildWorldLayout(seed) {
         addLamp(B.x + o, B.y + B.h - o); addLamp(B.x + B.w - o, B.y + B.h - o);
         addLamp(B.x + B.w / 2, B.y + o); addLamp(B.x + B.w / 2, B.y + B.h - o);
         addLamp(B.x + o, B.y + B.h / 2); addLamp(B.x + B.w - o, B.y + B.h / 2);
+        if (wHash(seed, Math.round(B.x), Math.round(B.y)) < 0.55) { const ax = Math.round(B.x + B.w * 0.27), ay = Math.round(B.y + 6); L.props.push({ k: 'atm', x: ax, y: ay, w: 26, h: 14 }); rectCol(ax, ay, 26, 14); }
     }
     const inset = (r, d) => ({ x: r.x + d, y: r.y + d, w: r.w - 2 * d, h: r.h - 2 * d });
 
@@ -3209,14 +3228,18 @@ function buildWorldLayout(seed) {
         cell(i * 6, j * 6, i * 6 + 6, j * 6 + 6, 'rural');
     }
 
+    indexLayout(L);
+    return L;
+}
+function indexLayout(L) {
     // ---- 3. indexes -----------------------------------------------------------------
     L.dealerLot = L.dealerLot || L.lots.find(l => l.dealer);
-    const bucketOf = (x, y) => Math.floor(x / 600) + Math.floor(y / 600) * 84;
+    const bucketOf = (x, y) => Math.floor(x / 600) + Math.floor(y / 600) * W_NB;
     L.cbuckets = new Map();
     for (const c of L.colliders) {
         const x0 = c.t ? c.x - c.r : c.x, x1 = c.t ? c.x + c.r : c.x + c.w, y0 = c.t ? c.y - c.r : c.y, y1 = c.t ? c.y + c.r : c.y + c.h;
         for (let bx = Math.floor(x0 / 600); bx <= Math.floor(x1 / 600); bx++) for (let by = Math.floor(y0 / 600); by <= Math.floor(y1 / 600); by++) {
-            const key = bx + by * 84; let a = L.cbuckets.get(key); if (!a) L.cbuckets.set(key, a = []); a.push(c);
+            const key = bx + by * W_NB; let a = L.cbuckets.get(key); if (!a) L.cbuckets.set(key, a = []); a.push(c);
         }
     }
     L.houseById = new Map(L.houses.map(h => [h.hid, h]));
@@ -3237,7 +3260,48 @@ function buildWorldLayout(seed) {
     L.props.forEach(o => put(0, 'props', o, o.w || 0, o.h || 0));
     L.pcars.forEach(o => put(0, 'pcars', o, 0, 0));
     L.junctions.forEach(o => put(0, 'junctions', o, 0, 0));
+    (L.xjunctions || []).forEach(o => put(0, 'junctions', o, 0, 0));
     L.chunkJson = new Map();
+    return L;
+}
+// Foreign city: another seed of the same generator, keeping only the downtown box around its centre, shifted into place.
+function mergeCity(L, F, city, idx) {
+    const ox = city.cx - W_C, oy = city.cy - W_C, R = city.R, off = (idx + 1) * 1000000;
+    const inb = (x, y) => Math.abs(x - W_C) <= R && Math.abs(y - W_C) <= R;
+    const sh = (o, extra) => Object.assign({}, o, { x: o.x + ox, y: o.y + oy }, extra);
+    const skipB = b => b.k === 'bank' || b.k === 'dealer';
+    for (const b of F.blocks) if (inb(b.x + b.w / 2, b.y + b.h / 2)) L.blocks.push(sh(b, { id: b.id + off }));
+    for (const b of F.buildings) {
+        if (skipB(b) || !inb(b.x + b.w / 2, b.y + b.h / 2)) continue;
+        const nb = sh(b, { id: b.id + off, city: city.id, door: Object.assign({}, b.door, { x: b.door.x + ox, y: b.door.y + oy }) });
+        if (b.price) nb.price = Math.max(500, Math.round(b.price * city.priceMul / 500) * 500);
+        if (b.hid) { nb.hid = 'c' + idx + b.hid; if (b.lot) nb.lot = [b.lot[0] + ox, b.lot[1] + oy, b.lot[2], b.lot[3]]; L.houses.push(nb); }
+        if (b.work) L.works.push(nb);
+        L.buildings.push(nb); L.colliders.push({ t: 0, x: nb.x, y: nb.y, w: nb.w, h: nb.h });
+    }
+    for (const l of F.lots) if (!l.dealer && inb(l.x + l.w / 2, l.y + l.h / 2)) L.lots.push(sh(l, { id: l.id + off }));
+    for (const p of F.props) if (inb(p.x, p.y)) L.props.push(sh(p));
+    for (const p of F.pcars) if (inb(p.x, p.y)) L.pcars.push(sh(p));
+    const bset = new Set(F.buildings.map(b => b.x + ',' + b.y + ',' + b.w + ',' + b.h));
+    for (const c of F.colliders) {
+        const cx = c.t ? c.x : c.x + c.w / 2, cy = c.t ? c.y : c.y + c.h / 2;
+        if (!inb(cx, cy) || (c.t === 0 && bset.has(c.x + ',' + c.y + ',' + c.w + ',' + c.h))) continue;   // building colliders were added above
+        L.colliders.push(sh(c));
+    }
+    for (const j of F.junctions) if (inb(j.x, j.y)) L.xjunctions.push(sh(j, { id: j.id + off, f: 1 }));
+    for (const r of F.roads) if (Math.abs(r.k) * W_S <= R) L.xroads.push(Object.assign({}, r, { p: r.p + (r.a === 'v' ? ox : oy), e: Math.min(r.e, R), o: r.a === 'v' ? city.cy : city.cx, f: 1 }));
+}
+function buildWorldLayout(seed) {
+    const L = buildCityLayout(seed);
+    L.xroads = []; L.xjunctions = []; L.highways = []; L.cities = W_CITIES;
+    W_CITIES.forEach((city, idx) => { if (!city.home) mergeCity(L, buildCityLayout(seed + city.seedAdd), city, idx - 1); });
+    const R = W_CITIES[1].R, B = W_C + W_GAP, add = (a, p, s0, s1) => {
+        L.xroads.push({ a, k: 'hw' + L.highways.length, p, c: 'x', hw: 130, ln: 4, e: (s1 - s0) / 2, o: (s0 + s1) / 2, f: 1 }); L.highways.push({ a, p, s0, s1 });
+    };
+    add('h', W_C, 2 * W_C, B - R);  add('v', W_C, 2 * W_C, B - R);       // Central City -> Port Aldren / Highmoor
+    add('v', B, W_C + R, B - R);    add('h', B, W_C + R, B - R);         // Port Aldren -> Solana / Highmoor -> Solana
+    L.allRoads = L.roads.concat(L.xroads);
+    indexLayout(L);
     return L;
 }
 function layoutChunkJson(L, cx, cy) {
@@ -3257,7 +3321,7 @@ function layoutPushOut(L, pos, r) {
         let any = false;
         for (let bx = Math.floor((pos.x - r) / 600); bx <= Math.floor((pos.x + r) / 600); bx++)
             for (let by = Math.floor((pos.y - r) / 600); by <= Math.floor((pos.y + r) / 600); by++) {
-                const list = L.cbuckets.get(bx + by * 84); if (!list) continue;
+                const list = L.cbuckets.get(bx + by * W_NB); if (!list) continue;
                 for (const c of list) any = collidePush(pos, r, c) || any;
             }
         moved = moved || any; if (!any) break;
@@ -3416,7 +3480,7 @@ function sendWorld(client, type, extra = {}) { if (client.ws.readyState === WebS
 function worldNotice(client, message, extra = {}) { sendWorld(client, 'world_notice', { message, ...extra }); }
 function fmtMoney(n) { return Math.floor(n).toLocaleString('en-US'); }
 function angDiff(a, b) { let d = (a - b) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; }
-function worldZone(x, y) { const D = Math.max(Math.abs(x - W_C), Math.abs(y - W_C)); return D < W_CORE ? 0 : D < W_INNER ? 1 : D < W_SUB ? 2 : 3; }
+function worldZone(x, y) { const c = worldCityAt(x, y) || W_CITIES[0], D = Math.max(Math.abs(x - c.cx), Math.abs(y - c.cy)); return D < W_CORE ? 0 : D < W_INNER ? 1 : D < W_SUB ? 2 : 3; }
 function rectDist(x, y, r) { const dx = Math.max(r.x - x, 0, x - (r.x + r.w)), dy = Math.max(r.y - y, 0, y - (r.y + r.h)); return Math.hypot(dx, dy); }
 
 // ---- world bootstrap -------------------------------------------------------------------
@@ -3507,7 +3571,7 @@ function worldSnapToBay(x, y, uid) {
 
 // ---- collision helpers ---------------------------------------------------------------------
 const _circ = [];
-function worldCarCircles(x, y, a) { const c = Math.cos(a), s = Math.sin(a); _circ.length = 0; for (const o of [-20, 0, 20]) _circ.push({ x: x + c * o, y: y + s * o, r: 17 }); return _circ; }
+function worldCarCircles(x, y, a) { const c = Math.cos(a), s = Math.sin(a); _circ.length = 0; for (const o of [-17, 0, 17]) _circ.push({ x: x + c * o, y: y + s * o, r: 14 }); return _circ; }
 function worldDynCars(x, y, range, skipUid, skipTraffic) {
     const out = [];
     for (const pc of parkedCars.values()) { if (pc.driven || pc.uid === skipUid) continue; if (Math.abs(pc.x - x) < range && Math.abs(pc.y - y) < range) out.push(pc); }
@@ -3536,7 +3600,7 @@ function worldStepVehicle(e) {
     else if (inp.down) v.v -= (v.v > 0.2 ? spec.accel * 2.4 : spec.accel * 0.8);
     else v.v *= 0.985;
     if (inp.repel) v.v *= 0.92;                                    // Shift = handbrake
-    v.v = clamp(v.v, -spec.speed * 0.35, spec.speed);
+    v.v = clamp(v.v, -spec.speed * 0.35, spec.speed * (worldOnHighway(e.x, e.y) ? 2 : 1));   // highways: double top speed
     if (Math.abs(v.v) < 0.02 && !inp.up && !inp.down) v.v = 0;
     const steer = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
     v.a += steer * spec.turn * Math.min(1, Math.abs(v.v) / 2.5) * (v.v >= 0 ? 1 : -1) / (1 + Math.abs(v.v) * 0.08);
@@ -3570,7 +3634,16 @@ function worldStepVehicle(e) {
             }
         }
     }
-    e.x = clamp(nx, 30, W_EXT - 30); e.y = clamp(ny, 30, W_EXT - 30); e.vx = 0; e.vy = 0;
+    const tc = e.room.clients.find(c => c.player === e);
+    if (tc && tc.world) {                                          // city-limit toll: charged whenever a car crosses the border
+        const cOld = worldCityAt(e.x, e.y), cNew = worldCityAt(nx, ny);
+        if (cOld !== cNew && Date.now() - (e.tollAt || 0) > 10000) {
+            const toll = (cNew || cOld).toll;
+            if (worldPayToll(tc, toll)) { e.tollAt = Date.now(); worldNotice(tc, `Toll gate: -${toll} coins. ${cNew ? 'Welcome to ' + cNew.name : 'Leaving ' + cOld.name}.`); }
+            else { nx = e.x; ny = e.y; v.v = 0; if (Date.now() - (e.tollMsg || 0) > 3000) { e.tollMsg = Date.now(); worldNotice(tc, `Toll gate: you need ${toll} coins (cash or bank) to pass.`, { level: 'bad' }); } }
+        }
+    }
+    e.x = clamp(nx, W_SHORE, W_EXT - W_SHORE); e.y = clamp(ny, W_SHORE, W_EXT - W_SHORE); e.vx = 0; e.vy = 0;
 }
 
 // ---- progress / persistence ------------------------------------------------------------------
@@ -3699,7 +3772,7 @@ function worldStreamChunks(client, force) {
 function worldSendStatic(client) {
     const bld = b => b && { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h, door: b.door };
     sendWorld(client, 'world_static', {
-        center: W_C, extent: W_EXT, chunk: W_CHUNK, nch: W_NCH, roads: WL.roads, cars: WORLD_CARS, carColors: WORLD_CAR_COLORS,
+        center: W_C, extent: W_EXT, chunk: W_CHUNK, nch: W_NCH, roads: WL.allRoads, cities: W_CITIES, cars: WORLD_CARS, carColors: WORLD_CAR_COLORS,
         companies: W_COMPANIES, spawn: WL.spawn, bank: bld(WL.bank), dealer: bld(WL.dealer), fireMs: WORLD_FIRE_MS, taskMs: WORLD_TASK_MS
     });
     sendWorld(client, 'world_houses', { list: [...houseOwner].map(([hid, o]) => [hid, o.name, o.owner_id === client.dbId ? 1 : 0]) });
@@ -3712,6 +3785,15 @@ function worldFire(client, reason) {
     w.job = null; w.task = null; w.jobCd = Date.now() + WORLD_REHIRE_MS;
     worldNotice(client, reason || `You were fired from ${co.name} for not working.`, { level: 'bad' });
     worldPushState(client); worldSave(client);
+}
+function worldPayToll(client, amt) {
+    const w = client.world, cash = Math.floor(w.sessionCoins || 0);
+    if (cash >= amt) w.sessionCoins = cash - amt;
+    else {
+        const bank = worldBankCoins(client); if (cash + bank < amt) return false;
+        db.prepare('UPDATE users SET coins=coins-? WHERE id=?').run(amt - cash, client.dbId); w.sessionCoins = 0; w.bankCoins = worldBankCoins(client); worldPushProfile(client);
+    }
+    worldPushState(client); return true;
 }
 function worldDeposit(client) {
     const w = client.world, amt = Math.max(0, Math.floor(w.sessionCoins || 0));
@@ -3826,13 +3908,21 @@ function worldComputePrompt(client) {
             const ax = b.x + b.w / 2, ay = b.y + b.h / 2;
             if (b.work) {
                 const co = W_COMPANIES.find(c => c.id === b.work), mine = w.job?.co === co.id;
-                consider(d, { id: 'work:' + b.id, kind: 'work', ctx: b, ax, ay, title: co.name, lines: [mine ? `You work here as ${co.role}` : `Hiring: ${co.role} · ${co.pay} coins per shift`, 'Staff entrance – office floor inside'], actions: [{ a: 'enter', label: 'Go inside', on: true }] });
+                consider(d, { id: 'work:' + b.id, kind: 'work', ctx: b, ax, ay, title: co.name, lines: [mine ? `You work here as ${co.role}` : `Hiring: ${co.role} · ${worldPayFor(co, b.door)} coins per shift`, 'Staff entrance – office floor inside'], actions: [{ a: 'enter', label: 'Go inside', on: true }] });
             } else {
                 const o = houseOwner.get(b.hid);
                 if (!o) consider(d, { id: 'house:' + b.hid, kind: 'house', ctx: b, ax, ay, title: 'House for sale', lines: [`${['Cosy', 'Family', 'Large'][b.tier || 0]} home · ${fmtMoney(b.price)} coins`, `Account balance: ${fmtMoney(coins)}`], actions: [{ a: 'buy', label: `Buy for ${fmtMoney(b.price)}`, on: coins >= b.price }] });
                 else if (o.owner_id === client.dbId) consider(d, { id: 'house:' + b.hid, kind: 'house', ctx: b, ax, ay, title: 'Your house', lines: ['Your private home – only you can enter'], actions: [{ a: 'enter', label: 'Go inside', on: true }] });
                 else consider(d, { id: 'house:' + b.hid, kind: 'house', ctx: b, ax, ay, title: `${o.name}'s house`, lines: ['Locked'], actions: [] });
             }
+        }
+    }
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        const ch = WL.chunks.get((cx + dx) + (cy + dy) * W_NCH); if (!ch) continue;
+        for (const a of ch.props) {
+            if (a.k !== 'atm') continue;
+            const d = Math.hypot(a.x + 13 - p.x, a.y + 7 - p.y); if (d > 85) continue;
+            consider(d, { id: 'atm:' + a.x + ',' + a.y, kind: 'atm', ax: a.x + 13, ay: a.y - 36, title: 'ATM', lines: [`Unbanked cash: ${fmtMoney(cash)}`, `Account balance: ${fmtMoney(coins)}`], actions: [{ a: 'deposit', label: cash > 0 ? `Deposit ${fmtMoney(cash)}` : 'Nothing to deposit', on: cash > 0 }], mini: true });
         }
     }
     const pc = parkedCars.get(client.dbId);
@@ -3849,7 +3939,7 @@ function worldInteriorPrompt(client) {
     if (def.kind === 'office') {
         const co = W_COMPANIES.find(c => c.id === def.coId), emp = worldEmployer(w), mine = emp && emp.id === co.id, now = Date.now();
         if (near(def.reception)) {
-            const lines = [co.name, `${co.role} · ${co.pay} coins per shift`]; const actions = [];
+            const lines = [co.name, `${co.role} · ${worldPayFor(co, w.ext)} coins per shift`]; const actions = [];
             if (mine) { lines.push(`Shift due in ${worldFmtMs(WORLD_FIRE_MS - (w.playMs - w.jobLast))}`); actions.push({ a: 'quit', label: 'Resign', on: true }); }
             else if (emp) lines.push(`Resign from ${emp.name} first`);
             else if (now < (w.jobCd || 0)) lines.push(`Recently fired – retry in ${worldFmtMs((w.jobCd || 0) - now)}`);
@@ -3858,7 +3948,7 @@ function worldInteriorPrompt(client) {
         }
         for (const s of def.stations) if (near(s)) {
             const t = w.task && w.task.desk === s.id;
-            const lines = mine ? (t ? ['Working…'] : [`Earn ${co.pay} coins · takes ${WORLD_TASK_MS / 1000}s`, 'Stay at your desk until finished']) : ['You need a job here – apply at reception'];
+            const lines = mine ? (t ? ['Working…'] : [`Earn ${worldPayFor(co, w.ext)} coins · takes ${WORLD_TASK_MS / 1000}s`, 'Stay at your desk until finished']) : ['You need a job here – apply at reception'];
             consider(Math.hypot(s.x - p.x, s.y - p.y) - 30, { id: s.id, kind: 'desk', ctx: s, ax: s.x, ay: s.y - 70, title: 'Work station', lines, actions: mine ? [t ? { a: 'cancel', label: 'Stop', on: true } : { a: 'work', label: 'Start work', on: true }] : [] });
         }
     } else {
@@ -3874,7 +3964,7 @@ function worldInteract(client, d) {
     const pr = worldComputePrompt(client); if (!pr || pr.id !== d.id) return;
     const act = (pr.actions || []).find(a => a.a === d.a); if (!act || act.on === false) return;
     switch (pr.kind) {
-        case 'bank': worldDeposit(client); break;
+        case 'bank': case 'atm': worldDeposit(client); break;
         case 'dealer': if (act.a.startsWith('buy:')) worldBuyCar(client, act.a.slice(4)); break;
         case 'work': { const def = worldInteriorDef('work:' + pr.ctx.id); worldGoto(client, 'work:' + pr.ctx.id, def.spawn.x, def.spawn.y); break; }
         case 'house':
@@ -3943,6 +4033,106 @@ function worldHandle(client, d) {
     const w = client.world; if (!w || !client.dbId) return;
     if (d.type === 'world_interact') worldInteract(client, { id: String(d.id), a: String(d.a) });
     else if (d.type === 'world_leave') { worldOnDisconnect(client); }
+    else if (d.type === 'world_nav') worldNav(client, String(d.t), d);
+    else if (d.type === 'world_map' && WL) sendWorld(client, 'world_map', { p: worldMapPlaces() });
+}
+// Road graph for the satnav: nodes are junctions, edges join neighbouring junctions on the same road line.
+function worldNavGraph() {
+    if (WL.navG) return WL.navG;
+    const nodes = [], byV = new Map(), byH = new Map(), segs = [];
+    for (const j of WL.junctions.concat(WL.xjunctions || [])) {
+        const n = { x: j.x, y: j.y, kx: Math.round((j.x - W_C) / W_S), ky: Math.round((j.y - W_C) / W_S), adj: [] };
+        nodes.push(n);
+        if (!byV.has(n.kx)) byV.set(n.kx, []); byV.get(n.kx).push(n);
+        if (!byH.has(n.ky)) byH.set(n.ky, []); byH.get(n.ky).push(n);
+    }
+    const link = (arr, ax) => {
+        arr.sort((a, b) => a[ax] - b[ax]);
+        const hwa = ax === 'y' ? 'v' : 'h';
+        for (let i = 0; i + 1 < arr.length; i++) {
+            const a = arr[i], b = arr[i + 1], d = Math.hypot(a.x - b.x, a.y - b.y), line = ax === 'y' ? a.x : a.y;
+            if (d > 3700 && !(WL.highways || []).some(h => h.a === hwa && Math.abs(h.p - line) < 1 && h.s0 - 1 <= a[ax] && b[ax] <= h.s1 + 1)) continue;   // no road there
+            a.adj.push([b, d]); b.adj.push([a, d]); segs.push({ a, b }); }
+    };
+    for (const arr of byV.values()) link(arr, 'y');
+    for (const arr of byH.values()) link(arr, 'x');
+    return (WL.navG = { nodes, segs });
+}
+function navSnap(g, x, y) {
+    let best = null, bd = Infinity;
+    for (const sg of g.segs) {
+        const dx = sg.b.x - sg.a.x, dy = sg.b.y - sg.a.y, t = Math.max(0, Math.min(1, ((x - sg.a.x) * dx + (y - sg.a.y) * dy) / (dx * dx + dy * dy)));
+        const px = sg.a.x + dx * t, py = sg.a.y + dy * t, d = Math.hypot(x - px, y - py);
+        if (d < bd) { bd = d; best = { sg, x: px, y: py }; }
+    }
+    return best;
+}
+// Returns { pts: [[x,y]...], turns: ['', 'left', ..., 'arrive'], len } following the roads from `from` to `to`.
+function worldRoute(from, to) {
+    const g = worldNavGraph(), A = navSnap(g, from.x, from.y), B = navSnap(g, to.x, to.y); if (!A || !B) return null;
+    let mid = [];
+    if (A.sg !== B.sg) {
+        const dist = new Map(), prev = new Map(), done = new Set(), heap = [];
+        const hpush = it => { heap.push(it); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+        const hpop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+        for (const n of [A.sg.a, A.sg.b]) { const d = Math.hypot(n.x - A.x, n.y - A.y); dist.set(n, d); hpush([d, n]); }
+        const ends = [B.sg.a, B.sg.b].map(n => [n, Math.hypot(n.x - B.x, n.y - B.y)]);
+        while (heap.length) {
+            const [d, n] = hpop(); if (done.has(n)) continue; done.add(n);
+            if (ends.every(e => done.has(e[0]))) break;
+            for (const [m, w] of n.adj) { const nd = d + w; if (nd < (dist.get(m) ?? Infinity)) { dist.set(m, nd); prev.set(m, n); hpush([nd, m]); } }
+        }
+        let endN = null, bt = Infinity;
+        for (const [n, e] of ends) { const t = (dist.get(n) ?? Infinity) + e; if (t < bt) { bt = t; endN = n; } }
+        if (!endN) return null;
+        for (let n = endN; n; n = prev.get(n)) mid.push(n);
+        mid.reverse();
+    }
+    let poly = [[from.x, from.y], [A.x, A.y], ...mid.map(n => [n.x, n.y]), [B.x, B.y], [to.x, to.y]];
+    poly = poly.filter((p, i) => !i || Math.hypot(p[0] - poly[i - 1][0], p[1] - poly[i - 1][1]) > 1);
+    if (poly.length < 2) return null;
+    const n = poly.length, turns = new Array(n).fill('');
+    for (let i = 2; i < n - 2; i++) {                      // skip the join/leave points at either end
+        const ax = poly[i][0] - poly[i - 1][0], ay = poly[i][1] - poly[i - 1][1], bx = poly[i + 1][0] - poly[i][0], by = poly[i + 1][1] - poly[i][1];
+        const l = Math.hypot(ax, ay) * Math.hypot(bx, by) || 1, cr = (ax * by - ay * bx) / l, dt = (ax * bx + ay * by) / l;
+        if (dt < -0.8) turns[i] = 'uturn'; else if (Math.abs(cr) >= 0.35 || dt < 0) turns[i] = cr > 0 ? 'right' : 'left';
+    }
+    turns[n - 1] = 'arrive';
+    const pts = [], tn = []; let len = 0;
+    for (let i = 0; i < n; i++) {
+        if (i > 0) len += Math.hypot(poly[i][0] - poly[i - 1][0], poly[i][1] - poly[i - 1][1]);
+        if (i <= 1 || i >= n - 2 || turns[i]) { pts.push([Math.round(poly[i][0]), Math.round(poly[i][1])]); tn.push(turns[i]); }
+    }
+    return { pts, turns: tn, len: Math.round(len) };
+}
+// Satnav: nearest workplace of your employer (any company if unemployed), your first house, or your parked car.
+function worldMapPlaces() {
+    if (WL.mapJ) return WL.mapJ;
+    const P = [], names = { bank: 'Central Bank', dealer: 'Car Dealership', hall: 'City Hall', mall: 'Shopping Mall', school: 'School' };
+    for (const b of WL.buildings) {
+        if (b.work) P.push(['w', b.door.x, b.door.y, b.sign, b.col]);
+        else if (names[b.k]) P.push([b.k, b.door.x, b.door.y, names[b.k]]);
+    }
+    for (const p of WL.props) if (p.k === 'atm') P.push(['a', p.x + 13, p.y + 7, 'ATM']);
+    return (WL.mapJ = P);
+}
+function worldNav(client, t, d = {}) {
+    const w = client.world, p = client.player; if (!w || !p || !WL || w.scene !== 'ext') return;
+    let tgt = null;
+    if (t === 'work') {
+        const co = w.job?.co; let bd = Infinity;
+        for (const b of WL.works) { if (co && b.work !== co) continue; const d = Math.hypot(b.door.x - p.x, b.door.y - p.y); if (d < bd) { bd = d; tgt = { x: b.door.x, y: b.door.y, label: b.sign || 'Workplace' }; } }
+    } else if (t === 'atm' || t === 'bank' || t === 'dealer') {
+        const list = t === 'atm' ? worldMapPlaces().filter(q => q[0] === 'a') : worldMapPlaces().filter(q => q[0] === t); let bd = Infinity;
+        for (const q of list) { const dd = Math.hypot(q[1] - p.x, q[2] - p.y); if (dd < bd) { bd = dd; tgt = { x: q[1], y: q[2], label: q[3] }; } }
+    } else if (t === 'pin') {
+        const x = +d.x, y = +d.y; if (isFinite(x) && isFinite(y)) tgt = { x: Math.round(clamp(x, W_SHORE, W_EXT - W_SHORE)), y: Math.round(clamp(y, W_SHORE, W_EXT - W_SHORE)), label: String(d.label || 'Destination').slice(0, 40) };
+    } else if (t === 'home') {
+        const hid = worldFirstHouse(client.dbId), b = hid && WL.houseById.get(hid); if (b) tgt = { x: b.door.x, y: b.door.y, label: 'Home' };
+    } else if (t === 'car') {
+        const pc = parkedCars.get(client.dbId); if (pc && !pc.driven) tgt = { x: Math.round(pc.x), y: Math.round(pc.y), label: 'Your car' };
+    }
+    sendWorld(client, 'world_nav', { t, tgt, route: tgt ? worldRoute({ x: p.x, y: p.y }, tgt) : null });
 }
 function worldOnPlayerDeath(owner, e) {
     const w = owner.world; if (!w || w.dead) return;
@@ -3978,7 +4168,7 @@ function worldFarmTick() {
             const sx = f.x + 30 + Math.random() * Math.max(1, f.w - 60), sy = f.y + 30 + Math.random() * Math.max(1, f.h - 60);
             const shape = new Entity(worldRoom, sx, sy, worldPickShape(f.kind));
             if (Math.random() < POWERUP_SPAWN_CHANCE) { shape.type = 'powerup'; shape.powerupType = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)]; shape.hp = 550; shape.maxHp = 550; shape.radius = 30; shape.xpVal = 4000; }
-            shape.fieldId = id; worldRoom.entities.push(shape);
+            shape.fieldId = id; shape.noReward = true; shape.xpAwarded = true; worldRoom.entities.push(shape);
         }
     }
     // keep shapes inside their field (knock-back can push them out) and cull fields nobody is near
@@ -4003,6 +4193,7 @@ function worldAssignRoad(car, road, dir, fromS) {
     const nodes = roadNodes.get(road.a + road.k); let next = null;
     if (dir > 0) { for (let i = 0; i < nodes.length; i++) if (nodes[i] > fromS + 8) { next = nodes[i]; break; } }
     else for (let i = nodes.length - 1; i >= 0; i--) if (nodes[i] < fromS - 8) { next = nodes[i]; break; }
+    if (next != null && Math.abs(next - W_C) > W_C - W_SHORE - 100) next = null;   // traffic never drives into the sea
     car.nextS = next;
     if (next == null) return false;
     // plan the manoeuvre at the next junction now, so the car can slow for a turn
@@ -4024,7 +4215,7 @@ function worldSpawnTraffic(client) {
     const zone = worldZone(p.x, p.y), want = [18, 14, 8, 3][zone];
     let near = 0; for (const t of traffic) if (Math.abs(t.x - p.x) < 2800 && Math.abs(t.y - p.y) < 2800) near++;
     if (near >= want || traffic.length >= 110) return;
-    const cands = worldChunkList(p.x, p.y, 2, 'junctions').filter(j => { const d = Math.hypot(j.x - p.x, j.y - p.y); return d > 1500 && d < 2900; });
+    const cands = worldChunkList(p.x, p.y, 2, 'junctions').filter(j => { const d = Math.hypot(j.x - p.x, j.y - p.y); return !j.f && d > 1500 && d < 2900; });
     if (!cands.length) return;
     const j = cands[Math.floor(Math.random() * cands.length)];
     const arms = [{ dx: 0, dy: -1, ok: j.n > 0 }, { dx: 0, dy: 1, ok: j.s > 0 }, { dx: -1, dy: 0, ok: j.w > 0 }, { dx: 1, dy: 0, ok: j.e > 0 }].filter(a => a.ok);
@@ -4146,7 +4337,7 @@ setInterval(() => {
             if (!st || !co || Math.hypot(st.x - p.x, st.y - p.y) > st.r + 30) { w.task = null; worldNotice(c, 'You left your desk – task cancelled.'); sendWorld(c, 'world_task', { p: -1 }); }
             else {
                 const prog = (now - w.task.start) / WORLD_TASK_MS;
-                if (prog >= 1) { w.task = null; w.sessionCoins += co.pay; w.jobLast = w.playMs; sendWorld(c, 'world_task', { p: -1 }); worldNotice(c, `Task complete: +${co.pay} coins (unbanked)`, { level: 'good', sessionCoins: w.sessionCoins }); worldPushState(c); worldSave(c); }
+                if (prog >= 1) { w.task = null; const pay = worldPayFor(co, w.ext); w.sessionCoins += pay; w.jobLast = w.playMs; sendWorld(c, 'world_task', { p: -1 }); worldNotice(c, `Task complete: +${pay} coins (unbanked)`, { level: 'good', sessionCoins: w.sessionCoins }); worldPushState(c); worldSave(c); }
                 else if (worldTickN % 2 === 0) sendWorld(c, 'world_task', { p: Math.round(prog * 100) / 100 });
             }
         }
