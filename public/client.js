@@ -2794,17 +2794,71 @@ let wcRideEl = null, wcRideT = null;
 function wcRideStart(d) {
     wcMetroClose();
     if (!wcRideEl) {
-        wcRideEl = wcEl('div', 'position:fixed;inset:0;z-index:85;background:#0b1220;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;font-family:sans-serif');
-        wcRideEl.innerHTML = '<div id="rd-t" style="font:bold 26px sans-serif"></div><div id="rd-s" style="color:#9fd8ff"></div><div id="rd-w" style="width:min(520px,80vw);height:64px;border-radius:10px;border:3px solid #6b7c93;background:repeating-linear-gradient(90deg,#1c2a3d 0 46px,#14202f 46px 92px)"></div><div style="width:min(520px,80vw);height:10px;background:#223;border-radius:6px;overflow:hidden"><div id="rd-b" style="height:100%;width:0;background:#2fa8f0"></div></div><div id="rd-l" style="font:15px sans-serif;color:#cde"></div>';
+        wcRideEl = wcEl('div', 'position:fixed;inset:0;z-index:85;background:#080d16;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#fff;font-family:sans-serif;overflow:hidden');
+        wcRideEl.innerHTML = `
+          <div id="rd-t" style="font:bold 25px sans-serif;z-index:2;text-align:center"></div>
+          <div id="rd-s" style="color:#b9dfff;z-index:2"></div>
+          <div id="rd-scene" style="position:relative;width:min(760px,94vw);height:min(390px,52vh);background:linear-gradient(#111d2c 0 58%,#202b37 58% 100%);border:3px solid #60748b;border-radius:12px;overflow:hidden;box-shadow:0 18px 60px #000">
+            <div id="rd-sign" style="position:absolute;top:12px;left:14px;background:#07111d;border:1px solid #60748b;padding:7px 12px;border-radius:5px;color:#a9dfff;font:bold 13px sans-serif">NEXT TRAIN · PLATFORM</div>
+            <div id="rd-tunnel" style="display:none;position:absolute;inset:0;background:repeating-linear-gradient(90deg,#101923 0 70px,#263746 71px 75px,#101923 76px 145px)"></div>
+            <div id="rd-rails" style="display:none;position:absolute;left:0;right:0;bottom:32px;height:18px;background:repeating-linear-gradient(90deg,#c2ccd5 0 32px,#3d4c5b 33px 58px)"></div>
+            <div id="rd-train" style="display:none;position:absolute;left:50%;top:25%;transform:translateX(-50%);width:76%;height:62%;background:linear-gradient(#dce8ef,#8296a7 60%,#344555);border:5px solid #d7e4ed;border-radius:22px 22px 12px 12px;box-shadow:0 12px 35px #000">
+              <div style="height:24px;background:#172b3b;border-radius:12px 12px 0 0"></div>
+              <div style="display:flex;gap:8px;padding:14px;height:calc(100% - 40px);box-sizing:border-box">
+                <div style="flex:1;background:#172c3d;border:3px solid #b8c9d4;border-radius:7px"></div>
+                <div style="width:23%;background:#d2e0e8;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#152535;font-size:38px">●</div>
+                <div style="flex:1;background:#172c3d;border:3px solid #b8c9d4;border-radius:7px"></div>
+              </div>
+            </div>
+            <div id="rd-platform" style="position:absolute;left:0;right:0;bottom:0;height:42%;background:linear-gradient(90deg,#394956,#202d39);border-top:5px solid #d6c66a"></div>
+            <div id="rd-person" style="position:absolute;left:50%;bottom:18%;font-size:35px;transform:translateX(-50%);z-index:3">🧍</div>
+            <div id="rd-stairs" style="position:absolute;right:18px;bottom:20px;color:#fff;background:#101c2b;padding:8px 10px;border-radius:5px;font-size:12px">↑ STREET EXIT</div>
+          </div>
+          <div id="rd-b" style="width:min(620px,86vw);height:9px;background:#243446;border-radius:8px;overflow:hidden"><div style="height:100%;width:0;background:#43b5ef"></div></div>
+          <div id="rd-l" style="font:14px sans-serif;color:#d5e7f5;text-align:center;z-index:2"></div>`;
         document.body.appendChild(wcRideEl);
     }
     const q = id => wcRideEl.querySelector(id);
-    q('#rd-t').textContent = (d.intercity ? '🚄 Intercity Express → ' : '🚇 Line ' + d.line + ' → ') + d.to; q('#rd-t').style.color = d.intercity ? '#c58bff' : WC_LINE_COL[d.line];
-    q('#rd-s').textContent = 'From ' + d.from + ' · ticket ' + d.fare + ' coins'; wcRideEl.style.display = 'flex';
-    const t0 = Date.now(); clearInterval(wcRideT);
-    wcRideT = setInterval(() => { const e = (Date.now() - t0) / 1000; q('#rd-b').style.width = Math.min(100, e / d.secs * 100) + '%'; q('#rd-w').style.backgroundPositionX = -(Date.now() / (d.intercity ? 2 : 6)) + 'px'; q('#rd-l').textContent = e < d.secs ? Math.ceil(d.secs - e) + ' s to go' : 'Arriving…'; }, 50);
+    q('#rd-t').textContent = (d.intercity ? '🚆 Intercity Express' : '🚇 Line ' + d.line) + ' · ' + d.to;
+    q('#rd-t').style.color = d.intercity ? '#c58bff' : WC_LINE_COL[d.line];
+    q('#rd-s').textContent = 'Ticket paid · ' + d.fare + ' coins';
+    wcRideEl.style.display = 'flex';
+    const waitMs = Math.max(0, (d.waitSecs || 12) * 1000), rideMs = 120000, t0 = Date.now();
+    clearInterval(wcRideT);
+    wcRideT = setInterval(() => {
+        const elapsed = Date.now() - t0, waiting = elapsed < waitMs;
+        const train = q('#rd-train'), tunnel = q('#rd-tunnel'), rails = q('#rd-rails'), person = q('#rd-person');
+        if (waiting) {
+            q('#rd-sign').textContent = 'NEXT TRAIN · ' + Math.ceil((waitMs-elapsed)/1000) + ' SECONDS';
+            q('#rd-l').textContent = 'Please stand behind the yellow line. The train is approaching.';
+            train.style.display = 'none'; tunnel.style.display = 'none'; rails.style.display = 'none'; person.style.display = 'block';
+            q('#rd-platform').style.display = 'block'; q('#rd-stairs').style.display = 'block';
+            q('#rd-b').firstElementChild.style.width = (elapsed / waitMs * 100) + '%';
+        } else {
+            const trip = Math.min(1, (elapsed-waitMs)/rideMs);
+            q('#rd-sign').textContent = 'ON BOARD · ' + Math.ceil((rideMs-(elapsed-waitMs))/1000) + ' SECONDS';
+            q('#rd-l').textContent = trip < 1 ? 'Travelling through the underground tunnel · Please remain on board.' : 'Arriving at destination · Please prepare to exit.';
+            tunnel.style.display = 'block'; rails.style.display = 'block'; train.style.display = 'block'; person.style.display = 'none';
+            q('#rd-platform').style.display = 'none'; q('#rd-stairs').style.display = 'none';
+            tunnel.style.backgroundPositionX = -(elapsed * 0.75) + 'px';
+            train.style.left = (50 + Math.sin(elapsed/450) * 1.2) + '%';
+            q('#rd-b').firstElementChild.style.width = (trip * 100) + '%';
+        }
+    }, 100);
 }
-function wcRideEnd() { clearInterval(wcRideT); if (wcRideEl) wcRideEl.style.display = 'none'; }
+function wcRideEnd() {
+    clearInterval(wcRideT);
+    if (wcRideEl) {
+        const q = id => wcRideEl.querySelector(id);
+        q('#rd-sign').textContent = 'ARRIVED · DOORS OPEN';
+        q('#rd-l').textContent = 'Leave the train and follow the stairs ↑ to street level.';
+        q('#rd-stairs').style.display = 'block';
+        q('#rd-stairs').textContent = '↑ EXIT TO STREET';
+        q('#rd-train').style.display = 'none'; q('#rd-tunnel').style.display = 'none'; q('#rd-rails').style.display = 'none';
+        q('#rd-platform').style.display = 'block'; q('#rd-person').style.display = 'block';
+        setTimeout(() => { if (wcRideEl) wcRideEl.style.display = 'none'; }, 2800);
+    }
+}
 function wcMapGroups() {
     WC.mapLines = {}; WC.mapHubs = {};
     for (const q of WC.mapPlaces || []) if (q[0] === 'm') { (WC.mapLines[q[5] + q[4]] = WC.mapLines[q[5] + q[4]] || { line: q[4], pts: [] }).pts.push(q); if (q[6]) WC.mapHubs[q[5]] = q; }
