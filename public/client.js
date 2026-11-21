@@ -2132,6 +2132,7 @@ function beginWorldMode() {
 function handleWorldMessage(d) {
     switch (d.type) {
         case 'world_static':
+            WC.inflight = d.inflight || {};
             Object.assign(WC, { center: d.center, centerY: d.centerY, extent: d.extent, extentY: d.extentY, circ: d.circ, gap: d.gap, land: d.land, airports: d.airports || [], chunk: d.chunk, nch: d.nch, roads: d.roads, cities: d.cities, cars: d.cars, carColors: d.carColors, companies: d.companies, spawn: d.spawn, bank: d.bank, dealer: d.dealer, fireMs: d.fireMs, taskMs: d.taskMs });
             wcBuildGates();
             beginWorldMode(); if (!wcMapEl) wcMapBuild(); return true;
@@ -2139,7 +2140,7 @@ function handleWorldMessage(d) {
         case 'world_house': if (d.o) WC.houses.set(d.hid, { o: d.o, m: d.m }); else WC.houses.delete(d.hid); wcSpriteCache.delete('hs' + d.hid); return true;
         case 'world_chunk': wcIngestChunk(d.c); return true;
         case 'world_scene': {
-            WC.scene = d.scene; WC.intKey = d.key; WC.interior = d.interior; WC.pos = { x: d.x, y: d.y }; wcIntCache = null; WC.prompt = null; wcRenderPrompt(); WC.task = -1; wcRenderTask();
+            WC.scene = d.scene; WC.intKey = d.key; WC.interior = d.interior; WC.fstate = d.fs || {}; WC.pos = { x: d.x, y: d.y }; wcIntCache = null; WC.prompt = null; wcRenderPrompt(); WC.task = -1; wcRenderTask();
             gameState = { entities: [], bullets: [], drones: [] }; renderEntities.clear(); lastBullets.clear(); lastDrones.clear(); dyingEntities = [];
             myId = null; camera.x = d.x - (canvas.width * fov) / 2; camera.y = d.y - (canvas.height * fov) / 2; return true;
         }
@@ -2150,7 +2151,8 @@ function handleWorldMessage(d) {
         case 'world_map': WC.mapPlaces = d.p; wcMapDraw(); return true;
         case 'world_nav': WC.nav = d.tgt ? { t: d.t, ...d.tgt, route: d.route } : null; if (!d.tgt) wcToast({ work: 'No workplace found.', home: 'You do not own a house yet.', car: 'Your car is not parked anywhere.', pin: 'Cannot route there.' }[d.t] || 'No destination.', 'bad'); return true;
         case 'world_death': wcToast(d.reason || 'You died.', 'bad'); return true;
-        case 'world_flight': wcFlight = d.f; wcRenderFlight(); return true;
+        case 'world_flight': wcFlight = d.f; wcRenderFlight(); wcIfeRender(); return true;
+        case 'world_furn': if (d.key === WC.intKey) WC.fstate = d.s || {}; return true;
         case 'world_branches': WC.branch = new Map(d.list); for (const b of WC.allBld.values()) wcApplyBranch(b); return true;
         case 'world_mission': {
             const had = wcMission; wcMission = d.m; wcMissionT = performance.now(); WC._trail = [];
@@ -2228,6 +2230,8 @@ function wcRenderTask() {
 function wcRenderPrompt() {
     const el = document.getElementById('world-prompt'); if (!el) return;
     const p = WC.prompt;
+    if (!p || !p.cards) wcRenderCards(null);
+    if (p && p.cards) { el.style.display = 'none'; el.dataset.id = ''; wcRenderCards(p); return; }
     if (!p) { el.style.display = 'none'; el.dataset.id = ''; return; }
     let firstOn = true;
     const acts = (p.actions || []).map(a => {
@@ -2244,7 +2248,7 @@ function worldInteractPrimary() {
     const a = (p.actions || []).find(x => x.on !== false); if (a) worldSend('world_interact', { id: p.id, a: a.a });
 }
 function wcPositionPrompt() {
-    const el = document.getElementById('world-prompt'); if (!el || !WC.prompt) return;
+    const el = document.getElementById('world-prompt'); if (!el || !WC.prompt || WC.prompt.cards) return;
     let sx = worldToScreenX(WC.prompt.ax), sy = worldToScreenY(WC.prompt.ay);
     const w = el.offsetWidth || 220, h = el.offsetHeight || 80;
     sx = Math.max(w / 2 + 10, Math.min(canvas.width - w / 2 - 10, sx)); sy = Math.max(h + 16, Math.min(canvas.height - 20, sy));
@@ -2349,6 +2353,7 @@ const WC_ROOF = ['#76828d', '#85919a', '#6d7986', '#8a9692', '#68767f', '#7c8691
 const WC_HOUSE_ROOF = ['#8f5140', '#6e4b42', '#a56a4b', '#566a78', '#745a49', '#8a6847'];
 const WC_AWN = [['#c0392b', '#f4efe4'], ['#2c7a5b', '#f4efe4'], ['#2f5f9e', '#f4efe4'], ['#d68a1c', '#f4efe4'], ['#7a3f8f', '#f4efe4'], ['#1f7f8c', '#f4efe4']];
 function wcShadow(g, w, h, len) {
+    return;                                    // buildings are 2.5D now: their shadow is cast on the ground at draw time
     g.fillStyle = 'rgba(8,12,16,.30)'; g.beginPath(); g.moveTo(len * .35, len * .45); g.lineTo(w + len, len * .45); g.lineTo(w + len, h + len); g.lineTo(len * .35, h + len); g.closePath(); g.fill();
 }
 function wcDoorMark(g, b, accent) {
@@ -3057,27 +3062,31 @@ function wcDrawExterior() {
     if (s > 0.3) for (const c of list) for (const j of c.junctions) if (vis(j.x - 140, j.y - 140, 280, 280) && once('j' + j.id)) wcDrawJunction(j, s);
     for (const c of list) for (const l of c.lots) if (vis(l.x, l.y, l.w, l.h) && once('l' + l.id)) wcDrawLot(l, s);
     for (const c of list) for (const p of c.props) if (p.k === 'pave' || p.k === 'lake') { if (vis(p.x, p.y, p.w, p.h) && once('g' + p.k + p.x + ',' + p.y)) wcDrawGroundProp(p, s); }
+    for (const c of list) for (const p of c.props) if (p.k === 'meadow' || p.k === 'green' || p.k === 'fence') { if (vis(p.x - 20, p.y - 20, p.w + 40, p.h + 40) && once('g' + p.k + p.x + ',' + p.y)) wcDrawCountryGround(p, s); }
     for (const c of list) for (const p of c.props) if (p.k === 'apron' || p.k === 'taxiway' || p.k === 'runway') { if (vis(p.x, p.y, p.w, p.h) && once('p' + p.k + p.x + ',' + p.y)) wcDrawAirProp(p, s); }
     for (const c of list) for (const p of c.props) if (p.k === 'path' || p.k === 'yard' || p.k === 'fountain') { if (vis(p.x, p.y, p.w, p.h) && once('p' + p.k + p.x + ',' + p.y)) wcDrawProp(p, s, 0); }
     if (!lod) for (const c of list) for (const q of c.pcars) {
         if (!vis(q.x - 40, q.y - 40, 80, 80)) continue;
         const van = q.t === 1; wcBlitCar(wcCarSprite(WC.carColors[q.c % WC.carColors.length] || '#ccc', van ? 3 : 0, van ? 66 : 56, van ? 32 : 29), q.x, q.y, q.a);
     }
+    const cam = wcCam(), nightL = wcNightLevel(), blds = [];
     for (const c of list) for (const b of c.buildings) {
-        if (!vis(b.x - WC_PAD, b.y - WC_PAD, b.w + 2 * WC_PAD, b.h + 2 * WC_PAD) || !once('B' + b.id)) continue;
+        if (!vis(b.x - WC_PAD - 260, b.y - WC_PAD - 260, b.w + 2 * WC_PAD + 520, b.h + 2 * WC_PAD + 520) || !once('B' + b.id)) continue;
         if (lod) { wcDrawBuildingLod(b, s); continue; }
         if (b.k === 'house') wcHouseLot(b, s);
-        wcBlit(wcBuildingSprite(b), b.x, b.y);
+        blds.push(b);
     }
+    blds.sort((p, q) => wcBHeight(p) - wcBHeight(q));                    // taller buildings overlap lower ones
+    for (const b of blds) wcDrawBuilding25(b, s, cam, nightL);
+    if (!lod) for (const c of list) for (const p of c.props) if ((p.k === 'rock' || p.k === 'hay' || p.k === 'well' || p.k === 'turbine') && vis(p.x - 200, p.y - 200, p.w + 400, p.h + 400) && once('cp' + p.k + p.x + ',' + p.y)) wcDrawCountryProp(p, s, cam);
     for (const c of list) for (const p of c.props) if (p.k === 'plane' && vis(p.x - 60, p.y - 60, p.w + 120, p.h + 120) && once('pl' + p.cx + ',' + p.cy)) wcDrawStaticPlane(p, s);
     for (const c of list) for (const p of c.props) if (p.k === 'silo' && vis(p.x, p.y, p.w, p.h) && once('s' + p.x + ',' + p.y)) wcDrawProp(p, s, 0);
-    const nightL = wcNightLevel();
     for (const c of list) for (const p of c.props) if ((p.k === 'pump' || p.k === 'stall' || p.k === 'billboard') && vis(p.x - 20, p.y - 20, p.w + 40, p.h + 40) && once('sp' + p.k + p.x + ',' + p.y)) wcDrawStreetProp(p, s, nightL);
     wcUpdateDyn(); wcDrawDyn(vx0, vy0, vx1, vy1, s);
     for (const c of list) for (const p of c.props) if ((p.k === 'canopy' || p.k === 'holo') && vis(p.x - 60, p.y - 60, p.w + 120, p.h + 120) && once('cp' + p.k + p.x + ',' + p.y)) wcDrawStreetProp(p, s, nightL);
     wcDrawMissionExtras(s);
     if (!lod) for (const c of list) for (const p of c.props) if ((p.k === 'lamp' || p.k === 'bench' || p.k === 'atm') && vis(p.x - 10, p.y - 10, (p.w || 0) + 20, (p.h || 0) + 20) && once('q' + p.k + p.x + ',' + p.y)) wcDrawProp(p, s, 1);
-    for (const c of list) for (const p of c.props) if (p.k === 'tree' && p.x > vx0 - 60 && p.x < vx1 + 60 && p.y > vy0 - 60 && p.y < vy1 + 60) { if (s < 0.22) { ctx.fillStyle = (p.v >> 2) & 1 ? '#3a7e46' : '#5a9c46'; ctx.fillRect(worldToScreenX(p.x) - p.r * s, worldToScreenY(p.y) - p.r * s, 2 * p.r * s, 2 * p.r * s); } else wcDrawTree(p, s); }
+    for (const c of list) for (const p of c.props) if (p.k === 'tree' && p.x > vx0 - 60 && p.x < vx1 + 60 && p.y > vy0 - 60 && p.y < vy1 + 60) { if (s < 0.22) { ctx.fillStyle = (p.v >> 2) & 1 ? '#3a7e46' : '#5a9c46'; const tr = 24 + (p.v % 4) * 6; ctx.fillRect(worldToScreenX(p.x) - tr * s, worldToScreenY(p.y) - tr * s, 2 * tr * s, 2 * tr * s); } else wcDrawTree25(p, s, cam); }
     wcDrawBorder(s, W, H); wcDrawWater(s, W, H);
     const meF = myId != null ? gameState.entities.find(e => e.id === myId) : null;
     if (meF && meF.fl) wcDrawClouds(W, H, renderEntities.get(meF.id)?.flAlt ?? meF.fl.alt);
@@ -3178,7 +3187,7 @@ function wcMapBuild() {
     const btn = document.createElement('button'); btn.textContent = '🗺 Map';
     btn.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:60;padding:8px 20px;border:0;border-radius:20px;background:#1d6fa5;color:#fff;font:bold 15px sans-serif;cursor:pointer;display:none;box-shadow:0 2px 8px rgba(0,0,0,.45)';
     btn.onclick = () => wcMapToggle(true); document.body.appendChild(btn);
-    const ov = document.createElement('div'); ov.style.cssText = 'position:fixed;inset:0;z-index:70;background:rgba(5,10,20,.78);display:none;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;font-family:sans-serif';
+    const ov = document.createElement('div'); ov.style.cssText = 'position:fixed;inset:0;z-index:155;background:rgba(5,10,20,.78);display:none;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;font-family:sans-serif';
     ov.innerHTML = '<canvas id="wc-map-cv" style="border:3px solid #fff;border-radius:8px;cursor:crosshair;background:#2b6a94"></canvas><div id="wc-map-side" style="display:flex;flex-direction:column;gap:6px;min-width:200px;max-height:94vh;overflow-y:auto;padding-right:4px"></div>';
     document.body.appendChild(ov);
     const side = ov.querySelector('#wc-map-side'), mk = (t, f) => { const b = document.createElement('button'); b.textContent = t; b.style.cssText = 'padding:9px 12px;border:0;border-radius:8px;background:#26496b;color:#fff;font:bold 14px sans-serif;cursor:pointer;text-align:left'; b.onclick = f; side.appendChild(b); return b; };
@@ -3218,6 +3227,7 @@ function wcMapToggle(on, mode) {
     if (!wcMapEl) wcMapBuild();
     wcMapEl.ov.style.display = on ? 'flex' : 'none';
     wcMapEl.taxi = mode === 'taxi';
+    clearInterval(wcMapEl.timer); wcMapEl.timer = on ? setInterval(() => { if (wcMapEl.ov.style.display === 'none' || !isWorldMode) { clearInterval(wcMapEl.timer); return; } wcMapDraw(); }, 200) : null;
     const hint = wcMapEl.ov.querySelector('#wc-map-side div:nth-child(2)'); if (hint) hint.textContent = wcMapEl.taxi ? '🚕 Taxi mode: pick a place below, or click the map then “Taxi to selected point”.' : 'Click anywhere to set a destination.';
     if (on) {
         const sz = Math.floor(Math.min(innerWidth - 260, innerHeight - 40, 820)); wcMapEl.cv.width = wcMapEl.cv.height = Math.max(300, sz); wcMapEl.cv.style.width = wcMapEl.cv.style.height = wcMapEl.cv.width + 'px';
@@ -3261,7 +3271,14 @@ function wcMapDraw() {
         g.save(); g.setLineDash([10, 8]); g.strokeStyle = 'rgba(255,120,120,.85)'; g.lineWidth = 2; g.beginPath(); g.moveTo(MX(0), 0); g.lineTo(MX(0), N - 30); g.stroke(); g.restore();
         g.save(); g.translate(MX(0) + 14, N / 2); g.rotate(-Math.PI / 2); g.fillStyle = 'rgba(255,190,190,.95)'; g.font = 'bold 12px sans-serif'; g.textAlign = 'center'; g.fillText('INTERNATIONAL DATE LINE', 0, 0); g.restore();
         g.textAlign = 'center'; g.font = 'bold 14px sans-serif';
-        for (const q of WC.cities) { const x = MX(q.cx), y = MY(q.cy); if (x > -50 && x < N + 50 && y > -50 && y < N + 50) { const t = `${q.name} · ${wcTzLabel(q.tz)}`; g.fillStyle = '#000'; g.fillText(t, x + 1, y + 1); g.fillStyle = '#fff'; g.fillText(t, x, y); } }
+        const placed = [];                                               // labels dodge each other: full, then below, then short, then code
+        for (const q of WC.cities.slice().sort((a, b) => (b.size || 0) - (a.size || 0))) {
+            const x = MX(q.cx), y = MY(q.cy); if (!(x > -50 && x < N + 50 && y > -50 && y < N + 50)) continue;
+            const code = ((WC.airports || []).find(a => a.city === q.id) || {}).code || q.name.slice(0, 3).toUpperCase(), tz = wcTzLabel(q.tz);
+            const tries = [[`${q.name} · ${tz}`, 0], [`${q.name} · ${tz}`, 18], [`${q.name} · ${tz}`, -18], [q.name.split(' ')[0], 0], [q.name.split(' ')[0], 18], [code, 0], [code, 18], [code, -18]];
+            let pick = null; for (const [t, dy] of tries) { const w = g.measureText(t).width, r = [x - w / 2 - 3, y + dy - 12, w + 6, 16]; if (!placed.some(o => r[0] < o[0] + o[2] && o[0] < r[0] + r[2] && r[1] < o[1] + o[3] && o[1] < r[1] + r[3])) { pick = [t, dy, r]; break; } }
+            if (!pick) continue; placed.push(pick[2]); g.fillStyle = '#000'; g.fillText(pick[0], x + 1, y + pick[1] + 1); g.fillStyle = '#fff'; g.fillText(pick[0], x, y + pick[1]);
+        }
         const showA = v.half < 40000, showW = v.half < 150000; g.font = '15px sans-serif';
         for (const q of WC.mapPlaces || []) {
             const x = MX(q[1]), y = MY(q[2]); if (x < -10 || y < -10 || x > N + 10 || y > N + 10) continue;
@@ -3319,7 +3336,7 @@ function wcDrawDayNight(W, H) {
 let wcIntCache = null;
 function wcPaintFurniture(g, f, D) {
     const x = f.x, y = f.y, w = f.w, h = f.h, k = f.k, acc = D.theme.accent || '#5b7fa8';
-    const sh = () => { g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(x + 3, y + 4, w, h); };
+    const sh = () => { if (wcFurnNoShadow) return; g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(x + 3, y + 4, w, h); };
     switch (k) {
         case 'rug': g.fillStyle = D.kind === 'house' ? '#8a4a4a' : '#44566c'; wcRR(g, x, y, w, h, 10); g.fill(); g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 3; wcRR(g, x + 7, y + 7, w - 14, h - 14, 7); g.stroke(); break;
         case 'desk': sh(); g.fillStyle = '#9b7248'; g.fillRect(x, y, w, h); g.fillStyle = '#b88b5a'; g.fillRect(x + 2, y + 2, w - 4, h - 4); g.fillStyle = '#2a3036'; g.fillRect(x + w / 2 - 22, y + h - 20, 44, 11); g.fillStyle = '#4a5560'; g.fillRect(x + w / 2 - 20, y + h - 18, 40, 7); g.fillStyle = '#f1f1f1'; g.fillRect(x + 12, y + 12, 18, 12); break;
@@ -3350,45 +3367,379 @@ function wcPaintFurniture(g, f, D) {
         case 'bath': sh(); g.fillStyle = '#e9eef0'; wcRR(g, x, y, w, h, 12); g.fill(); g.fillStyle = '#9ccbe0'; wcRR(g, x + 8, y + 8, w - 16, h - 16, 10); g.fill(); g.fillStyle = '#b0b6ba'; g.beginPath(); g.arc(x + w - 14, y + h / 2, 4, 0, 7); g.fill(); break;
     }
 }
+
+// ===================== 2.5D: buildings, trees and interiors rise towards a camera above the screen centre =====================
+// A point at height h projects to  c + (p - c) * Hc / (Hc - h),  where c is the ground point under the camera and Hc its height.
+// Walls facing the camera are drawn as quads between the footprint and the projected roof, so blocks read as volumes.
+const WC_BH = { tower: b => 70 + (b.f || 30) * 2.6, mid: b => 46 + (b.f || 8) * 4, apt: 72, mall: 46, megamall: b => 34 * (b.lv || 3), hotel: b => 60 + (b.f || 20) * 2.4, shop: 24, old: b => 22 + (b.f || 2) * 7, house: 22, farmhouse: 22, barn: 30, shed: 14, school: 30, bank: 70, dealer: 34, hall: 56, terminal: 46, ctower: 150, hangar: 54, gallery: 34, cathedral: 96, inn: 28, motel: 24, mill: 32 };
+const WC_WALL = { tower: '#55687c', mid: '#66788a', apt: '#9d8f7e', mall: '#8a8f96', megamall: '#7d8590', hotel: '#7d7a8c', shop: '#b9ae9c', old: '#d8c4a0', house: '#e2d6bd', farmhouse: '#e2d6bd', barn: '#8a2f28', shed: '#7b6a55', school: '#b7a27f', bank: '#c8bfa8', dealer: '#9fb3c4', hall: '#c9c0aa', terminal: '#9fb3c4', ctower: '#d5d9dc', hangar: '#8d99a1', gallery: '#e3d9c0', cathedral: '#a89f8b', inn: '#d8c4a0', motel: '#c9bfa6', mill: '#6e5638' };
+// heights are exaggerated (×2.2) against a low virtual camera so towers lean visibly away from the screen centre
+function wcBHeight(b) { const h = WC_BH[b.k]; return Math.min(760, 2.2 * (typeof h === 'function' ? h(b) : (h || 30))); }
+function wcCam() { const W = canvas.width, H = canvas.height; return { x: camera.x + W * fov / 2, y: camera.y + H * fov / 2, hc: 1900 * fov }; }
+function wcProj(cam, x, y, h) { const k = cam.hc / (cam.hc - h); return [worldToScreenX(cam.x + (x - cam.x) * k), worldToScreenY(cam.y + (y - cam.y) * k), k]; }
+function wcQuad(a, b, c, d, fill) { ctx.fillStyle = fill; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); ctx.closePath(); ctx.fill(); }
+function wcDrawBuilding25(b, s, cam, night) {
+    const h = wcBHeight(b), x0 = b.x, y0 = b.y, x1 = b.x + b.w, y1 = b.y + b.h, X = worldToScreenX, Y = worldToScreenY;
+    // ground shadow: the footprint swept away from a sun in the north-west
+    const sl = h * 0.22, dx = sl * 0.75 * s, dy = sl * s;
+    ctx.fillStyle = 'rgba(8,12,16,.26)'; ctx.beginPath();
+    ctx.moveTo(X(x0), Y(y0)); ctx.lineTo(X(x1), Y(y0)); ctx.lineTo(X(x1) + dx, Y(y0) + dy); ctx.lineTo(X(x1) + dx, Y(y1) + dy); ctx.lineTo(X(x0) + dx, Y(y1) + dy); ctx.lineTo(X(x0), Y(y1)); ctx.closePath(); ctx.fill();
+    const B = [[X(x0), Y(y0)], [X(x1), Y(y0)], [X(x1), Y(y1)], [X(x0), Y(y1)]], T = [wcProj(cam, x0, y0, h), wcProj(cam, x1, y0, h), wcProj(cam, x1, y1, h), wcProj(cam, x0, y1, h)];
+    const base = b.neon ? '#1e1b33' : (WC_WALL[b.k] || '#8a8f96');
+    const faces = [];
+    if (cam.y < y0) faces.push([0, 1, 14]); if (cam.x > x1) faces.push([1, 2, -26]); if (cam.y > y1) faces.push([2, 3, -40]); if (cam.x < x0) faces.push([3, 0, 0]);
+    for (const [i, j, shade] of faces) {
+        wcQuad(B[i], B[j], T[j], T[i], wcShade(base.length === 7 ? base : '#8a8f96', shade));
+        if (h > 40 && s > 0.45) {                                        // storeys: window bands (lit at night)
+            const n = Math.min(22, Math.floor(h / 26));
+            ctx.strokeStyle = night > 0.25 ? `rgba(255,214,120,${0.25 + night * 0.5})` : b.neon ? (i % 2 ? '#ff2bd6' : '#00e5ff') : 'rgba(255,255,255,.18)';
+            ctx.lineWidth = Math.max(1, 2 * s); if (night > 0.25) ctx.setLineDash([5 * s, 4 * s]);
+            ctx.beginPath();
+            for (let q = 1; q <= n; q++) { const t = q / (n + 1); ctx.moveTo(B[i][0] + (T[i][0] - B[i][0]) * t, B[i][1] + (T[i][1] - B[i][1]) * t); ctx.lineTo(B[j][0] + (T[j][0] - B[j][0]) * t, B[j][1] + (T[j][1] - B[j][1]) * t); }
+            ctx.stroke(); ctx.setLineDash([]);
+        }
+        if (b.neon) { ctx.save(); ctx.shadowColor = '#ff2bd6'; ctx.shadowBlur = 8; ctx.strokeStyle = '#ff2bd6'; ctx.lineWidth = Math.max(1, 1.6 * s); ctx.beginPath(); ctx.moveTo(B[i][0], B[i][1]); ctx.lineTo(T[i][0], T[i][1]); ctx.moveTo(B[j][0], B[j][1]); ctx.lineTo(T[j][0], T[j][1]); ctx.stroke(); ctx.restore(); }
+    }
+    const spr = wcBuildingSprite(b), k = T[0][2];
+    ctx.drawImage(spr, T[0][0] - WC_PAD * s * k, T[0][1] - WC_PAD * s * k, spr.width / wcSPR * s * k, spr.height / wcSPR * s * k);
+}
+function wcDrawTree25(p, s, cam) {
+    const spr = wcTreeSprite(p.v), [sx, sy, k] = wcProj(cam, p.x, p.y, 70);
+    ctx.fillStyle = 'rgba(8,12,16,.22)'; ctx.beginPath(); ctx.ellipse(worldToScreenX(p.x) + 10 * s, worldToScreenY(p.y) + 14 * s, (22 + (p.v % 4) * 5) * s, (16 + (p.v % 4) * 4) * s, 0, 0, 7); ctx.fill();
+    ctx.drawImage(spr, sx - 88 * s * k, sy - 88 * s * k, spr.width / wcSPR * s * k, spr.height / wcSPR * s * k);
+}
+// ---- countryside props ----
+function wcDrawCountryGround(p, s) {
+    const X = worldToScreenX, Y = worldToScreenY;
+    if (p.k === 'meadow') { ctx.fillStyle = 'rgba(190,210,110,.35)'; wcRR(ctx, X(p.x), Y(p.y), p.w * s, p.h * s, 40 * s); ctx.fill(); if (s > 0.3) { const r = wcRng(p.x * 7 + p.y); for (let i = 0; i < 30; i++) { ctx.fillStyle = ['#f4e36b', '#f5f2ea', '#e58fb2', '#b7a0e8'][i % 4]; ctx.beginPath(); ctx.arc(X(p.x + r() * p.w), Y(p.y + r() * p.h), 3 * s, 0, 7); ctx.fill(); } } }
+    else if (p.k === 'green') { ctx.fillStyle = '#7fb662'; ctx.beginPath(); ctx.ellipse(X(p.x + p.w / 2), Y(p.y + p.h / 2), p.w / 2 * s, p.h / 2 * s, 0, 0, 7); ctx.fill(); ctx.strokeStyle = '#cbbf9e'; ctx.lineWidth = Math.max(2, 18 * s); ctx.stroke(); }
+    else if (p.k === 'fence') { ctx.strokeStyle = 'rgba(120,88,52,.9)'; ctx.lineWidth = Math.max(1, 3 * s); ctx.strokeRect(X(p.x), Y(p.y), p.w * s, p.h * s); if (s > 0.35) { ctx.fillStyle = '#6d4f2e'; for (let t = 0; t <= p.w; t += 60) for (const yy of [p.y, p.y + p.h]) ctx.fillRect(X(p.x + t) - 2 * s, Y(yy) - 2 * s, 4 * s, 4 * s); } }
+}
+function wcDrawCountryProp(p, s, cam) {
+    const X = worldToScreenX, Y = worldToScreenY;
+    if (p.k === 'rock') { const r = p.w / 2, cx = X(p.x + r), cy = Y(p.y + r); ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(cx + 5 * s, cy + 6 * s, r * s, r * 0.8 * s, 0, 0, 7); ctx.fill(); ctx.fillStyle = ['#8a8d88', '#7d7f7a', '#9a9a92', '#6f736e'][p.v % 4]; ctx.beginPath(); ctx.ellipse(cx, cy, r * s, r * 0.85 * s, (p.v || 0) * 0.7, 0, 7); ctx.fill(); ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.beginPath(); ctx.ellipse(cx - r * 0.3 * s, cy - r * 0.3 * s, r * 0.4 * s, r * 0.3 * s, 0, 0, 7); ctx.fill(); }
+    else if (p.k === 'hay') { const cx = X(p.x + 18), cy = Y(p.y + 18); ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.beginPath(); ctx.arc(cx + 5 * s, cy + 6 * s, 18 * s, 0, 7); ctx.fill(); ctx.fillStyle = '#d9b75a'; ctx.beginPath(); ctx.arc(cx, cy, 18 * s, 0, 7); ctx.fill(); ctx.strokeStyle = '#b8933a'; ctx.lineWidth = Math.max(1, 2 * s); ctx.beginPath(); ctx.arc(cx, cy, 11 * s, 0, 7); ctx.stroke(); ctx.beginPath(); ctx.arc(cx, cy, 5 * s, 0, 7); ctx.stroke(); }
+    else if (p.k === 'well') { const cx = X(p.x + 26), cy = Y(p.y + 26); ctx.fillStyle = '#8f8a80'; ctx.beginPath(); ctx.arc(cx, cy, 26 * s, 0, 7); ctx.fill(); ctx.fillStyle = '#23465c'; ctx.beginPath(); ctx.arc(cx, cy, 16 * s, 0, 7); ctx.fill(); ctx.fillStyle = '#7a4a2b'; ctx.fillRect(cx - 30 * s, cy - 4 * s, 60 * s, 8 * s); }
+    else if (p.k === 'turbine') {
+        const bx = X(p.x + 12), by = Y(p.y + 12), [hx, hy, k] = wcProj(cam, p.x + 12, p.y + 12, 260), t = performance.now() / 1000 * 1.6 + (p.ph || 0);
+        ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = Math.max(2, 8 * s); ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + 80 * s, by + 110 * s); ctx.stroke();   // tower shadow
+        ctx.strokeStyle = '#e9edf0'; ctx.lineWidth = Math.max(2, 9 * s); ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(hx, hy); ctx.stroke();
+        ctx.fillStyle = '#f4f6f8'; for (let i = 0; i < 3; i++) { const a = t + i * 2.094; ctx.save(); ctx.translate(hx, hy); ctx.rotate(a); ctx.beginPath(); ctx.moveTo(0, -4 * s * k); ctx.quadraticCurveTo(60 * s * k, -8 * s * k, 120 * s * k, 0); ctx.quadraticCurveTo(60 * s * k, 5 * s * k, 0, 4 * s * k); ctx.closePath(); ctx.fill(); ctx.restore(); }
+        ctx.fillStyle = '#c9cfd4'; ctx.beginPath(); ctx.arc(hx, hy, 8 * s * k, 0, 7); ctx.fill();
+    }
+}
+
+// ===================== interiors in 2.5D, with live furniture ==============================================================
+const WC_FH = { desk: 22, monitor: 30, reception: 34, sofa: 20, plant: 46, cabinet: 58, cooler: 46, table: 20, dining: 22, tv: 36, counter: 34, island: 34, bed: 18, wardrobe: 76, nightstand: 22, kiosk: 64, bath: 22, fridge: 78, lamp: 64, radio: 26, coffee: 44, fireplace: 70, aquarium: 50, shower: 92, laptop: 26, elevator: 110, arcade: 66, directory: 64, fountain: 18, photobooth: 90, vending: 74, atmi: 56, checkin: 36, post: 34, board: 120, arch: 84, scanner: 30, window: 34, seats: 20, gatedesk: 34, chair: 18 };
+const WC_FSIDE = { desk: '#7a5a38', reception: '#4a3626', sofa: '#2e4256', plant: '#6b4a30', cabinet: '#69737b', cooler: '#aab4ba', table: '#57402a', dining: '#57402a', tv: '#101316', counter: '#6f7479', island: '#6f7479', bed: '#4a3222', wardrobe: '#5a3f2a', nightstand: '#5f4630', kiosk: '#3a3026', bath: '#c6cdd1', fridge: '#b9c2c8', lamp: '#3b3b3b', radio: '#4a3a2c', coffee: '#2b2b2b', fireplace: '#7d4a3a', aquarium: '#2f5f7a', shower: '#9fb3bf', laptop: '#3a3f45', elevator: '#5d7a8c', arcade: '#1b1d2e', directory: '#2e3a46', fountain: '#9aa4ad', photobooth: '#7a1f2b', vending: '#7a2222', atmi: '#2e5a3a', checkin: '#2d3a46', post: '#9aa4ad', board: '#14181c', arch: '#7f8a92', scanner: '#495560', window: '#3d5a70', seats: '#2a3a52', gatedesk: '#2d3a46', chair: '#24303b', monitor: '#15191d' };
+let wcFurnNoShadow = false, wcFurnSpr = new Map();
+function wcPaintFurniture2(g, f, D) {
+    const x = f.x, y = f.y, w = f.w, h = f.h, k = f.k;
+    switch (k) {
+        case 'lamp': g.fillStyle = '#e8d8a8'; g.beginPath(); g.arc(x, y, f.r, 0, 7); g.fill(); g.strokeStyle = '#b39b5c'; g.lineWidth = 2; g.stroke(); return true;
+        case 'radio': g.fillStyle = '#6b4a30'; wcRR(g, x, y, w, h, 4); g.fill(); g.fillStyle = '#d8c69a'; g.beginPath(); g.arc(x + 10, y + h / 2, 6, 0, 7); g.fill(); g.fillStyle = '#2a2a2a'; g.fillRect(x + 20, y + 6, 14, 3); return true;
+        case 'fridge': g.fillStyle = '#e8edf0'; wcRR(g, x, y, w, h, 6); g.fill(); g.strokeStyle = '#aab4ba'; g.lineWidth = 2; g.beginPath(); g.moveTo(x + 4, y + h * 0.4); g.lineTo(x + w - 4, y + h * 0.4); g.stroke(); g.fillStyle = '#8a959c'; g.fillRect(x + w - 12, y + 8, 4, 12); return true;
+        case 'coffee': g.fillStyle = '#2f2f2f'; wcRR(g, x, y, w, h, 4); g.fill(); g.fillStyle = '#c0392b'; g.fillRect(x + 6, y + 6, 6, 6); g.fillStyle = '#f2efe6'; g.beginPath(); g.arc(x + w / 2 + 3, y + h - 8, 5, 0, 7); g.fill(); return true;
+        case 'fireplace': g.fillStyle = '#9a5b46'; g.fillRect(x, y, w, h); g.fillStyle = '#2b1d17'; g.fillRect(x + w * 0.45, y + 16, w * 0.55, h - 32); for (let i = 0; i < 6; i++) { g.fillStyle = 'rgba(0,0,0,.15)'; g.fillRect(x, y + i * h / 6, w, 2); } return true;
+        case 'aquarium': g.fillStyle = '#2f5f7a'; g.fillRect(x, y, w, h); g.fillStyle = '#5fb3d9'; g.fillRect(x + 4, y + 4, w - 8, h - 8); g.fillStyle = '#d8c28a'; g.fillRect(x + 4, y + h - 10, w - 8, 6); return true;
+        case 'shower': g.fillStyle = '#dfe8ec'; g.fillRect(x, y, w, h); g.fillStyle = '#b8d3df'; g.fillRect(x + 6, y + 6, w - 12, h - 12); g.strokeStyle = 'rgba(255,255,255,.7)'; g.lineWidth = 2; g.strokeRect(x + 2, y + 2, w - 4, h - 4); g.fillStyle = '#8a959c'; g.beginPath(); g.arc(x + w / 2, y + h / 2, 5, 0, 7); g.fill(); return true;
+        case 'laptop': g.fillStyle = '#3a3f45'; g.fillRect(x, y, w, h); g.fillStyle = '#5aa6d8'; g.fillRect(x + 3, y + 3, w - 6, h - 10); return true;
+        case 'switch': g.fillStyle = '#f2efe6'; g.fillRect(x, y, w, h); g.fillStyle = '#888'; g.fillRect(x + 6, y + 2, 4, 6); return true;
+        case 'elevator': g.fillStyle = '#5d7a8c'; g.fillRect(x, y, w, h); g.fillStyle = 'rgba(170,220,255,.55)'; g.fillRect(x + 8, y + 8, w - 16, h - 16); g.strokeStyle = '#d8e6ee'; g.lineWidth = 3; g.strokeRect(x + 8, y + 8, w - 16, h - 16); g.fillStyle = '#fff'; g.font = 'bold 13px Ubuntu'; g.textAlign = 'center'; g.fillText('LIFT', x + w / 2, y + h / 2 + 5); return true;
+        case 'arcade': g.fillStyle = '#1b1d2e'; g.fillRect(x, y, w, h); g.fillStyle = ['#ff2bd6', '#00e5ff', '#ffb000'][f.col % 3]; g.fillRect(x + 4, y + 4, w - 8, 6); g.fillStyle = '#0a0a14'; g.fillRect(x + 8, y + 14, w - 16, h - 30); g.fillStyle = '#c0392b'; g.beginPath(); g.arc(x + 16, y + h - 9, 4, 0, 7); g.fill(); return true;
+        case 'directory': g.fillStyle = '#2e3a46'; g.fillRect(x, y, w, h); g.fillStyle = '#9fd8ff'; g.fillRect(x + 6, y + 6, w - 12, h - 12); g.fillStyle = '#1d4f7a'; for (let i = 0; i < 5; i++) g.fillRect(x + 10, y + 12 + i * 9, w - 20, 4); return true;
+        case 'fountain': g.fillStyle = '#b9c1c6'; g.beginPath(); g.arc(x, y, f.r, 0, 7); g.fill(); g.fillStyle = '#4f9fc9'; g.beginPath(); g.arc(x, y, f.r - 9, 0, 7); g.fill(); g.fillStyle = '#d6dde1'; g.beginPath(); g.arc(x, y, 12, 0, 7); g.fill(); return true;
+        case 'photobooth': g.fillStyle = '#a8293a'; g.fillRect(x, y, w, h); g.fillStyle = '#f4efe4'; g.fillRect(x + 10, y + 10, w - 20, 30); g.fillStyle = '#a8293a'; g.font = 'bold 15px Ubuntu'; g.textAlign = 'center'; g.fillText('PHOTO', x + w / 2, y + 31); g.fillStyle = '#3a0f16'; g.fillRect(x + 10, y + 50, w / 2 - 14, h - 60); return true;
+        case 'vending': g.fillStyle = '#c0392b'; g.fillRect(x, y, w, h); g.fillStyle = '#e8edf0'; g.fillRect(x + 6, y + 6, w - 22, h - 12); for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) { g.fillStyle = ['#2c7a5b', '#f2b233', '#1d6fa5'][i]; g.fillRect(x + 10 + j * 18, y + 10 + i * 13, 12, 8); } return true;
+        case 'atmi': g.fillStyle = '#2e7a4a'; g.fillRect(x, y, w, h); g.fillStyle = '#d9f2e0'; g.fillRect(x + 8, y + 8, w - 16, 16); g.fillStyle = '#fff'; g.font = 'bold 10px Ubuntu'; g.textAlign = 'center'; g.fillText('ATM', x + w / 2, y + h - 10); return true;
+        case 'checkin': g.fillStyle = '#e9ecef'; g.fillRect(x, y, w, h); g.fillStyle = f.col || '#1d6fa5'; g.fillRect(x, y, w, 12); g.fillStyle = '#2d3a46'; for (let i = 0; i < 2; i++) g.fillRect(x + 30 + i * 110, y + 20, 50, 22); g.fillStyle = '#fff'; g.font = 'bold 11px Ubuntu'; g.textAlign = 'center'; g.fillText('CHECK-IN ' + (f.n || ''), x + w / 2, y + 10); return true;
+        case 'post': g.fillStyle = '#c3cbd1'; g.beginPath(); g.arc(x, y, f.r, 0, 7); g.fill(); return true;
+        case 'board': g.fillStyle = '#14181c'; g.fillRect(x, y, w, h); return true;
+        case 'arch': g.strokeStyle = '#8a959c'; g.lineWidth = 8; g.strokeRect(x + 4, y + 4, w - 8, h - 8); g.fillStyle = 'rgba(80,200,120,.35)'; g.fillRect(x + 8, y + 8, w - 16, h - 16); return true;
+        case 'scanner': g.fillStyle = '#495560'; g.fillRect(x, y, w, h); g.fillStyle = '#2b3138'; g.fillRect(x + 6, y + 10, w - 12, h - 20); g.fillStyle = '#ffb000'; g.fillRect(x + 6, y + h / 2 - 12, w - 12, 24); return true;
+        case 'window': { const gr = g.createLinearGradient(x, y, x, y + h); gr.addColorStop(0, '#9fd3ff'); gr.addColorStop(1, '#4f8fbf'); g.fillStyle = gr; g.fillRect(x, y, w, h); g.fillStyle = 'rgba(255,255,255,.35)'; for (let i = 0; i < w; i += 90) g.fillRect(x + i, y, 6, h); return true; }
+        case 'seats': g.fillStyle = '#2a3a52'; g.fillRect(x, y, w, h); g.fillStyle = '#3d5578'; for (let i = 0; i < 6; i++) wcRR(g, x + 4 + i * (w - 8) / 6, y + 4, (w - 8) / 6 - 4, h - 8, 4), g.fill(); return true;
+        case 'gatedesk': g.fillStyle = '#e9ecef'; g.fillRect(x, y, w, h); g.fillStyle = '#1d4f7a'; g.fillRect(x, y + h - 12, w, 12); g.fillStyle = '#fff'; g.font = 'bold 11px Ubuntu'; g.textAlign = 'center'; g.fillText('GATE 2', x + w / 2, y + h - 2); return true;
+        case 'jetway': g.fillStyle = '#8d99a1'; g.fillRect(x, y, w, h); g.fillStyle = '#c9d1d6'; g.fillRect(x + 6, y + 4, w - 12, h - 8); return true;
+    }
+    return false;
+}
+function wcFurnSprite(f, D, i) {
+    const key = WC.intKey + '#' + i; let c = wcFurnSpr.get(key); if (c) return c;
+    const bx = f.r ? f.x - f.r : f.x, by = f.r ? f.y - f.r : f.y, bw = f.r ? 2 * f.r : f.w, bh = f.r ? 2 * f.r : f.h, pad = 4, sc = Math.min(wcSPR, 1.5);
+    c = document.createElement('canvas'); c.width = Math.ceil((bw + 2 * pad) * sc); c.height = Math.ceil((bh + 2 * pad) * sc);
+    const g = c.getContext('2d'); g.scale(sc, sc); g.translate(pad - bx, pad - by);
+    wcFurnNoShadow = true; if (!wcPaintFurniture2(g, f, D)) wcPaintFurniture(g, f, D); wcFurnNoShadow = false;
+    c._bx = bx - pad; c._by = by - pad; c._sc = sc; wcFurnSpr.set(key, c); return c;
+}
 function wcGetInterior() {
     if (wcIntCache && wcIntCache.key === WC.intKey) return wcIntCache;
     const D = WC.interior, fl = D.floor, M = 90, sc = Math.min(wcSPR, 1.25);
+    wcFurnSpr = new Map();
     const c = document.createElement('canvas'); c.width = Math.ceil((fl.w + 2 * M) * sc); c.height = Math.ceil((fl.h + 2 * M) * sc);
     const g = c.getContext('2d'); g.scale(sc, sc); g.translate(M - fl.x, M - fl.y);
     g.fillStyle = '#12171c'; g.fillRect(fl.x - M, fl.y - M, fl.w + 2 * M, fl.h + 2 * M);
     for (const r of D.rooms) {
-        const col = { office: '#8d9aa8', lobby: '#d8d1c0', living: '#c9a070', kitchen: '#cfd3d0', bedroom: '#b9a7a0', mall: D.theme.neon ? '#2a2540' : '#e4dfd2' }[r.c] || '#bbb';
-        if (r.c === 'mall') { g.fillStyle = col; g.fillRect(r.x, r.y, r.w, r.h); for (let x = r.x; x < r.x + r.w; x += 60) for (let y = r.y; y < r.y + r.h; y += 60) if (((x - r.x) / 60 + (y - r.y) / 60) % 2 === 0) { g.fillStyle = D.theme.neon ? 'rgba(255,43,214,.06)' : 'rgba(0,0,0,.04)'; g.fillRect(x, y, 60, 60); } continue; }
-        g.fillStyle = col; g.fillRect(r.x, r.y, r.w, r.h); g.strokeStyle = 'rgba(0,0,0,.10)'; g.lineWidth = 1;
-        if (r.c === 'living') { for (let y = r.y; y < r.y + r.h; y += 24) { g.beginPath(); g.moveTo(r.x, y); g.lineTo(r.x + r.w, y); g.stroke(); } }
-        else if (r.c === 'office') { for (let x = r.x; x < r.x + r.w; x += 48) { g.beginPath(); g.moveTo(x, r.y); g.lineTo(x, r.y + r.h); g.stroke(); } for (let y = r.y; y < r.y + r.h; y += 48) { g.beginPath(); g.moveTo(r.x, y); g.lineTo(r.x + r.w, y); g.stroke(); } }
-        else if (r.c === 'lobby' || r.c === 'kitchen') { for (let x = r.x; x < r.x + r.w; x += 40) for (let y = r.y; y < r.y + r.h; y += 40) { if (((x - r.x) / 40 + (y - r.y) / 40) % 2 === 0) { g.fillStyle = 'rgba(0,0,0,.05)'; g.fillRect(x, y, 40, 40); } } }
+        const col = { office: '#8d9aa8', lobby: '#d8d1c0', living: '#c9a070', kitchen: '#cfd3d0', bedroom: '#b9a7a0', mall: D.theme.neon ? '#2a2540' : '#e4dfd2', hall: '#dcdad3', lounge: '#c7ccd3' }[r.c] || '#bbb';
+        g.fillStyle = col; g.fillRect(r.x, r.y, r.w, r.h);
+        const tile = r.c === 'mall' || r.c === 'hall' ? 60 : r.c === 'lobby' || r.c === 'kitchen' ? 40 : 0;
+        if (tile) { for (let x = r.x; x < r.x + r.w; x += tile) for (let y = r.y; y < r.y + r.h; y += tile) if (((x - r.x) / tile + (y - r.y) / tile) % 2 === 0) { g.fillStyle = D.theme.neon ? 'rgba(255,43,214,.06)' : 'rgba(0,0,0,.05)'; g.fillRect(x, y, tile, tile); } }
+        else if (r.c === 'living') { g.strokeStyle = 'rgba(0,0,0,.10)'; for (let y = r.y; y < r.y + r.h; y += 24) { g.beginPath(); g.moveTo(r.x, y); g.lineTo(r.x + r.w, y); g.stroke(); } }
+        else if (r.c === 'office' || r.c === 'lounge') { g.strokeStyle = 'rgba(0,0,0,.08)'; for (let x = r.x; x < r.x + r.w; x += 48) { g.beginPath(); g.moveTo(x, r.y); g.lineTo(x, r.y + r.h); g.stroke(); } for (let y = r.y; y < r.y + r.h; y += 48) { g.beginPath(); g.moveTo(r.x, y); g.lineTo(r.x + r.w, y); g.stroke(); } }
         else { g.fillStyle = 'rgba(255,255,255,.04)'; for (let i = 0; i < 300; i++) g.fillRect(r.x + (i * 97 % r.w), r.y + (i * 53 % r.h), 3, 3); }
     }
-    if (D.kind === 'mall') { g.save(); g.fillStyle = D.theme.accent; g.fillRect(fl.x, fl.y - 26, fl.w, 26); g.fillStyle = '#fff'; g.font = 'bold 17px Ubuntu, Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(D.theme.name.toUpperCase(), fl.x + fl.w / 2, fl.y - 12); g.restore(); }
-    if (D.kind === 'office') { g.fillStyle = D.theme.accent; g.fillRect(fl.x, fl.y + fl.h - 304, fl.w, 5); g.save(); g.fillStyle = D.theme.accent; g.fillRect(fl.x, fl.y - 26, fl.w, 26); g.fillStyle = '#fff'; g.font = 'bold 17px Ubuntu, Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(D.theme.name.toUpperCase(), fl.x + fl.w / 2, fl.y - 12); g.restore(); }
-    for (const f of D.furn) wcPaintFurniture(g, f, D);
-    for (const w of D.walls) { g.fillStyle = '#2a323b'; g.fillRect(w.x, w.y, w.w, w.h); g.fillStyle = '#566272'; g.fillRect(w.x + 2, w.y + 2, w.w - 4, Math.min(5, w.h - 4)); }
-    const d = D.door; if (d.w > 0) { g.fillStyle = '#7a3b3b'; g.fillRect(d.x, d.y - 26, d.w, 26); g.fillStyle = 'rgba(255,255,255,.4)'; g.fillRect(d.x + 6, d.y - 22, d.w - 12, 3); g.fillStyle = '#e3d9b8'; g.fillRect(d.x, d.y, d.w, d.h);
-    g.fillStyle = 'rgba(255,255,255,.7)'; g.font = 'bold 14px Ubuntu, Arial'; g.textAlign = 'center'; g.fillText('EXIT', d.x + d.w / 2, d.y - 8); }
+    if (D.kind === 'terminal') { g.fillStyle = '#1d4f7a'; for (const x of [D.door.px - 260, D.door.px + 260]) { g.fillRect(x - 3, fl.y + 520, 6, fl.h - 520); } }
+    if (D.kind === 'mall' || D.kind === 'office' || D.kind === 'terminal') { g.save(); g.fillStyle = D.theme.accent; g.fillRect(fl.x, fl.y - 26, fl.w, 26); g.fillStyle = '#fff'; g.font = 'bold 17px Ubuntu, Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(D.theme.name.toUpperCase(), fl.x + fl.w / 2, fl.y - 12); g.restore(); }
+    if (D.kind === 'office') { g.fillStyle = D.theme.accent; g.fillRect(fl.x, fl.y + fl.h - 304, fl.w, 5); }
+    // flat things stay in the floor layer; everything with height is drawn live in 2.5D
+    for (const f of D.furn) if (!(WC_FH[f.k] > 0)) { if (!wcPaintFurniture2(g, f, D)) wcPaintFurniture(g, f, D); }
+    const d = D.door; if (d.w > 0) { g.fillStyle = '#e3d9b8'; g.fillRect(d.x, d.y, d.w, d.h); g.fillStyle = 'rgba(255,255,255,.75)'; g.font = 'bold 14px Ubuntu, Arial'; g.textAlign = 'center'; g.fillText('EXIT', d.x + d.w / 2, d.y - 8); }
     wcIntCache = { key: WC.intKey, c, M, sc, fl };
     return wcIntCache;
 }
 function wcDrawInterior() {
     if (!WC.interior) return;
-    const I = wcGetInterior(), s = 1 / fov;
-    ctx.fillStyle = '#0d1115'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const D = WC.interior, I = wcGetInterior(), s = 1 / fov, W = canvas.width, H = canvas.height, now = performance.now() / 1000, st = WC.fstate || {};
+    const cam = { x: camera.x + W * fov / 2, y: camera.y + H * fov / 2, hc: 1250 * fov };
+    ctx.fillStyle = '#0d1115'; ctx.fillRect(0, 0, W, H);
     ctx.drawImage(I.c, worldToScreenX(I.fl.x - I.M), worldToScreenY(I.fl.y - I.M), I.c.width / I.sc * s, I.c.height / I.sc * s);
-    if (WC.interior.kind === 'office') {   // the desk you are at lights up when you work
+    if (D.kind === 'office') {
         const me = gameState.entities.find(e => e.id === myId);
-        for (const st of WC.interior.stations) if (me && Math.hypot(st.x - me.x, st.y - me.y) < st.r) { ctx.strokeStyle = 'rgba(255,230,120,.55)'; ctx.lineWidth = Math.max(2, 3 * s); ctx.beginPath(); ctx.arc(worldToScreenX(st.x), worldToScreenY(st.y), 26 * s, 0, 7); ctx.stroke(); }
+        for (const stn of D.stations) if (!stn.use && me && Math.hypot(stn.x - me.x, stn.y - me.y) < stn.r) { ctx.strokeStyle = 'rgba(255,230,120,.55)'; ctx.lineWidth = Math.max(2, 3 * s); ctx.beginPath(); ctx.arc(worldToScreenX(stn.x), worldToScreenY(stn.y), 26 * s, 0, 7); ctx.stroke(); }
+    }
+    // interactive furniture: a soft ring shows what you can use
+    const me = gameState.entities.find(e => e.id === myId);
+    for (const stn of D.stations) if (stn.use && me && Math.hypot(stn.x - me.x, stn.y - me.y) < stn.r + 120) { ctx.strokeStyle = `rgba(120,200,255,${0.25 + 0.15 * Math.sin(now * 3)})`; ctx.lineWidth = Math.max(1, 2 * s); ctx.setLineDash([6 * s, 6 * s]); ctx.beginPath(); ctx.arc(worldToScreenX(stn.x), worldToScreenY(stn.y), 22 * s, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
+    // volumes: walls + furniture, lowest first
+    const items = [];
+    D.walls.forEach(w => items.push({ wall: 1, x: w.x, y: w.y, w: w.w, h: w.h, hh: 100 }));
+    D.furn.forEach((f, i) => { const hh = WC_FH[f.k]; if (hh > 0) items.push({ f, i, hh }); });
+    items.sort((a, b) => a.hh - b.hh);
+    const X = worldToScreenX, Y = worldToScreenY, glows = [];
+    for (const it of items) {
+        if (it.wall) {
+            const x0 = it.x, y0 = it.y, x1 = it.x + it.w, y1 = it.y + it.h, B = [[X(x0), Y(y0)], [X(x1), Y(y0)], [X(x1), Y(y1)], [X(x0), Y(y1)]], T = [wcProj(cam, x0, y0, it.hh), wcProj(cam, x1, y0, it.hh), wcProj(cam, x1, y1, it.hh), wcProj(cam, x0, y1, it.hh)];
+            if (cam.y < y0) wcQuad(B[0], B[1], T[1], T[0], '#4a5562'); if (cam.x > x1) wcQuad(B[1], B[2], T[2], T[1], '#3b4550'); if (cam.y > y1) wcQuad(B[2], B[3], T[3], T[2], '#56626f'); if (cam.x < x0) wcQuad(B[3], B[0], T[0], T[3], '#46515d');
+            wcQuad(T[0], T[1], T[2], T[3], '#2a323b'); ctx.strokeStyle = '#6b7889'; ctx.lineWidth = Math.max(1, 2 * s); ctx.beginPath(); ctx.moveTo(T[0][0], T[0][1]); ctx.lineTo(T[1][0], T[1][1]); ctx.lineTo(T[2][0], T[2][1]); ctx.lineTo(T[3][0], T[3][1]); ctx.closePath(); ctx.stroke();
+            continue;
+        }
+        const f = it.f, hh = it.hh, side = WC_FSIDE[f.k] || '#555';
+        if (f.r) {                                                          // cylinder
+            const [tx, ty, k] = wcProj(cam, f.x, f.y, hh), bx = X(f.x), by = Y(f.y), dx = tx - bx, dy = ty - by, L = Math.hypot(dx, dy) || 1, nx = -dy / L * f.r * s, ny = dx / L * f.r * s;
+            ctx.fillStyle = side; ctx.beginPath(); ctx.arc(bx, by, f.r * s, 0, 7); ctx.fill(); wcQuad([bx + nx, by + ny], [tx + nx * k, ty + ny * k], [tx - nx * k, ty - ny * k], [bx - nx, by - ny], side);
+        } else {
+            const x0 = f.x, y0 = f.y, x1 = f.x + f.w, y1 = f.y + f.h, B = [[X(x0), Y(y0)], [X(x1), Y(y0)], [X(x1), Y(y1)], [X(x0), Y(y1)]], T = [wcProj(cam, x0, y0, hh), wcProj(cam, x1, y0, hh), wcProj(cam, x1, y1, hh), wcProj(cam, x0, y1, hh)];
+            ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.fillRect(B[0][0] + 4 * s, B[0][1] + 5 * s, f.w * s, f.h * s);
+            if (cam.y < y0) wcQuad(B[0], B[1], T[1], T[0], wcShade(side.length === 7 ? side : '#555555', 10)); if (cam.x > x1) wcQuad(B[1], B[2], T[2], T[1], wcShade(side.length === 7 ? side : '#555555', -12));
+            if (cam.y > y1) wcQuad(B[2], B[3], T[3], T[2], wcShade(side.length === 7 ? side : '#555555', -22)); if (cam.x < x0) wcQuad(B[3], B[0], T[0], T[3], side);
+        }
+        const spr = wcFurnSprite(f, D, it.i), [sx, sy, k] = wcProj(cam, spr._bx, spr._by, hh);
+        ctx.drawImage(spr, sx, sy, spr.width / spr._sc * s * k, spr.height / spr._sc * s * k);
+        // live overlays on the top face
+        const top = (fx, fy) => wcProj(cam, fx, fy, hh);
+        const on = !!st[it.i];
+        if (f.k === 'tv' && on) { const [ax, ay] = top(f.x + 3, f.y + 3), [bx2, by2] = top(f.x + f.w - 3, f.y + f.h - 6), hue = (now * 40) % 360; const gr = ctx.createLinearGradient(ax, ay, bx2, by2); gr.addColorStop(0, `hsl(${hue},70%,55%)`); gr.addColorStop(1, `hsl(${(hue + 120) % 360},70%,45%)`); ctx.fillStyle = gr; ctx.fillRect(ax, ay, bx2 - ax, by2 - ay); glows.push([ax + (bx2 - ax) / 2, by2 + 30 * s, 130, `hsla(${hue},80%,70%,.35)`]); }
+        if (f.k === 'lamp' && on) { const [ax, ay] = top(f.x, f.y); ctx.fillStyle = '#fff3c4'; ctx.beginPath(); ctx.arc(ax, ay, f.r * s * k * 0.7, 0, 7); ctx.fill(); glows.push([ax, ay, 260, 'rgba(255,214,140,.45)']); }
+        if (f.k === 'fireplace' && on) { const [ax, ay] = top(f.x + f.w * 0.55, f.y + 20), [bx2, by2] = top(f.x + f.w, f.y + f.h - 20); for (let q = 0; q < 6; q++) { const fy = ay + (by2 - ay) * (q + 0.5) / 6, fx = ax + (bx2 - ax) * (0.5 + 0.35 * Math.sin(now * 9 + q * 1.7)); ctx.fillStyle = q % 2 ? '#ffb000' : '#ff5a1f'; ctx.beginPath(); ctx.ellipse(fx, fy, 8 * s * k, 5 * s * k, 0, 0, 7); ctx.fill(); } glows.push([(ax + bx2) / 2, (ay + by2) / 2, 220, 'rgba(255,140,60,.45)']); }
+        if (f.k === 'radio' && on) { ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = `bold ${Math.max(10, 18 * s)}px Ubuntu`; ctx.textAlign = 'center'; for (let q = 0; q < 3; q++) { const t = (now * 0.8 + q / 3) % 1, [ax, ay] = top(f.x + f.w / 2, f.y); ctx.globalAlpha = 1 - t; ctx.fillText(q % 2 ? '♫' : '♪', ax + Math.sin(t * 6 + q) * 14 * s, ay - t * 60 * s); } ctx.globalAlpha = 1; }
+        if (f.k === 'aquarium') { const [ax, ay] = top(f.x + 6, f.y + 6), [bx2, by2] = top(f.x + f.w - 6, f.y + f.h - 12); for (let q = 0; q < 4; q++) { const t = (now * (0.15 + q * 0.05) + q * 0.3) % 1, fx = ax + (bx2 - ax) * (q % 2 ? t : 1 - t), fy = ay + (by2 - ay) * (0.3 + 0.15 * q); ctx.fillStyle = ['#ff8a3d', '#ffd23d', '#3dd5ff', '#ff5fa2'][q]; ctx.beginPath(); ctx.ellipse(fx, fy, 6 * s, 3 * s, 0, 0, 7); ctx.fill(); } }
+        if (f.k === 'fountain') { const [ax, ay, kk] = top(f.x, f.y); for (let q = 0; q < 3; q++) { const t = (now * 0.6 + q / 3) % 1; ctx.strokeStyle = `rgba(255,255,255,${0.6 * (1 - t)})`; ctx.lineWidth = Math.max(1, 2 * s); ctx.beginPath(); ctx.arc(ax, ay, (14 + t * (f.r - 22)) * s * kk, 0, 7); ctx.stroke(); } }
+        if (f.k === 'arcade') { const [ax, ay] = top(f.x + 8, f.y + 14), [bx2, by2] = top(f.x + f.w - 8, f.y + f.h - 16); ctx.fillStyle = `hsl(${(now * 120 + f.col * 90) % 360},80%,${45 + 10 * Math.sin(now * 7)}%)`; ctx.fillRect(ax, ay, bx2 - ax, by2 - ay); glows.push([(ax + bx2) / 2, by2 + 20 * s, 90, 'rgba(120,200,255,.3)']); }
+        if (f.k === 'elevator') { const [ax, ay] = top(f.x + 14, f.y + 14), [bx2, by2] = top(f.x + f.w - 14, f.y + f.h - 14), t = (Math.sin(now * 0.7) + 1) / 2; ctx.fillStyle = 'rgba(40,60,80,.55)'; ctx.fillRect(ax + (bx2 - ax) * 0.15, ay + (by2 - ay) * (0.1 + 0.5 * t), (bx2 - ax) * 0.7, (by2 - ay) * 0.3); }
+        if (f.k === 'board') {                                              // live departures board
+            const [ax, ay] = top(f.x, f.y), [bx2, by2] = top(f.x + f.w, f.y + f.h), hh2 = by2 - ay, list = wcDepartures(D);
+            ctx.fillStyle = '#0b0e10'; ctx.fillRect(ax, ay, bx2 - ax, hh2); ctx.font = `bold ${Math.max(7, hh2 / 4.2)}px monospace`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+            const shift = Math.floor(now / 3) % Math.max(1, list.length);
+            for (let q = 0; q < 3; q++) { const row = list[(shift + q) % list.length]; if (!row) break; ctx.fillStyle = q === 0 ? '#ffd23d' : '#f2b233'; ctx.fillText(row, ax + 6 * s, ay + 3 * s + q * hh2 / 3.2); }
+        }
+        if (f.k === 'window') { const [ax, ay] = top(f.x, f.y), [bx2, by2] = top(f.x + f.w, f.y + f.h), t = (now * 0.03) % 1; ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.font = `${Math.max(8, (by2 - ay) * 0.9)}px sans-serif`; ctx.fillText('✈', ax + (bx2 - ax) * t, by2 - 2); }
+    }
+    // the lights
+    if (st.off) {
+        ctx.fillStyle = 'rgba(4,7,18,.8)'; ctx.fillRect(0, 0, W, H);
+        ctx.save(); ctx.globalCompositeOperation = 'lighter';
+        for (const [gx, gy, r, col] of glows) { const gr = ctx.createRadialGradient(gx, gy, 0, gx, gy, r * s); gr.addColorStop(0, col); gr.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = gr; ctx.fillRect(gx - r * s, gy - r * s, 2 * r * s, 2 * r * s); }
+        ctx.restore();
+    } else if (glows.length) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; for (const [gx, gy, r, col] of glows) { const gr = ctx.createRadialGradient(gx, gy, 0, gx, gy, r * s * 0.7); gr.addColorStop(0, col.replace(/,\.\d+\)$/, ',.18)')); gr.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = gr; ctx.fillRect(gx - r * s, gy - r * s, 2 * r * s, 2 * r * s); } ctx.restore(); }
+}
+function wcDepartures(D) {
+    const A = (WC.airports || []).find(a => a.city === (D.theme && D.theme.city)); if (!A) return [];
+    if (WC._dep && WC._dep.k === A.code) return WC._dep.l;
+    const rows = (WC.airports || []).filter(b => b !== A).map(b => { const c = WC.cities.find(q => q.id === b.city), dx = wcWrapD(b.sb.x - A.sb.x), d = Math.hypot(dx, b.sb.y - A.sb.y); return [d, `${b.code}  ${c.name.toUpperCase().slice(0, 14).padEnd(14)} ${wcTzLabel(c.tz).padEnd(6)} ${dx >= 0 ? 'EAST' : 'WEST'}  ON TIME`]; }).sort((p, q) => p[0] - q[0]).map(r => r[1]);
+    WC._dep = { k: A.code, l: rows }; return rows;
+}
+
+// ===================== boarding-pass picker: a scrollable gallery of destination cards ======================================
+const wcSnapCache = new Map();
+// An aerial "photo" of a city drawn from its real street plan: outline, roads (in the city's style), building texture, airport.
+function wcCitySnapshot(id) {
+    if (wcSnapCache.has(id)) return wcSnapCache.get(id);
+    const q = WC.cities.find(c => c.id === id); if (!q) return '';
+    const Wc = 300, Hc = 170, cv = document.createElement('canvas'); cv.width = Wc; cv.height = Hc; const g = cv.getContext('2d');
+    const style = q.style || 'generic', R = q.border * 1.05, k = Math.min(Wc, Hc * 1.3) / (2 * R), X = x => Wc / 2 + wcWrapD(x - q.cx) * k, Y = y => Hc / 2 + (y - q.cy) * k;
+    const bg = { cyber: ['#1a1530', '#2b1f4a'], oldtown: ['#cdbb8f', '#b9a273'], rural: ['#8fae5c', '#a9c06a'] }[style] || { port: ['#6f9fb8', '#88b2c4'], sun: ['#d8c07a', '#e2cf8f'], mesa: ['#c98e5c', '#d9a06c'], tropic: ['#5fb39a', '#79c4a8'], blossom: ['#d9a7bb', '#e8bfcf'], pine: ['#5d8a5a', '#77a06a'], hill: ['#8fa86f', '#a3b884'] }[q.theme] || ['#7fae66', '#93bf77'];
+    const gr = g.createLinearGradient(0, 0, Wc, Hc); gr.addColorStop(0, bg[0]); gr.addColorStop(1, bg[1]); g.fillStyle = gr; g.fillRect(0, 0, Wc, Hc);
+    const N = q.bp.length, path = sc => { g.beginPath(); for (let i = 0; i <= N; i++) { const a = i / N * Math.PI * 2, r = q.bp[i % N] * sc; const x = Wc / 2 + Math.cos(a) * r * k, y = Hc / 2 + Math.sin(a) * r * k; i ? g.lineTo(x, y) : g.moveTo(x, y); } g.closePath(); };
+    g.fillStyle = style === 'cyber' ? '#24203d' : style === 'oldtown' ? '#d9c39c' : style === 'rural' ? '#a7b87a' : '#b9b8ad'; path(1); g.fill();
+    g.save(); path(1); g.clip();
+    const rng = wcRng(id.length * 9973 + q.cx), pal = style === 'cyber' ? ['#ff2bd6', '#00e5ff', '#7a5cff', '#2f3050', '#3a3760'] : style === 'oldtown' ? ['#b5563a', '#c4693f', '#a24b33', '#e8dcc0'] : style === 'rural' ? ['#8a2f28', '#e2d6bd', '#c9b37a'] : ['#76828d', '#85919a', '#a56a4b', '#566a78', '#e2d6bd'];
+    for (let i = 0; i < (style === 'rural' ? 260 : 1500); i++) { const a = rng() * Math.PI * 2, d = Math.sqrt(rng()) * R, x = Wc / 2 + Math.cos(a) * d * k, y = Hc / 2 + Math.sin(a) * d * k, sz = (style === 'cyber' ? 2.5 + (1 - d / R) * 5 : 2.4 + rng() * 2.8); g.fillStyle = pal[Math.floor(rng() * pal.length)]; g.fillRect(x, y, sz, sz * (0.7 + rng() * 0.6)); }
+    g.restore();
+    for (const r of WC.roads) {
+        const vert = r.a === 'v', o = r.o ?? WC.center;
+        if (Math.abs(wcWrapD((vert ? r.p : o) - q.cx)) > R + r.e && r.c !== 'x') continue;
+        if (Math.abs((vert ? o : r.p) - q.cy) > R + (vert ? r.e : 0)) continue;
+        g.strokeStyle = r.c === 'x' ? '#e8962a' : style === 'cyber' ? (r.c === 'a' ? '#00e5ff' : 'rgba(255,43,214,.22)') : style === 'oldtown' && r.c !== 'a' ? 'rgba(120,100,76,.35)' : style === 'rural' && r.c !== 'a' ? 'rgba(150,120,80,.4)' : r.c === 'a' ? '#3e444c' : 'rgba(70,76,84,.28)';
+        g.lineWidth = r.c === 'x' ? 2.6 : r.c === 'a' ? 1.8 : 0.5;
+        if (style === 'cyber' && r.c === 'a') { g.shadowColor = '#00e5ff'; g.shadowBlur = 4; } else g.shadowBlur = 0;
+        g.beginPath(); if (vert) { g.moveTo(X(r.p), Y(o - r.e)); g.lineTo(X(r.p), Y(o + r.e)); } else { g.moveTo(X(o - r.e), Y(r.p)); g.lineTo(X(o + r.e), Y(r.p)); } g.stroke();
+    }
+    g.shadowBlur = 0;
+    const ap = (WC.airports || []).find(a => a.city === id); if (ap) { g.fillStyle = '#fff'; g.font = '15px sans-serif'; g.textAlign = 'center'; g.fillText('✈', X(ap.door.x), Y(ap.door.y) + 5); }
+    const vg = g.createRadialGradient(Wc / 2, Hc / 2, Hc * 0.4, Wc / 2, Hc / 2, Wc * 0.65); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.35)'); g.fillStyle = vg; g.fillRect(0, 0, Wc, Hc);
+    const url = cv.toDataURL('image/jpeg', 0.82); wcSnapCache.set(id, url); return url;
+}
+let wcCardsEl = null;
+function wcRenderCards(p) {
+    if (!wcCardsEl) {
+        wcCardsEl = document.createElement('div'); wcCardsEl.id = 'wc-cards';
+        wcCardsEl.innerHTML = '<div class="wcc-head"><div><div class="wcc-title"></div><div class="wcc-sub"></div></div><button class="wcc-x" title="Close">✕</button></div><div class="wcc-grid"></div>';
+        document.body.appendChild(wcCardsEl);
+        wcCardsEl.querySelector('.wcc-x').addEventListener('click', () => { wcCardsEl.style.display = 'none'; wcCardsEl.dataset.closed = wcCardsEl.dataset.id; });
+        wcCardsEl.addEventListener('wheel', e => e.stopPropagation(), { passive: true });
+    }
+    if (!p) { wcCardsEl.style.display = 'none'; wcCardsEl.dataset.id = ''; return; }
+    if (wcCardsEl.dataset.closed === p.id) return;
+    const key = JSON.stringify([p.id, p.lines, p.actions.map(a => [a.a, a.on])]);
+    wcCardsEl.style.display = 'flex';
+    if (wcCardsEl.dataset.key === key) return;
+    wcCardsEl.dataset.key = key; wcCardsEl.dataset.id = p.id;
+    wcCardsEl.querySelector('.wcc-title').textContent = p.title || '';
+    wcCardsEl.querySelector('.wcc-sub').textContent = (p.lines || []).join(' · ');
+    const head = { east: 'Eastbound →', west: '← Westbound', north: '↑ Northbound', south: '↓ Southbound' };
+    wcCardsEl.querySelector('.wcc-grid').innerHTML = p.actions.map(a => `
+        <div class="wcc-card${a.on === false ? ' off' : ''}">
+          <div class="wcc-img" style="background-image:url(${wcCitySnapshot(a.city)})"><span class="wcc-code">${escapeHTML(a.code)}</span><span class="wcc-tz">${escapeHTML(wcTzLabel(a.tz))}</span></div>
+          <div class="wcc-cap"><div class="wcc-name">${escapeHTML(a.name)}</div><div class="wcc-meta">${head[a.head] || ''} · ~${a.mins} min · ${a.km.toLocaleString()} km</div>
+          <button class="wcc-buy" data-a="${escapeHTML(a.a)}" ${a.on === false ? 'disabled' : ''}>✈ ${escapeHTML(WC.airports.find(x => x.city === (WC.interior && WC.interior.theme.city))?.code || '')} → ${escapeHTML(a.code)} · Buy ${a.fare.toLocaleString()}</button></div>
+        </div>`).join('');
+    wcCardsEl.querySelectorAll('.wcc-buy').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); worldSend('world_interact', { id: p.id, a: b.dataset.a }); }));
+}
+
+// ===================== long-haul in-flight screen: the globe as a cylinder ===========================================
+let wcIfe = null;
+function wcIfeEnsure() {
+    if (wcIfe) return wcIfe;
+    const el = document.createElement('div'); el.id = 'wc-ife';
+    el.innerHTML = `<div class="ife-tabs"><button data-t="route" class="on">🌍 Route</button><button data-t="menu">🍽 Menu</button><button data-t="info">ℹ Flight info</button><span class="ife-sp"></span><button class="ife-min" title="Minimise">▾</button></div>
+      <div class="ife-body"><canvas class="ife-cv" width="760" height="270"></canvas><div class="ife-menu"></div><div class="ife-info"></div></div>`;
+    document.body.appendChild(el);
+    const pill = document.createElement('button'); pill.id = 'wc-ife-pill'; pill.textContent = '✈ In-flight screen'; document.body.appendChild(pill);
+    wcIfe = { el, pill, tab: 'route', open: false, rot: 0, drag: null, idle: 0, cv: el.querySelector('.ife-cv') };
+    el.querySelectorAll('.ife-tabs button[data-t]').forEach(b => b.addEventListener('click', () => { wcIfe.tab = b.dataset.t; el.querySelectorAll('.ife-tabs button[data-t]').forEach(x => x.classList.toggle('on', x === b)); wcIfeRender(true); }));
+    el.querySelector('.ife-min').addEventListener('click', () => { wcIfe.open = false; wcIfe.userClosed = true; wcIfeRender(true); });
+    pill.addEventListener('click', () => { wcIfe.open = true; wcIfeRender(true); });
+    const cv = wcIfe.cv;
+    cv.addEventListener('pointerdown', e => { wcIfe.drag = { x: e.clientX, r: wcIfe.rot }; cv.setPointerCapture(e.pointerId); });
+    cv.addEventListener('pointermove', e => { if (wcIfe.drag) { wcIfe.rot = wcIfe.drag.r - (e.clientX - wcIfe.drag.x) * 0.012; wcIfe.idle = performance.now(); } });
+    cv.addEventListener('pointerup', () => { wcIfe.drag = null; wcIfe.idle = performance.now(); });
+    el.addEventListener('wheel', e => e.stopPropagation(), { passive: true });
+    return wcIfe;
+}
+function wcIfeRender(force) {
+    const I = wcIfeEnsure(), f = wcFlight, flying = isWorldMode && f;
+    if (!flying) { I.el.style.display = 'none'; I.pill.style.display = 'none'; I.userClosed = false; I.autoDone = false; return; }
+    if (f.long && f.ph === 'air' && !I.autoDone && !I.userClosed) { I.open = true; I.autoDone = true; }
+    I.el.style.display = I.open ? 'flex' : 'none'; I.pill.style.display = I.open ? 'none' : 'block';
+    if (!I.open) return;
+    const body = I.el.querySelector('.ife-body');
+    body.querySelector('.ife-cv').style.display = I.tab === 'route' ? 'block' : 'none';
+    body.querySelector('.ife-menu').style.display = I.tab === 'menu' ? 'block' : 'none';
+    body.querySelector('.ife-info').style.display = I.tab === 'info' ? 'grid' : 'none';
+    if (I.tab === 'menu' && (force || !I.menuBuilt)) {
+        I.menuBuilt = true;
+        const m = WC.inflight || {};
+        body.querySelector('.ife-menu').innerHTML = `<div class="ife-mh">Served at your seat · charged to your cash or bank</div>` + Object.entries(m).map(([id, it]) => `<div class="ife-mi"><div><b>${escapeHTML(it.name)}</b><small>${[it.heal ? `+${it.heal}% health` : '', it.speed ? '+25% speed' : '', it.xp ? `+${it.xp} score` : '', it.souvenir ? 'collectable for ' + escapeHTML(f.toName) : ''].filter(Boolean).join(' · ')}</small></div><button data-i="${id}">Order · ${it.price}</button></div>`).join('');
+        body.querySelectorAll('.ife-mi button').forEach(b => b.addEventListener('click', () => worldSend('world_inflight', { item: b.dataset.i })));
+    }
+    if (I.tab === 'info') {
+        const me = gameState.entities.find(e => e.id === myId), dz = ((f.tz - f.fromTz) % 24 + 36) % 24 - 12;
+        const clock = tz => { const h = ((6 + (Date.now() % WC_DAY_MS) / WC_DAY_MS * 24 + tz) % 24 + 24) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); };
+        const anti = me ? wcAntipodeCity(me.x, me.y) : null, crossIDL = wcRouteCrossesIDL(f);
+        const rows = [['From', `${f.fromName} (${f.fromCode}) · ${clock(f.fromTz)} ${wcTzLabel(f.fromTz)}`], ['To', `${f.toName} (${f.toCode}) · ${clock(f.tz)} ${wcTzLabel(f.tz)}`],
+            ['Time difference', `${dz >= 0 ? '+' : ''}${dz} h`], ['Direction', ({ east: 'Eastbound', west: 'Westbound', north: 'Northbound', south: 'Southbound' })[f.dir] + (crossIDL ? ' · crosses the date line' : '')],
+            ['Distance', `${Math.round((f.total - f.rem) / 1000).toLocaleString()} / ${Math.round(f.total / 1000).toLocaleString()} km`], ['Time to arrival', `${Math.floor(f.eta / 60)}:${String(f.eta % 60).padStart(2, '0')}`],
+            ['Altitude', `${Math.round(f.alt * 11000).toLocaleString()} m`], ['Ground speed', `${f.kmh.toLocaleString()} km/h`], ['Antipode below you', anti ? `${anti.name} (${wcTzLabel(anti.tz)}) is on the opposite side of the world` : '—']];
+        const html = rows.map(([k, v]) => `<div class="ife-k">${k}</div><div class="ife-v">${escapeHTML(String(v))}</div>`).join('');
+        const inf = body.querySelector('.ife-info'); if (inf.dataset.h !== html) { inf.dataset.h = html; inf.innerHTML = html; }
     }
 }
+function wcAntipodeCity(x, y) { const ax = x + (WC.circ || 0) / 2; let best = null, bd = Infinity; for (const c of WC.cities || []) { const d = Math.abs(wcWrapD(c.cx - ax)) + Math.abs(c.cy - y) * 0.3; if (d < bd) { bd = d; best = c; } } return best; }
+function wcRouteCrossesIDL(f) { const A = WC.airports.find(a => a.city === f.from), B = WC.airports.find(a => a.city === f.to); if (!A || !B) return false; const dx = wcWrapD(B.sb.x - A.sb.x), x2 = A.sb.x + dx; return x2 < 0 || x2 >= WC.circ; }
+// 3D cylinder: longitude = x / circumference, height = y. Looks slightly from above; the near side is lit, night side shaded.
+function wcIfeDraw() {
+    const I = wcIfe; if (!I || !I.open || I.tab !== 'route' || !wcFlight || !WC.circ) return;
+    const f = wcFlight, cv = I.cv, g = cv.getContext('2d'), Wc = cv.width, Hc = cv.height, C = WC.circ, EY = WC.extentY || 1;
+    const me = gameState.entities.find(e => e.id === myId), rp = me && renderEntities.get(me.id), px = rp ? rp.renderX : (me ? me.x : 0), py = rp ? rp.renderY : (me ? me.y : 0);
+    if (!I.drag && performance.now() - (I.idle || 0) > 4000) I.rot *= 0.94;
+    const phi = px / C * Math.PI * 2 + I.rot, R = Math.min(Wc * 0.36, 270), cx = Wc / 2, cy = Hc / 2 + 6, ky = (Hc * 0.52) / EY, tau = 0.42;
+    const P = (x, y) => { const a = x / C * Math.PI * 2 - phi, X3 = R * Math.sin(a), Z3 = R * Math.cos(a), Y3 = (y - EY / 2) * ky; return [cx + X3, cy + Y3 * Math.cos(tau) + Z3 * Math.sin(tau) * 0.28, Z3 / R]; };
+    const bg = g.createLinearGradient(0, 0, 0, Hc); bg.addColorStop(0, '#06101f'); bg.addColorStop(1, '#0d2238'); g.fillStyle = bg; g.fillRect(0, 0, Wc, Hc);
+    for (let i = 0; i < 60; i++) { g.fillStyle = 'rgba(255,255,255,.5)'; g.fillRect((i * 97) % Wc, (i * 53) % Hc, 1.2, 1.2); }
+    const L = WC.land, steps = 180, sunAt = x => Math.sin(((((Date.now() % WC_DAY_MS) / WC_DAY_MS + wcWrapD(x - WC.center) / C) % 1 + 1) % 1) * Math.PI * 2);
+    // strips, back to front
+    const strips = [];
+    for (let i = 0; i < steps; i++) { const x0 = i / steps * C, x1 = (i + 1) / steps * C, a = ((x0 + x1) / 2) / C * Math.PI * 2 - phi; strips.push({ x0, x1, z: Math.cos(a) }); }
+    strips.sort((p, q) => p.z - q.z);
+    for (const sp of strips) {
+        const front = sp.z > 0, lit = 0.35 + 0.65 * Math.max(0, sp.z), sun = sunAt((sp.x0 + sp.x1) / 2), night = sun < 0 ? Math.min(0.6, -sun * 0.8) : 0;
+        const a0 = P(sp.x0, 0), a1 = P(sp.x1, 0), b1 = P(sp.x1, EY), b0 = P(sp.x0, EY);
+        const quad = (p, q, r, s2, col) => { g.fillStyle = col; g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.lineTo(r[0], r[1]); g.lineTo(s2[0], s2[1]); g.closePath(); g.fill(); };
+        g.globalAlpha = front ? 1 : 0.28;
+        quad(a0, a1, b1, b0, `rgb(${Math.round(30 * lit * (1 - night))},${Math.round(90 * lit * (1 - night))},${Math.round(150 * lit * (1 - night * 0.6))})`);
+        const lx0 = Math.max(sp.x0, L.x0), lx1 = Math.min(sp.x1, L.x1);
+        if (lx1 > lx0) quad(P(lx0, L.y0), P(lx1, L.y0), P(lx1, L.y1), P(lx0, L.y1), `rgb(${Math.round(95 * lit * (1 - night))},${Math.round(150 * lit * (1 - night))},${Math.round(80 * lit * (1 - night))})`);
+        g.globalAlpha = 1;
+    }
+    // rims
+    g.strokeStyle = 'rgba(160,210,255,.5)'; g.lineWidth = 1.2;
+    for (const yy of [0, EY]) { g.beginPath(); for (let i = 0; i <= 120; i++) { const p = P(i / 120 * C, yy); i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); } g.stroke(); }
+    // time-zone meridians and the date line
+    if (WC.gap) for (let x = 0; x < C; x += WC.gap / 2) {
+        const top = P(x, 0), bot = P(x, EY); if (top[2] < 0) continue; const idl = Math.abs(wcWrapD(x)) < 1;
+        g.strokeStyle = idl ? 'rgba(255,110,110,.95)' : 'rgba(255,255,255,.18)'; g.lineWidth = idl ? 2 : 1; g.setLineDash(idl ? [6, 4] : [3, 5]); g.beginPath(); g.moveTo(top[0], top[1]); g.lineTo(bot[0], bot[1]); g.stroke(); g.setLineDash([]);
+        g.fillStyle = idl ? '#ff9a9a' : 'rgba(255,255,255,.6)'; g.font = '10px Ubuntu, sans-serif'; g.textAlign = 'center';
+        const tz = Math.round(wcWrapD(x - WC.center) / WC.gap * 6); g.fillText(idl ? 'DATE LINE' : wcTzLabel(tz <= -12 ? tz + 24 : tz), top[0], top[1] - 5);
+    }
+    // the route (front solid, back dashed), cities, plane, antipode
+    const A = WC.airports.find(a => a.city === f.from), B = WC.airports.find(a => a.city === f.to);
+    if (A && B) {
+        const dx = wcWrapD(B.sb.x - A.sb.x), n = 90;
+        for (let i = 0; i < n; i++) {
+            const p = P(A.sb.x + dx * i / n, A.sb.y + (B.sb.y - A.sb.y) * i / n), q = P(A.sb.x + dx * (i + 1) / n, A.sb.y + (B.sb.y - A.sb.y) * (i + 1) / n), fr = p[2] > 0 && q[2] > 0;
+            g.strokeStyle = fr ? '#ffd23d' : 'rgba(255,210,61,.3)'; g.lineWidth = fr ? 2.4 : 1.2; g.setLineDash(fr ? [] : [4, 4]); g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.stroke();
+        }
+        g.setLineDash([]);
+    }
+    for (const c of WC.cities) {
+        const p = P(c.cx, c.cy); if (p[2] < -0.05) continue; const key = c.id === f.from || c.id === f.to;
+        g.fillStyle = key ? '#ffd23d' : 'rgba(255,255,255,.85)'; g.beginPath(); g.arc(p[0], p[1], key ? 4 : 2.5, 0, 7); g.fill();
+        if (p[2] > 0.25 || key) { g.fillStyle = key ? '#fff' : 'rgba(255,255,255,.7)'; g.font = `${key ? 'bold 12px' : '10px'} Ubuntu, sans-serif`; g.textAlign = 'left'; g.fillText(c.code, p[0] + 5, p[1] - 4); }
+    }
+    const ap = P(px + C / 2, py); g.strokeStyle = 'rgba(255,120,200,.7)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(ap[0] - 5, ap[1] - 5); g.lineTo(ap[0] + 5, ap[1] + 5); g.moveTo(ap[0] + 5, ap[1] - 5); g.lineTo(ap[0] - 5, ap[1] + 5); g.stroke();
+    const pp = P(px, py), ahead = P(px + Math.cos(rp?.flA ?? 0) * 3000, py + Math.sin(rp?.flA ?? 0) * 3000), ang = Math.atan2(ahead[1] - pp[1], ahead[0] - pp[0]);
+    g.save(); g.translate(pp[0], pp[1]); g.rotate(ang); g.fillStyle = '#fff'; g.beginPath(); g.moveTo(9, 0); g.lineTo(-6, -6); g.lineTo(-3, 0); g.lineTo(-6, 6); g.closePath(); g.fill(); g.restore();
+    g.fillStyle = 'rgba(255,255,255,.75)'; g.font = '11px Ubuntu, sans-serif'; g.textAlign = 'left';
+    g.fillText(`${f.fromCode} → ${f.toCode} · ${Math.round(f.rem / 1000).toLocaleString()} km to go · drag to spin the globe`, 10, Hc - 10);
+    g.fillStyle = '#ff9ad2'; g.textAlign = 'right'; g.fillText('✕ = your antipode', Wc - 10, Hc - 10);
+}
+
 function drawWorldEnvironment() {
     if (!wcTex) wcMakeTex();
     ctx.save();
     if (WC.scene === 'ext') wcDrawExterior(); else wcDrawInterior();
     ctx.restore();
+    wcIfeDraw();
     wcPositionPrompt();                                                   // keep the bubble glued to its building / car
     const now = performance.now(); if (now - wcChipT > 400) { wcChipT = now; wcRenderChip(); }   // shift countdown
 }
@@ -3417,7 +3768,7 @@ function drawWorldMinimap() {
     for (const c of list) for (const p of c.props) if ((p.k === 'runway' || p.k === 'taxiway' || p.k === 'apron') && !seen.has('r' + p.x + ',' + p.y)) { seen.add('r' + p.x + ',' + p.y); mCtx.fillStyle = p.k === 'apron' ? '#a9a99f' : '#3b4146'; mCtx.fillRect(X(p.x), Y(p.y), Math.max(1, p.w * k), Math.max(1, p.h * k)); }
     for (const c of list) for (const f of c.fields) { if (seen.has('f' + f.id)) continue; seen.add('f' + f.id); mCtx.fillStyle = f.kind === 'pitch' ? '#5c9a4e' : '#b89a55'; mCtx.fillRect(X(f.x), Y(f.y), f.w * k, f.h * k); }
     mCtx.fillStyle = '#39414a';
-    for (const r of WC.roads) { const w = Math.max(1, 2 * r.hw * k); if (Math.abs((r.a === 'v' ? py : px) - (r.o ?? WC.center)) > r.e + R + 100) continue; if (r.a === 'v') { if (Math.abs(r.p - px) < R + 100) mCtx.fillRect(X(r.p) - w / 2, 0, w, 150); } else if (Math.abs(r.p - py) < R + 100) mCtx.fillRect(0, Y(r.p) - w / 2, 150, w); }
+    for (const r of WC.roads) { const w = Math.max(1, 2 * r.hw * k), o = r.o ?? WC.center; if (Math.abs((r.a === 'v' ? py : px) - o) > r.e + R + 100) continue; if (r.a === 'v') { if (Math.abs(r.p - px) < R + 100) mCtx.fillRect(X(r.p) - w / 2, Y(o - r.e), w, 2 * r.e * k); } else if (Math.abs(r.p - py) < R + 100) mCtx.fillRect(X(o - r.e), Y(r.p) - w / 2, 2 * r.e * k, w); }
     for (const c of list) for (const l of c.lots) { if (seen.has('l' + l.id)) continue; seen.add('l' + l.id); mCtx.fillStyle = l.dealer ? '#c9a23a' : '#4b535b'; mCtx.fillRect(X(l.x), Y(l.y), l.w * k, l.h * k); }
     for (const c of list) for (const b of c.buildings) {
         if (seen.has('B' + b.id)) continue; seen.add('B' + b.id);
@@ -5949,3 +6300,5 @@ setupJoystick('joy-right', {
     btn.addEventListener('pointerleave', release);
 
 })();
+
+setInterval(() => { if (typeof isWorldMode !== 'undefined') wcIfeRender(); }, 500);
