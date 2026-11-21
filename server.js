@@ -1044,6 +1044,13 @@ class HashGrid {
         c[type].push(obj);
     }
     getNearby(x, y, range) {
+        if (this.wrap && (x - range < 0 || x + range > this.wrap)) {      // the world wraps: look on the far side of the date line too
+            const a = this._near(x, y, range), b = this._near(x - range < 0 ? x + this.wrap : x - this.wrap, y, range);
+            return { entities: a.entities.concat(b.entities), bullets: a.bullets.concat(b.bullets), drones: a.drones.concat(b.drones) };
+        }
+        return this._near(x, y, range);
+    }
+    _near(x, y, range) {
         const result = { entities: [], bullets: [], drones: [] }, cs = this.cellSize;
         for (let c = Math.floor((x - range) / cs); c <= Math.floor((x + range) / cs); c++) for (let r = Math.floor((y - range) / cs); r <= Math.floor((y + range) / cs); r++) {
             const cell = this.map.get(c + r * 100000); if (!cell) continue;
@@ -1592,7 +1599,10 @@ getPowerupBulletSpeedMultiplier() {
     update() {
         this.vx *= 0.85; this.vy *= 0.85;
         this.x += this.vx; this.y += this.vy;
-        if (this.room.worldKind === 'exterior') { this.x = Math.max(0, Math.min(W_CIRC, this.x)); this.y = Math.max(0, Math.min(W_EXTY, this.y)); }
+        if (this.room.worldKind === 'exterior') {          // a cylinder east-west, and over a pole you come down the far meridian facing the other way
+            if (this.y < W_POLE_N || this.y > W_POLE_S) { this.y = this.y < W_POLE_N ? 2 * W_POLE_N - this.y : 2 * W_POLE_S - this.y; this.x += W_CIRC / 2; this.vx = -this.vx; this.vy = -this.vy; this.angle += Math.PI; }
+            this.x = wrapX(this.x);
+        }
         else {
             const arenaExtent = this.room.mode === 'WORLD' ? (this.room.worldExtent || WORLD_SIZE) : WORLD_SIZE;
             this.x = Math.max(0, Math.min(arenaExtent, this.x));
@@ -2297,7 +2307,7 @@ const rooms = {
 const WORLD_TILE = 420, WORLD_GRID = 120, WORLD_EXTENT = WORLD_TILE * WORLD_GRID;
 const worldRoom = new Room('WORLD', 'WORLD', { shapeCount: 0, botCount: 0, shapeRespawn: false });
 worldRoom.worldExtent = WORLD_EXTENT;      // replaced by the real (wrapping) size once the layout constants exist; see W_CIRC / W_EXTY
-worldRoom.grid = new HashGrid(500);
+worldRoom.grid = new HashGrid(500); worldRoom.grid.wrap = 2700000;   // = W_CIRC (declared further down)
 rooms.WORLD = worldRoom;
 worldRoom.worldKind = 'exterior';
 // Interiors (houses / workplaces) are private Rooms created on demand; they are kept out of `rooms`
@@ -2951,11 +2961,62 @@ const W_BORDER_N = 96;                      // samples of each city's (organic) 
 // Signed east-west offset from a to b the short way round the globe.
 function wrapDx(d) { d = ((d % W_CIRC) + W_CIRC) % W_CIRC; return d > W_CIRC / 2 ? d - W_CIRC : d; }
 function wrapX(x) { return ((x % W_CIRC) + W_CIRC) % W_CIRC; }
+// ---- the globe -------------------------------------------------------------------------------------------------
+// The map is an equirectangular chart of a sphere: x is longitude (W_CIRC = 360°) and y is latitude. The poles sit
+// beyond the polar seas, W_POLE_PAD past the northern and southern coasts, so pole to pole is half the circumference
+// (one map unit north-south = one unit east-west at the equator). Ground travel uses the chart as it is; flights follow
+// great circles, so long routes bow towards the pole and antipodal-meridian routes (Kaimana Bay → Central City) fly
+// straight over it: you reach the pole heading north and come down the far side heading south.
+const W_POLE_PAD = (W_CIRC / 2 - W_EXTY) / 2;
+const W_POLE_N = -W_POLE_PAD, W_POLE_S = W_EXTY + W_POLE_PAD;
+function wLat(y) { return Math.PI / 2 - (y - W_POLE_N) / (W_CIRC / 2) * Math.PI; }
+function wLon(x) { return x / W_CIRC * Math.PI * 2; }
+function wYofLat(lat) { return W_POLE_N + (Math.PI / 2 - lat) / Math.PI * (W_CIRC / 2); }
+function wGC(x1, y1, x2, y2) {                       // central angle, length (map units at equator scale) and initial bearing (0 = north, π/2 = east)
+    const p1 = wLat(y1), p2 = wLat(y2), dl = wLon(x2) - wLon(x1);
+    const cc = Math.sin(p1) * Math.sin(p2) + Math.cos(p1) * Math.cos(p2) * Math.cos(dl), c = Math.acos(Math.max(-1, Math.min(1, cc)));
+    const brg = Math.atan2(Math.sin(dl) * Math.cos(p2), Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl));
+    return { c, d: c * W_CIRC / (2 * Math.PI), brg };
+}
+// Direction on the chart of a heading `brg` at latitude y (east-west stretches by 1/cos(lat) on an equirectangular map).
+function wMapAng(brg, y) { const k = Math.max(0.03, Math.cos(wLat(y))); return Math.atan2(-Math.cos(brg), Math.sin(brg) / k); }
+// The great circle sampled as chart points. Longitude is unwrapped so the line is continuous; going over a pole the
+// line continues past the pole (y beyond W_POLE_N / W_POLE_S) on the antipodal meridian – exactly how a plane flies it.
+function wGCPath(x1, y1, x2, y2, n = 48) {
+    const vec = (x, y) => { const la = wLat(y), lo = wLon(x); return [Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)]; };
+    let a = vec(x1, y1), b = vec(x2, y2), dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    if (dot < -0.999999) b = vec(x2 + 1, y2 + (y2 < (W_POLE_N + W_POLE_S) / 2 ? 1 : -1)), dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];   // antipodes: nudge so the path picks a pole
+    const c = Math.acos(Math.max(-1, Math.min(1, dot))), sc = Math.sin(c) || 1, out = [];
+    let px = null, flip = 0, mirror = 0;
+    for (let i = 0; i <= n; i++) {
+        const t = i / n, k1 = c ? Math.sin((1 - t) * c) / sc : 1 - t, k2 = c ? Math.sin(t * c) / sc : t;
+        const v = [a[0] * k1 + b[0] * k2, a[1] * k1 + b[1] * k2, a[2] * k1 + b[2] * k2];
+        const lat = Math.atan2(v[2], Math.hypot(v[0], v[1])), atPole = Math.hypot(v[0], v[1]) < 1e-7; let x = atPole && px !== null ? px - flip : Math.atan2(v[1], v[0]) / (Math.PI * 2) * W_CIRC, y = wYofLat(lat);
+        if (px !== null) {
+            let dx = x + flip - px; dx -= Math.round(dx / W_CIRC) * W_CIRC;
+            if (Math.abs(dx) > W_CIRC * 0.3) { mirror = mirror ? 0 : (lat > 0 ? 1 : -1); flip += W_CIRC / 2; dx = x + flip - px; dx -= Math.round(dx / W_CIRC) * W_CIRC; }   // over a pole
+            x = px + dx;
+        } else x = x1 + wrapDx(x - x1);
+        px = x;
+        if (mirror > 0) y = 2 * W_POLE_N - y; else if (mirror < 0) y = 2 * W_POLE_S - y;
+        out.push([x, y]);
+    }
+    return out;
+}
+function wGCMapLen(x1, y1, x2, y2, n = 24) { const P = wGCPath(x1, y1, x2, y2, n); let L = 0; for (let i = 1; i < P.length; i++) L += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]); return L; }
 // Cities: col = time-zone column (CT-6 .. CT+12), row = 0 north / 1 south. `size` is the base radius
 // of the organic outline (the old cities were 18 000-unit squares). The first four keep their order.
 // style: 'cyber' (the capital: neon financial district, skyscrapers, multi-level malls, highest wages and prices),
 //        'oldtown' (historic quarter: terraces, galleries, cobbled streets, markets – touristy, not poor),
 //        'rural' (small, cheap, poor farming town: low wages, low prices, not much to do), 'generic' (the rest).
+// Four (invented) cultures, one per time-zone column. Crossroads towns belong to the column they lean towards.
+function W_CULTURE_COL(col) { col = ((col % 4) + 4) % 4; return col >= 3.75 || col < 0.75 ? 'west' : col < 1.75 ? 'central' : col < 2.75 ? 'sun' : 'isles'; }
+const W_CULTURES = {
+    west:    { name: 'Westreach',          greet: 'Well met, traveller!', lang: 'Westreach',  lht: 0, open: 7, close: 21, fest: 'Dust Fair',       spec: ['brisket', 'peachpie'],       idx: 0 },
+    central: { name: 'Central Federation', greet: 'Welcome!',             lang: 'Federal',    lht: 0, open: 0, close: 24, fest: "Founders' Night", spec: ['neonbao', 'synthshake'],     idx: 1 },
+    sun:     { name: 'Sunward Coast',      greet: 'Bonsól!',              lang: 'Solanese',   lht: 0, open: 8, close: 23, siesta: [13, 16], fest: 'Lantern Tide', spec: ['saffronrice', 'orangepastry'], idx: 2 },
+    isles:   { name: 'Kaimana Isles',      greet: "Ma'ora!",              lang: 'Kaimanan',   lht: 1, open: 6, close: 24, fest: 'Blossom Moon',   spec: ['coconutfish', 'ricecake'],   idx: 3 }
+};
 const W_CITIES = [
     { id: 'central',  name: 'Central City', code: 'CTC', col: 1, row: 0, home: true, style: 'cyber', theme: 'cyber', size: 30600, wageMul: 1.9,  priceMul: 2.2,  toll: 30 },
     { id: 'port',     name: 'Port Aldren',  code: 'PAL', col: 2, row: 0, seedAdd: 101, style: 'generic', theme: 'port',    size: 25800, wageMul: 1.2,  priceMul: 1.1,  toll: 25 },
@@ -2980,6 +3041,7 @@ for (const c of W_CITIES) {
     c.cx = W_CX + Math.round((c.col - 1) * W_GAP / W_S) * W_S; c.cy = W_CY + Math.round(c.row * W_GAP / W_S) * W_S;
     if (c.tz === undefined) c.tz = (c.col - 1) * 6;
     c.border = c.size * 1.4; c.bp = null;
+    c.culture = W_CULTURE_COL(c.col);
 }
 // City limit test. bp = outline radius sampled at W_BORDER_N angles (filled in when the layout is built).
 function cityBorderAt(c, ang) {
@@ -3094,7 +3156,16 @@ const WORLD_ITEMS = {
     popcorn:   { name: 'Popcorn', price: 6, heal: 15, ic: '🍿' },
     candy:     { name: 'Pick & mix', price: 4, heal: 8, speed: 20, ic: '🍬' },
     cheese:    { name: 'Artisan cheese', price: 16, heal: 50, ic: '🧀' },
-    wine:      { name: 'Bottle of wine', price: 30, xp: 240, ic: '🍷' }
+    wine:      { name: 'Bottle of wine', price: 30, xp: 240, ic: '🍷' },
+    // regional specialities: only sold in their own culture's food shops and stalls
+    brisket:      { name: 'Smokehouse brisket', price: 14, heal: 60, ic: '🍖', cult: 'west' },
+    peachpie:     { name: 'Prairie peach pie', price: 6, heal: 25, speed: 20, ic: '🥧', cult: 'west' },
+    neonbao:      { name: 'Neon bao bun', price: 8, heal: 35, ic: '🥟', cult: 'central' },
+    synthshake:   { name: 'Synth-berry shake', price: 6, speed: 40, ic: '🥤', cult: 'central' },
+    saffronrice:  { name: 'Saffron rice pan', price: 13, heal: 55, ic: '🥘', cult: 'sun' },
+    orangepastry: { name: 'Orange-blossom pastry', price: 5, heal: 20, speed: 15, ic: '🥐', cult: 'sun' },
+    coconutfish:  { name: 'Coconut fish parcel', price: 12, heal: 55, ic: '🐟', cult: 'isles' },
+    ricecake:     { name: 'Blossom rice cake', price: 4, heal: 15, speed: 20, ic: '🍡', cult: 'isles' }
 };
 const SHOP_KINDS = {
     grocery:  { name: 'Grocery', items: ['sandwich', 'fruit', 'drink', 'fuelcan'] },
@@ -4035,10 +4106,13 @@ const FL_TAXI = 5, FL_VR = 26, FL_FINAL = 22000, FL_CLIMB = 14000, FL_DESC = 420
 function flAng(a) { a = ((a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI; return a; }
 function flTurn(a, b, rate) { const d = flAng(b - a); return flAng(a + Math.max(-rate, Math.min(rate, d))); }
 function flightCreate(A, B, cruise) {
-    const dx = wrapDx(B.sb.x - A.sb.x), dy = B.sb.y - A.sb.y, east = dx >= 0, landDir = dx >= 0 ? 1 : -1;
+    const g = wGC(A.sb.x, A.sb.y, B.sb.x, B.sb.y), dx = wrapDx(B.sb.x - A.sb.x), dy = B.sb.y - A.sb.y, east = Math.abs(Math.sin(g.brg)) > 0.2 ? Math.sin(g.brg) > 0 : dx >= 0, landDir = dx >= 0 ? 1 : -1;
     const tdx = landDir > 0 ? B.x0 + 220 : B.x1 - 220, startX = east ? A.endW : A.endE;
+    const cb = Math.cos(g.brg), head = cb > 0.7 ? 'north' : cb < -0.7 ? 'south' : east ? 'east' : 'west';
+    const near = (8 / 180) * (W_CIRC / 2), P = wGCPath(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 48);           // does this stretch of the great circle pass within 8° of a pole?
+    const viaPole = P.some(q => q[1] < W_POLE_N + near) ? 'N' : P.some(q => q[1] > W_POLE_S - near) ? 'S' : null;   // then fly straight over it
     return {
-        from: A.city, to: B.city, dir: east ? 'east' : 'west', cruise, dist: Math.round(Math.hypot(dx, dy)),
+        from: A.city, to: B.city, dir: east ? 'east' : 'west', head, cruise, dist: Math.round(wGCMapLen(A.sb.x, A.sb.y, B.sb.x, B.sb.y)), poles: 0, remC: null, viaPole,
         x: A.sb.x, y: A.sb.y, a: 0, v: 0, alt: 0, ph: 'taxi', t: 0, climb: 0, wraps: 0, prevDI: Infinity,
         wp: [[A.cb, A.ty], [startX, A.ty], [startX, A.ry]],
         roll: { a: east ? 0 : Math.PI, y: A.ry },
@@ -4048,7 +4122,8 @@ function flightCreate(A, B, cruise) {
 // Distance still to fly (straight line to the approach fix + final + landing roll), for the HUD / ETA.
 function flightRemaining(f) {
     const L = f.land;
-    if (f.ph === 'taxi' || f.ph === 'lineup' || f.ph === 'roll' || f.ph === 'air') return Math.hypot(wrapDx(L.ifx - f.x), L.ty - f.y) + FL_FINAL + 3000;
+    if (f.ph === 'air' && f.remC != null) return f.remC + FL_FINAL + 3000;
+    if (f.ph === 'taxi' || f.ph === 'lineup' || f.ph === 'roll' || f.ph === 'air') return wGCMapLen(f.x, f.y, L.ifx, L.ty, 16) + FL_FINAL + 3000;
     if (f.ph === 'final') return Math.max(0, -wrapDx(f.x - L.tx) * L.dir) + 3000;
     return 0;
 }
@@ -4058,7 +4133,10 @@ function flightStep(f) {
     const L = f.land; let ev = null;
     const move = () => {
         f.x += Math.cos(f.a) * f.v; f.y += Math.sin(f.a) * f.v;
-        if (f.x < 0 || f.x >= W_CIRC) { f.x = wrapX(f.x); f.wraps++; ev = 'wrap'; }
+        if (f.y < W_POLE_N || f.y > W_POLE_S) {                   // over the pole: down the antipodal meridian, nose now pointing the other way on the chart
+            f.y = f.y < W_POLE_N ? 2 * W_POLE_N - f.y : 2 * W_POLE_S - f.y; f.x = wrapX(f.x + W_CIRC / 2); f.a = flAng(f.a + Math.PI); f.poles++; f.remC = null; ev = 'pole';
+        }
+        if (f.x < 0 || f.x >= W_CIRC) { f.x = wrapX(f.x); f.wraps++; if (ev !== 'pole') ev = 'wrap'; }
     };
     switch (f.ph) {
         case 'taxi': case 'taxiin': {
@@ -4082,12 +4160,21 @@ function flightStep(f) {
             break;
         case 'air': {
             f.climb += f.v;
-            const dxI = wrapDx(L.ifx - f.x), dyI = L.ty - f.y, dI = Math.hypot(dxI, dyI), rem = dI + FL_FINAL;
+            // great-circle navigation: steer along the initial bearing of the great circle to the approach fix
+            // (re-solved every tick, so the track curves on the chart); close in, fly the chart directly
+            const dxI = wrapDx(L.ifx - f.x), dyI = L.ty - f.y, dLoc = Math.hypot(dxI, dyI);
+            if (f.remC == null || f.t % 20 === 0) f.remC = dLoc < 40000 ? dLoc : wGCMapLen(f.x, f.y, L.ifx, L.ty, 20); else f.remC = Math.max(dLoc, f.remC - f.v);
+            const dI = dLoc, rem = f.remC + FL_FINAL;
             f.alt = Math.max(0, Math.min(1, f.climb / FL_CLIMB, rem / FL_DESC));
             const tv = Math.min(f.cruise, FL_VR + (f.cruise - FL_VR) * Math.max(0, Math.min(1, (rem - 9000) / 38000)));
             f.v += Math.max(-0.05, Math.min(0.05, tv - f.v));
-            const rate = f.climb < 2500 ? 0 : rem < 70000 ? 0.012 : 0.006;
-            f.a = flTurn(f.a, Math.atan2(dyI, dxI), rate);
+            const rate = f.climb < 2500 ? 0 : rem < 70000 ? 0.012 : 0.02;
+            const nearPole = f.viaPole && Math.min(Math.abs(f.y - W_POLE_N), Math.abs(f.y - W_POLE_S)) < (8 / 180) * (W_CIRC / 2);
+            const want = dLoc < 60000 ? Math.atan2(dyI, dxI)
+                : f.viaPole && !f.poles ? (f.viaPole === 'N' ? -Math.PI / 2 : Math.PI / 2)                    // straight up the meridian to the pole
+                : nearPole ? (f.viaPole === 'N' ? Math.PI / 2 : -Math.PI / 2)                                  // and straight down the far side until the chart behaves again
+                : wMapAng(wGC(f.x, f.y, L.ifx, L.ty).brg, f.y);
+            f.a = flTurn(f.a, want, rate);
             move();
             if (dI < 2600 || (dI < 9000 && dI > f.prevDI)) f.ph = 'final';
             f.prevDI = dI;
@@ -4163,6 +4250,7 @@ function collidePush(pos, r, c) {
     return true;
 }
 // <<WORLD_LAYOUT_END>>
+worldRoom.grid.wrap = W_CIRC;
 
 // <<WORLD_INTERIORS_BEGIN>>
 // ---------------------------------------------------------------------------
@@ -4374,18 +4462,18 @@ function worldUsePrompt(client, def, s) {
         case 'petpen': return [d, { ...base, title: 'Puppy pen', lines: ['Cuddle the puppies: +20% health'], actions: [{ a: 'go', label: 'Pet the puppies', on: true }], mini: true }];
         case 'elevator': return [d, { ...base, title: 'Glass elevator', lines: [`You are on level ${def.lv}`], actions: Array.from({ length: def.levels }, (_, i) => ({ a: 'lv' + (i + 1), label: i + 1 === def.lv ? `Level ${i + 1} (here)` : `Level ${i + 1}`, on: i + 1 !== def.lv })) }];
         case 'board': {
-            const A = WL.airportByCity.get(def.ap), lines = worldFlightOptions(A).slice(0, 7).map(o => `${o.to.code}  ${o.toCity.name.padEnd(18)} ${worldTzLabel(o.toCity.tz).padEnd(6)} ~${o.mins} min · ${fmtMoney(o.fare)}`);
+            const A = WL.airportByCity.get(def.ap), lines = [...airItins(A)].slice(0, 7).map(([dest, list]) => { const o = list[0], B = WL.airportByCity.get(dest); return `${o.legs[0].fn.padEnd(6)} ${B.code} ${W_CITIES.find(c => c.id === dest).name.padEnd(18)} ${o.stops ? o.stops + ' stop' : 'nonstop'} · ~${o.mins} min · ${fmtMoney(o.fare)}`; });
             return [d, { ...base, title: '✈ Departures', lines: [...lines, 'Buy a boarding pass at any check-in desk'], actions: [] }];
         }
         case 'tickets': {
-            const A = WL.airportByCity.get(def.ap), t = worldTicketValid(w, A) ? w.ticket : null;
-            return [d, { ...base, kind: 'tickets', title: `✈ ${A.code} check-in · desk ${f.n}`, cards: true, pick: true,
-                lines: [t ? `Your boarding pass: ${A.code} → ${WL.airportByCity.get(t.to).code}. Go through security to the gate.` : 'Choose your destination. You can pay with cash or from the bank.'],
-                actions: worldFlightOptions(A).map(o => ({ a: 'tix:' + o.to.city, label: `${o.to.code} · ${o.toCity.name}`, on: cash + bank >= o.fare, city: o.to.city, code: o.to.code, name: o.toCity.name, fare: o.fare, mins: o.mins, head: o.head, tz: o.toCity.tz, km: Math.round(o.dist / 1000) })) }];
+            const A = WL.airportByCity.get(def.ap), l = worldTicketLeg(w, A), it = w.itin;
+            return [d, { ...base, kind: 'tickets', title: `✈ ${A.code} check-in · all airlines · desk ${f.n}`, cards: true, pick: true,
+                lines: [l ? `Your ticket: ${AIRLINES[l.al].name} ${l.fn} ${A.code} → ${WL.airportByCity.get(l.to).code}${it.legs.length > 1 ? ` (then ${it.legs.slice(it.i + 1).map(q => q.fn).join(', ')})` : ''}. Go through security to the gate.` : 'Choose a flight. Direct, or change planes at a hub on one ticket. Pay with cash or from the bank.'],
+                actions: airItinActions(client, A) }];
         }
         case 'gate': {
-            const A = WL.airportByCity.get(def.ap), t = worldTicketValid(w, A) ? w.ticket : null, B = t && WL.airportByCity.get(t.to), cB = B && W_CITIES.find(c => c.id === B.city);
-            return [d, { ...base, title: `Gate 2 · ${A.code}`, lines: t ? [`${A.code} → ${B.code} ${cB.name} · boarding now`] : ['No boarding pass – buy one at check-in'], actions: t ? [{ a: 'board', label: `Board to ${cB.name}`, on: true }] : [] }];
+            const A = WL.airportByCity.get(def.ap), l = worldTicketLeg(w, A), B = l && WL.airportByCity.get(l.to), cB = B && W_CITIES.find(c => c.id === B.city);
+            return [d, { ...base, title: `Gate 2 · ${A.code}`, lines: l ? [`${AIRLINES[l.al].name} ${l.fn} · ${A.code} → ${B.code} ${cB.name}`, `${AIRCRAFT[l.ac].name} · ${w.itin.cls === 'J' ? 'Business' : 'Economy'} · boarding now`] : ['No boarding pass – buy one at check-in or on your phone'], actions: l ? [{ a: 'board', label: `Board ${l.fn} to ${cB.name}`, on: true }] : [] }];
         }
     }
     if (s.use.startsWith('shop:')) {
@@ -4497,8 +4585,8 @@ function worldCasino(client, d) {
         sendWorld(client, 'casino_res', view());
     }
 }
-function worldTicketValid(w, A) { return w.ticket && w.ticket.until > Date.now() && (!A || w.ticket.from === A.city); }
-function worldUse(client, s, a) {
+function worldTicketValid(w, A) { return !!worldTicketLeg(w, A); }
+function worldUse(client, s, a, extra) {
     const w = client.world, p = client.player, room = client.room, def = room.def, now = Date.now(), max = p.getEffectiveMaxHp();
     w.useCd = w.useCd || {};
     const cd = (k, ms) => { if (now - (w.useCd[k] || 0) < ms) { worldNotice(client, `Not yet – try again in ${Math.ceil((ms - (now - w.useCd[k])) / 1000)} s.`); return false; } w.useCd[k] = now; return true; };
@@ -4522,7 +4610,7 @@ function worldUse(client, s, a) {
         case 'fountain': if (worldPayToll(client, 1)) { p.worldSpeedUntil = Math.max(now, p.worldSpeedUntil || 0) + 30000; worldNotice(client, ['🪙 Plop. You feel lucky: +25% speed for 30 s.', '🪙 Your wish is safe with the fountain (+25% speed for 30 s).'][Math.floor(Math.random() * 2)], { level: 'good' }); } break;
         case 'vending': if (a.startsWith('buy:')) { const b = WL.buildingById.get(def.bid); worldBuyItem(client, a.slice(4), b && W_CITIES.find(c => c.id === b.city)); } break;
         case 'elevator': { const lv = Number(a.slice(2)); if (lv >= 1 && lv <= def.levels && lv !== def.lv) { const key = 'mall:' + def.bid + ':' + lv, nd = worldInteriorDef(key), st = nd.stations.find(q => q.use === 'elevator'); worldGoto(client, key, st.x, st.y); } break; }
-        case 'tickets': if (a.startsWith('tix:')) worldBuyTicket(client, WL.airportByCity.get(def.ap), a.slice(4)); break;
+        case 'tickets': if (a.startsWith('tix:')) worldBuyItin(client, WL.airportByCity.get(def.ap), a.slice(4), extra && extra.cls === 'J' ? 'J' : 'Y'); break;
         case 'roulette': case 'blackjack': case 'slots': casinoOpen(client, s); break;
         case 'vr': if (cd('vr', 20000) && worldPayToll(client, 15)) { p.addXP(400); p.worldSpeedUntil = Math.max(now, p.worldSpeedUntil || 0) + 60000; worldNotice(client, '🥽 You shot down five drones in VR: +400 score, +25% speed for 60 s.', { level: 'good' }); } break;
         case 'petpen': if (cd('petpen', 45000)) { p.hp = Math.min(max, p.hp + max * 0.2); worldNotice(client, '🐶 The puppies love you: +20% health.', { level: 'good' }); } break;
@@ -4530,18 +4618,10 @@ function worldUse(client, s, a) {
         default: if (s.use.startsWith('shop:') && a.startsWith('buy:')) worldBuyItem(client, a.slice(4), W_CITIES.find(c => c.id === def.ap) || null);
     }
 }
-function worldBuyTicket(client, A, toId) {
-    const w = client.world, opt = A && worldFlightOptions(A).find(o => o.to.city === toId); if (!opt) return;
-    if (!worldPayToll(client, opt.fare)) { worldNotice(client, `The fare to ${opt.toCity.name} is ${fmtMoney(opt.fare)} coins.`, { level: 'bad' }); return; }
-    w.ticket = { from: A.city, to: toId, until: Date.now() + 20 * 60000, fare: opt.fare };
-    worldNotice(client, `🎫 Boarding pass ${A.code} → ${opt.to.code} (${opt.toCity.name}, ${worldTzLabel(opt.toCity.tz)}). Go through security to Gate 2.`, { level: 'good' });
-    w.promptKey = '\u0000';
-}
 function worldBoardWithTicket(client, A) {
-    const w = client.world; if (!worldTicketValid(w, A)) return;
-    const to = w.ticket.to; w.ticket = null;
-    worldGoto(client, 'ext', A.sb.x, A.sb.y + 60);
-    worldBoardFlight(client, A, to, true);
+    const w = client.world, leg = worldTicketLeg(w, A); if (!leg) return;
+    if (w.scene !== 'ext') worldGoto(client, 'ext', A.sb.x, A.sb.y + 60);
+    worldBoardFlight(client, A, leg);
 }
 // ---- in-flight service (long-haul screen menu) ----
 const INFLIGHT_MENU = {
@@ -4555,13 +4635,14 @@ function worldInflightOrder(client, id) {
     const w = client.world, p = client.player, f = p && p.flight, it = INFLIGHT_MENU[id]; if (!f || !it) return;
     const city = W_CITIES.find(c => c.id === f.to);
     if (it.souvenir && w.souv.has(city.id)) { worldNotice(client, `You already have a ${city.name} souvenir.`); return; }
-    if (!worldPayToll(client, it.price)) { worldNotice(client, `That costs ${it.price} coins.`, { level: 'bad' }); return; }
+    const biz = f.cls === 'J', price = biz ? 0 : it.price;
+    if (price && !worldPayToll(client, price)) { worldNotice(client, `That costs ${it.price} coins.`, { level: 'bad' }); return; }
     const max = p.getEffectiveMaxHp(), msg = [];
     if (it.heal) { p.hp = Math.min(max, p.hp + max * it.heal / 100); msg.push(`+${it.heal}% health`); }
     if (it.speed) { p.worldSpeedUntil = Math.max(Date.now(), p.worldSpeedUntil || 0) + it.speed * 1000; msg.push('+25% speed after landing'); }
     if (it.xp) { p.addXP(it.xp); msg.push(`+${it.xp} score`); }
     if (it.souvenir) { w.souv.add(city.id); msg.push(`souvenir ${w.souv.size}/${W_CITIES.length}`); }
-    worldNotice(client, `🛎 ${it.name} served (-${it.price})${msg.length ? ': ' + msg.join(', ') : ''}`, { level: 'good' });
+    worldNotice(client, `🛎 ${it.name} served (${price ? '-' + price : 'complimentary in Business'})${msg.length ? ': ' + msg.join(', ') : ''}`, { level: 'good' });
     worldPushState(client);
 }
 
@@ -4843,7 +4924,7 @@ function worldApplyProgress(ent, prog) {
 function worldSnapshot(client) {
     const w = client.world, p = client.player; if (!w || !p || w.dead) return;   // a dead tank must not overwrite the reset progress
     w.prog = { score: p.score, level: p.level, statPoints: p.statPoints, stats: [...p.stats], tankType: p.tankType };
-    const { maxHealth, ...pu } = p.powerups || {}; w.buff = { su: p.worldSpeedUntil || 0, pu };
+    const { maxHealth, ...pu } = p.powerups || {}; w.buff = { su: p.worldSpeedUntil || 0, pu, hpf: Math.max(0.05, Math.min(1, p.hp / Math.max(1, p.getEffectiveMaxHp()))) };
 }
 function worldSave(client) {
     const w = client.world; if (!client.dbId || !w) return;
@@ -4887,10 +4968,10 @@ function worldInteriorDef(scene) {
     const [kind, key, lvs] = scene.split(':');
     if (kind === 'work') {
         const b = WL.buildingById.get(Number(key)); const co = W_COMPANIES.find(c => c.id === (b && worldWorkOf(b))) || W_COMPANIES[0]; d = buildOfficeInterior(co); d.coId = co.id; d.bid = b ? b.id : 0;
-        if (b && (b.f || 0) > 3) { const fl = 2 + (b.id * 7) % Math.max(1, b.f - 2); d.theme.name += ' · Floor ' + fl; d.theme.alt = +Math.min(3.6, 1 + fl * 0.03).toFixed(2); }
+        if (b && (b.f || 0) > 3) { const fl = 2 + (b.id * 7) % Math.max(1, b.f - 2); d.theme.name += ' · Floor ' + fl; d.theme.alt = +Math.min(3.6, 1 + fl * 0.03).toFixed(2); d.theme.eh = Math.round(fl * 5.7); }
     }
     else if (kind === 'mall') { const b = WL.buildingById.get(Number(key)); d = buildMallInterior(b || { id: 0, lv: 3 }, Math.max(1, Math.min(b?.lv || 3, Number(lvs) || 1))); furnishMall(d, b); }
-    else if (kind === 'stay') { const b = WL.buildingById.get(Number(key)); const tier = b?.k === 'hotel' ? 2 : b?.k === 'inn' ? 1 : 0; d = buildHouseInterior(tier); furnishHouse(d, tier); d.bid = b ? b.id : 0; d.stay = 1; d.theme.name = b?.nm || 'Room'; if (b && b.k === 'hotel') { const fl = 3 + (b.id * 5) % Math.max(1, (b.f || 10) - 3); d.theme.name += ' · Room ' + fl + String(b.id % 40 + 1).padStart(2, '0'); d.theme.alt = +Math.min(3, 1 + fl * 0.05).toFixed(2); } }
+    else if (kind === 'stay') { const b = WL.buildingById.get(Number(key)); const tier = b?.k === 'hotel' ? 2 : b?.k === 'inn' ? 1 : 0; d = buildHouseInterior(tier); furnishHouse(d, tier); d.bid = b ? b.id : 0; d.stay = 1; d.theme.name = b?.nm || 'Room'; if (b && b.k === 'hotel') { const fl = 3 + (b.id * 5) % Math.max(1, (b.f || 10) - 3); d.theme.name += ' · Room ' + fl + String(b.id % 40 + 1).padStart(2, '0'); d.theme.alt = +Math.min(3, 1 + fl * 0.05).toFixed(2); d.theme.eh = Math.round(fl * 6.6); } }
     else if (kind === 'term') { const ap = WL.airportByCity.get(key) || WL.airports[0]; d = buildTerminalInterior(ap); d.bid = ap.term.id; }
     else { const h = WL.houseById.get(key); const tier = h ? h.tier : 0; d = buildHouseInterior(tier); furnishHouse(d, tier); d.hid = key; }
     d.colliders = interiorColliders(d);
@@ -4923,7 +5004,7 @@ function worldGoto(client, scene, x, y) {
     const ent = new Entity(room, x, y, 'tank', user?.username || 'Player', 0, true, client.ws);
     ent.nameColor = user?.selected_color || '#ffffff';
     worldApplyProgress(ent, w.prog);
-    if (w.buff && !w.dead) { ent.worldSpeedUntil = w.buff.su; Object.assign(ent.powerups, w.buff.pu); }
+    if (w.buff && !w.dead) { ent.worldSpeedUntil = w.buff.su; Object.assign(ent.powerups, w.buff.pu); if (w.buff.hpf != null) ent.hp = ent.getEffectiveMaxHp() * w.buff.hpf; }
     if (scene === 'ext' && WL) { const pos = { x, y }; layoutPushOut(WL, pos, ent.radius); ent.x = pos.x; ent.y = pos.y; }
     room.entities.push(ent); room.clients.push(client);
     client.room = room; client.player = ent; client.spectatingId = null;
@@ -4966,12 +5047,12 @@ function worldSpawnNewlyOrAfterDeath(client) {
 function worldViewScale(p) { return Math.max(1, (1 + ((p.level || 1) - 1) * 0.011) * (p.flight ? 1.4 + 1.6 * p.flight.alt : p.vehicle ? 1.5 : 1) * (p.getPowerupActive('fov') ? 1.3 : 1)); }
 function worldStreamChunks(client, force) {
     const w = client.world, p = client.player; if (!w || !p || w.scene !== 'ext' || !WL) return;
-    const cx = clamp(Math.floor(p.x / W_CHUNK), 0, W_NCH - 1), cy = clamp(Math.floor(p.y / W_CHUNK), 0, W_NCH - 1);
+    const NX = Math.round(W_CIRC / W_CHUNK), cx = Math.floor(wrapX(p.x) / W_CHUNK) % NX, cy = clamp(Math.floor(p.y / W_CHUNK), 0, W_NCH - 1);
     const vs = worldViewScale(p), R = vs > 2.2 ? 3 : vs > 1.35 ? 2 : 1;
     // forget chunks far behind (the client drops them too), so long flights don't pile up memory on either side
-    if (w.sentChunks.size > 120) for (const key of w.sentChunks) { const kx = key % W_NCH, ky = Math.floor(key / W_NCH); if (Math.max(Math.abs(kx - cx), Math.abs(ky - cy)) > 7) w.sentChunks.delete(key); }
+    if (w.sentChunks.size > 120) for (const key of w.sentChunks) { const kx = key % W_NCH, ky = Math.floor(key / W_NCH), ddx = Math.abs(kx - cx), wdx = Math.min(ddx, NX - ddx); if (Math.max(wdx, Math.abs(ky - cy)) > 7) w.sentChunks.delete(key); }
     for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) {
-        const x = cx + dx, y = cy + dy; if (x < 0 || y < 0 || x >= W_NCH || y >= W_NCH) continue;
+        const x = ((cx + dx) % NX + NX) % NX, y = cy + dy; if (y < 0 || y >= W_NCH) continue;          // columns wrap round the date line
         const key = x + y * W_NCH; if (w.sentChunks.has(key)) continue;
         w.sentChunks.add(key);
         if (client.ws.readyState === WebSocket.OPEN) client.ws.send(layoutChunkBin(WL, x, y));
@@ -4980,8 +5061,10 @@ function worldStreamChunks(client, force) {
 function worldSendStatic(client) {
     const bld = b => b && { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h, door: b.door };
     sendWorld(client, 'world_static', {
+        poleN: W_POLE_N, poleS: W_POLE_S, cultures: W_CULTURES, dayMs: WORLD_DAY_MS,
+        air: { airlines: AIRLINES, aircraft: AIRCRAFT, legs: airNet().legs.map(l => ({ al: l.al, ac: l.ac, fn: l.fn, from: l.from, to: l.to, mins: l.mins, per: l.per, off: l.off })) },
         center: W_CX, centerY: W_CY, extent: W_CIRC, extentY: W_EXTY, circ: W_CIRC, gap: W_GAP, land: W_LAND, chunk: W_CHUNK, nch: W_NCH, roads: WL.allRoads,
-        cities: W_CITIES.map(c => ({ id: c.id, name: c.name, code: c.code, cx: c.cx, cy: c.cy, tz: c.tz, theme: c.theme, style: c.style, toll: c.toll, home: !!c.home, size: c.size, border: c.border, bp: c.bp })),
+        cities: W_CITIES.map(c => ({ id: c.id, name: c.name, code: c.code, cx: c.cx, cy: c.cy, tz: c.tz, theme: c.theme, style: c.style, culture: c.culture, toll: c.toll, home: !!c.home, size: c.size, border: c.border, bp: c.bp })),
         airports: WL.airports.map(a => ({ city: a.city, name: a.name, code: a.code, x0: a.x0, x1: a.x1, ry: a.ry, sb: a.sb, door: a.door })),
         cars: WORLD_CARS, carColors: WORLD_CAR_COLORS,
         companies: W_COMPANIES, spawn: WL.spawn, bank: bld(WL.bank), dealer: bld(WL.dealer), fireMs: WORLD_FIRE_MS, taskMs: WORLD_TASK_MS, items: WORLD_ITEMS, shopKinds: SHOP_KINDS, stallKinds: STALL_KINDS, ranks: WORLD_RANKS, inflight: INFLIGHT_MENU
@@ -5092,33 +5175,116 @@ const WORLD_DAY_MS = 12 * 60 * 1000;                     // same shared day as t
 const WORLD_HEAD_LABEL = { east: 'Eastbound ➜', west: '⬅ Westbound', north: '⬆ Northbound', south: '⬇ Southbound' };
 function worldTzLabel(tz) { return tz === 0 ? 'CT' : 'CT' + (tz > 0 ? '+' : '') + tz; }
 function worldLocalClock(tz) { const h = ((6 + (Date.now() % WORLD_DAY_MS) / WORLD_DAY_MS * 24 + tz) % 24 + 24) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); }
-function worldFlightOptions(A) {
-    if (A._opts) return A._opts;
-    const out = [];
-    for (const B of WL.airports) {
-        if (B === A) continue;
-        const dx = wrapDx(B.sb.x - A.sb.x), dy = B.sb.y - A.sb.y, d = Math.hypot(dx, dy);
-        const head = Math.abs(dx) >= Math.abs(dy) * 0.5 ? (dx >= 0 ? 'east' : 'west') : (dy > 0 ? 'south' : 'north');
-        out.push({ to: B, toCity: W_CITIES.find(c => c.id === B.city), east: dx >= 0, head, dist: d, fare: Math.round(40 + d / 7500), mins: Math.max(1, Math.round((d / PLANE_CRUISE + 3600) / 3600)) });
+// ---- airlines -------------------------------------------------------------------------------------------------------
+// Four flag carriers fly from their region's hub to the other hubs (wide-bodies on the long trunks) and out to every town
+// in their region (turboprops to the small ones). Prairie Link flies turboprops between small towns and their nearest
+// neighbour abroad; Hopper is the budget airline linking the big non-hub cities point to point. Everything else is a
+// connection: one ticket, change planes airside at the hub.
+const AIRLINES = {
+    CA: { name: 'Central Air',       kind: 'flag',     hub: 'central', c1: '#c0392b', c2: '#f5c518', tail: '#14213d' },
+    WR: { name: 'Westreach Airways', kind: 'flag',     hub: 'redmesa', c1: '#9a5b2a', c2: '#e8c53a', tail: '#4a2c14' },
+    SJ: { name: 'Sunward Jet',       kind: 'flag',     hub: 'solana',  c1: '#f39c12', c2: '#1f6fd1', tail: '#0b3d91' },
+    KW: { name: 'Kaimana Wings',     kind: 'flag',     hub: 'kaimana', c1: '#16a085', c2: '#ff7f50', tail: '#0b4f4a' },
+    HP: { name: 'Hopper',            kind: 'budget',   c1: '#ff6f00', c2: '#ffd54f', tail: '#ff6f00' },
+    PL: { name: 'Prairie Link',      kind: 'regional', c1: '#2e8b57', c2: '#f1f1f1', tail: '#1e5631' }
+};
+const AIRCRAFT = { prop: { name: 'Turboprop', speed: 0.62 }, narrow: { name: 'Narrow-body jet', speed: 1 }, wide: { name: 'Wide-body jet', speed: 1.12 } };
+const AIR_HUB = { west: 'redmesa', central: 'central', sun: 'solana', isles: 'kaimana' }, AIR_FLAG = { west: 'WR', central: 'CA', sun: 'SJ', isles: 'KW' };
+let AIR_NET = null;
+function airSmall(c) { return c.style === 'rural' || c.size < 16000; }
+function airHash(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function airNet() {
+    if (AIR_NET) return AIR_NET;
+    const legs = [], from = new Map(), seen = new Set(), ap = c => WL.airportByCity.get(c), city = id => W_CITIES.find(c => c.id === id);
+    const len = (a, b) => { const A = ap(a), B = ap(b); return wGCMapLen(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 32); };
+    const add = (al, a, b, ac) => {
+        for (const [x, y] of [[a, b], [b, a]]) {
+            const k = al + x + '>' + y; if (x === y || seen.has(k) || !ap(x) || !ap(y)) continue; seen.add(k);
+            const L0 = len(x, y), AL = AIRLINES[al], h = airHash(k), mul = AL.kind === 'budget' ? 0.62 : AL.kind === 'regional' ? 0.85 : 1;
+            const fare = Math.round((30 + L0 / 7000) * mul), per = (ac === 'wide' ? 9 : ac === 'prop' ? 7 : 6) * 60000;
+            const A = ap(x), B = ap(y), near = (8 / 180) * (W_CIRC / 2), P = wGCPath(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 48), pole = P.some(q => q[1] < W_POLE_N + near) ? 'N' : P.some(q => q[1] > W_POLE_S - near) ? 'S' : '';
+            const leg = { al, ac, pole, fn: al + (100 + h % 880), from: x, to: y, len: Math.round(L0), mins: Math.max(1, Math.round((L0 / (PLANE_CRUISE * AIRCRAFT[ac].speed) + 2500) / 360) / 10), fare, fareJ: Math.round(fare * 2.8 + 60), per, off: h % per };
+            legs.push(leg); (from.get(x) || from.set(x, []).get(x)).push(leg);
+        }
+    };
+    const hubs = Object.values(AIR_HUB);
+    for (const [cu, hub] of Object.entries(AIR_HUB)) {
+        const al = AIR_FLAG[cu];
+        for (const h2 of hubs) if (h2 !== hub) add(al, hub, h2, len(hub, h2) > 560000 ? 'wide' : 'narrow');
+        for (const c of W_CITIES) if (c.culture === cu && c.id !== hub) add(al, hub, c.id, airSmall(c) ? 'prop' : 'narrow');
     }
-    out.sort((p, q) => p.dist - q.dist);
-    return (A._opts = out);
+    for (const c of W_CITIES) if (airSmall(c)) {                 // Prairie Link: each small town to its nearest airport in another region
+        const o = W_CITIES.filter(q => q.culture !== c.culture).sort((p, q) => len(c.id, p.id) - len(c.id, q.id))[0]; if (o) add('PL', c.id, o.id, 'prop');
+    }
+    const big = W_CITIES.filter(c => !airSmall(c) && !hubs.includes(c.id));
+    for (const c of big) for (const o of big.filter(q => q.culture !== c.culture).sort((p, q) => len(c.id, p.id) - len(c.id, q.id)).slice(0, 2)) add('HP', c.id, o.id, len(c.id, o.id) > 700000 ? 'wide' : 'narrow');
+    AIR_NET = { legs, from };
+    return AIR_NET;
 }
-function worldBoardFlight(client, A, toId, prepaid) {
-    const w = client.world, p = client.player, B = WL.airportByCity.get(toId);
+// Every way to fly from airport A: direct, one stop, or (only where needed) two stops. Up to three choices per destination.
+function airItins(A) {
+    if (A._itins) return A._itins;
+    const net = airNet(), byDest = new Map(), legsFrom = c => net.from.get(c) || [];
+    const push = legs => {
+        const cities = [A.city, ...legs.map(l => l.to)]; if (new Set(cities).size !== cities.length) return;
+        const dest = legs[legs.length - 1].to, k = legs.length > 1 ? 0.85 : 1;
+        const o = { key: legs.map(l => l.fn).join('+'), legs, stops: legs.length - 1, mins: Math.round((legs.reduce((t, l) => t + l.mins, 0) + (legs.length - 1) * 2) * 10) / 10,
+            fare: Math.round(legs.reduce((t, l) => t + l.fare, 0) * k), fareJ: Math.round(legs.reduce((t, l) => t + l.fareJ, 0) * k) };
+        (byDest.get(dest) || byDest.set(dest, []).get(dest)).push(o);
+    };
+    for (const l1 of legsFrom(A.city)) { push([l1]); for (const l2 of legsFrom(l1.to)) push([l1, l2]); }
+    const reached = new Set(byDest.keys());
+    for (const l1 of legsFrom(A.city)) for (const l2 of legsFrom(l1.to)) for (const l3 of legsFrom(l2.to)) if (!reached.has(l3.to)) push([l1, l2, l3]);
+    const out = new Map();
+    for (const [dest, list] of byDest) {
+        if (dest === A.city) continue;
+        list.sort((p, q) => p.mins - q.mins || p.fare - q.fare);
+        const best = list[0].mins, keep = [], add = o => { if (o && !keep.includes(o) && keep.length < 3) keep.push(o); };
+        list.filter(o => !o.stops).forEach(add);
+        add(list[0]); add(list.slice().sort((p, q) => p.fare - q.fare)[0]);
+        for (const o of list) if (o.mins <= best * 1.8 + 3 && !keep.some(k => k.legs[0].al === o.legs[0].al)) add(o);
+        out.set(dest, keep.sort((p, q) => p.mins - q.mins));
+    }
+    return (A._itins = out);
+}
+function airFindItin(A, key) { for (const list of airItins(A).values()) for (const o of list) if (o.key === key) return o; return null; }
+// The check-in / phone list: one entry per option, grouped by destination on the client.
+function airItinActions(client, A) {
+    const w = client.world, money = Math.floor(w.sessionCoins || 0) + (w.bankCoins || 0), out = [];
+    const dests = [...airItins(A)].sort((p, q) => p[1][0].mins - q[1][0].mins);
+    for (const [dest, list] of dests) {
+        const B = WL.airportByCity.get(dest), cB = W_CITIES.find(c => c.id === dest), g = wGC(A.sb.x, A.sb.y, B.sb.x, B.sb.y), cb = Math.cos(g.brg);
+        const head = cb > 0.7 ? 'north' : cb < -0.7 ? 'south' : Math.sin(g.brg) > 0 ? 'east' : 'west';
+        for (const o of list) out.push({ a: 'tix:' + o.key, on: money >= o.fare, onJ: money >= o.fareJ, city: dest, code: B.code, name: cB.name, tz: cB.tz, head, km: Math.round(o.legs.reduce((t, l) => t + l.len, 0) / 1000),
+            mins: o.mins, fare: o.fare, fareJ: o.fareJ, stops: o.stops, pole: (o.legs.find(l => l.pole) || {}).pole || '', via: o.legs.slice(0, -1).map(l => WL.airportByCity.get(l.to).code), legs: o.legs.map(l => ({ al: l.al, fn: l.fn, ac: l.ac, from: WL.airportByCity.get(l.from).code, to: WL.airportByCity.get(l.to).code })), label: `${B.code} · ${cB.name}` });
+    }
+    return out;
+}
+function worldBuyItin(client, A, key, cls, remote) {
+    const w = client.world, o = A && airFindItin(A, key); if (!o) return false;
+    const price = cls === 'J' ? o.fareJ : o.fare, l0 = o.legs[0], B = WL.airportByCity.get(o.legs[o.legs.length - 1].to), cB = W_CITIES.find(c => c.id === B.city);
+    if (!worldPayToll(client, price)) { worldNotice(client, `That ticket costs ${fmtMoney(price)} coins.`, { level: 'bad' }); return false; }
+    w.itin = { key, legs: o.legs.map(l => ({ from: l.from, to: l.to, al: l.al, fn: l.fn, ac: l.ac })), i: 0, cls, fare: price, until: Date.now() + (remote ? 60 : 30) * 60000 };
+    const via = o.stops ? ` via ${o.legs.slice(0, -1).map(l => WL.airportByCity.get(l.to).code).join(', ')}` : ' nonstop';
+    worldNotice(client, `🎫 ${cls === 'J' ? 'Business' : 'Economy'} ticket ${A.code} → ${B.code} (${cB.name})${via}. First flight: ${AIRLINES[l0.al].name} ${l0.fn}. ${remote ? `Head to ${A.name} – your mobile boarding pass works at the gate.` : 'Go through security to the gate.'}`, { level: 'good' });
+    w.promptKey = '\u0000'; worldPushState(client);
+    return true;
+}
+function worldTicketLeg(w, A) { const it = w.itin; if (!it || it.until < Date.now()) return null; const l = it.legs[it.i]; return l && (!A || l.from === A.city) ? l : null; }
+function worldBoardFlight(client, A, leg) {
+    const w = client.world, p = client.player, B = leg && WL.airportByCity.get(leg.to);
     if (!w || !p || !B || B === A || p.vehicle || p.flight || w.scene !== 'ext') return;
-    const opt = worldFlightOptions(A).find(o => o.to === B); if (!opt) return;
-    if (!prepaid && !worldPayToll(client, opt.fare)) { worldNotice(client, `The fare to ${opt.toCity.name} is ${fmtMoney(opt.fare)} coins (cash or bank).`, { level: 'bad' }); return; }
-    const f = flightCreate(A, B, PLANE_CRUISE); f.liv = 0;
-    // drones stay on the ground
+    const ac = AIRCRAFT[leg.ac] || AIRCRAFT.narrow, AL = AIRLINES[leg.al], f = flightCreate(A, B, PLANE_CRUISE * ac.speed);
+    f.al = leg.al; f.ac = leg.ac; f.fn = leg.fn; f.cls = w.itin ? w.itin.cls : 'Y'; f.liv = 0;
     if (client.room) client.room.drones = client.room.drones.filter(d => d.owner !== p);
-    p.activeDrones = 0;
-    w.task = null;
+    p.activeDrones = 0; w.task = null;
     p.flight = f; p.ghost = true; p.x = f.x; p.y = f.y; p.vx = p.vy = 0;
     p.inputs = { up: false, down: false, left: false, right: false, shooting: false, angle: p.inputs?.angle || 0, repel: false };
-    const fromCity = W_CITIES.find(c => c.id === A.city);
-    worldNotice(client, `${prepaid ? 'Boarding pass scanned. ' : ''}Boarded ${A.code} → ${B.code}: ${opt.head}bound to ${opt.toCity.name} (${worldTzLabel(opt.toCity.tz)}). Fare -${fmtMoney(opt.fare)}. Sit back – taxiing to the runway.`, { level: 'good' });
-    w.flightInfo = { from: A.city, to: B.city, fromName: fromCity.name, toName: opt.toCity.name, fromCode: A.code, toCode: B.code, dir: opt.head, tz: opt.toCity.tz, fromTz: fromCity.tz, total: flightRemaining(f), dist: Math.round(opt.dist), long: opt.dist > W_GAP * 1.2 ? 1 : 0, east: f.dir === 'east' ? 1 : 0 };
+    const fromCity = W_CITIES.find(c => c.id === A.city), toCity = W_CITIES.find(c => c.id === B.city), it = w.itin, last = !it || it.i >= it.legs.length - 1;
+    worldNotice(client, `${AL.name} ${leg.fn} · ${A.code} → ${B.code} (${toCity.name}) · ${ac.name}${f.viaPole ? ` · over the ${f.viaPole === 'N' ? 'North' : 'South'} Pole` : ''}. ${f.cls === 'J' ? 'Welcome to Business – the menu is on us. ' : ''}Taxiing to the runway.`, { level: 'good' });
+    w.flightInfo = { from: A.city, to: B.city, fromName: fromCity.name, toName: toCity.name, fromCode: A.code, toCode: B.code, dir: f.head, tz: toCity.tz, fromTz: fromCity.tz, total: flightRemaining(f), dist: f.dist,
+        long: leg.ac === 'wide' || f.dist > W_GAP * 1.2 ? 1 : 0, east: f.dir === 'east' ? 1 : 0, al: leg.al, alName: AL.name, fn: leg.fn, ac: leg.ac, acName: ac.name, cls: f.cls, pole: f.viaPole || '',
+        next: !last ? (() => { const n = it.legs[it.i + 1]; return `${AIRLINES[n.al].name} ${n.fn} to ${WL.airportByCity.get(n.to).code}`; })() : '' };
     worldPushFlight(client);
     worldPushState(client);
 }
@@ -5132,6 +5298,8 @@ function worldStepFlight(e) {
     const f = e.flight, ev = flightStep(f);
     e.x = f.x; e.y = f.y; e.vx = 0; e.vy = 0;
     const c = e.room.clients.find(q => q.player === e);
+    if (ev === 'pole' && c && c.world && c.world.flightInfo) { c.world.flightInfo.dir = f.y < W_EXTY / 2 ? 'south' : 'north'; worldPushFlight(c); }
+    if (ev === 'pole' && c) worldNotice(c, `🧭 Over the ${f.y < W_EXTY / 2 ? 'North' : 'South'} Pole – every time zone meets here. You're heading ${f.y < W_EXTY / 2 ? 'south' : 'north'} now, down the far side of the world.`, { level: 'warn' });
     if (ev === 'wrap' && c) worldNotice(c, f.dir === 'east' ? '✈ Crossing the International Date Line eastbound – calendars go back one day.' : '✈ Crossing the International Date Line westbound – calendars jump forward one day.', { level: 'warn' });
     if (ev === 'done') worldEndFlight(e, c);
 }
@@ -5142,6 +5310,18 @@ function worldEndFlight(e, client) {
     if (!client || !client.world) return;
     client.world.ext = { x: e.x, y: e.y }; client.world.flightInfo = null;
     sendWorld(client, 'world_flight', { f: null });
+    const it = client.world.itin;
+    if (it && it.legs[it.i] && it.legs[it.i].to === f.to) {
+        it.i++;
+        if (it.i < it.legs.length) {                                     // a connection: straight to the gate, airside, without going through the city
+            const n = it.legs[it.i], key = 'term:' + B.city, def = worldInteriorDef(key), gs = def.stations.find(q => q.use === 'gate');
+            it.until = Math.max(it.until, Date.now() + 30 * 60000);
+            worldGoto(client, key, gs.x, gs.y + 70);
+            worldNotice(client, `🔁 Welcome to ${city.name} (${worldTzLabel(city.tz)}). Your connection ${AIRLINES[n.al].name} ${n.fn} to ${WL.airportByCity.get(n.to).code} boards at Gate 2 – it's right here.`, { level: 'good' });
+            worldPushState(client); return;
+        }
+        client.world.itin = null;
+    }
     worldNotice(client, `Welcome to ${city.name}! Local time ${worldLocalClock(city.tz)} (${worldTzLabel(city.tz)}).`, { level: 'good' });
     worldPushState(client); worldSave(client);
 }
@@ -5182,12 +5362,12 @@ function worldComputePrompt(client) {
         if (Math.abs(ap.sb.x - p.x) > 2500 || Math.abs(ap.sb.y - p.y) > 2500) continue;
         const dg = Math.hypot(ap.sb.x - p.x, ap.sb.y - p.y), dd = dist(ap.door), city = W_CITIES.find(c => c.id === ap.city);
         if (dg < 210) {
-            const t = worldTicketValid(w, ap) ? w.ticket : null, B = t && WL.airportByCity.get(t.to), cB = B && W_CITIES.find(c => c.id === B.city);
+            const t = worldTicketLeg(w, ap), B = t && WL.airportByCity.get(t.to), cB = B && W_CITIES.find(c => c.id === B.city);
             consider(dg - 60, { id: 'gate:' + ap.city, kind: 'gate', ctx: ap, ax: ap.sb.x, ay: ap.sb.y - 130, title: `✈ ${ap.code} · Gate 2`,
-                lines: t ? [`Boarding pass ${ap.code} → ${B.code} ${cB.name}`, `${city.name} · ${worldTzLabel(city.tz)}`] : ['Check in and buy a boarding pass inside the terminal', `${city.name} · ${worldTzLabel(city.tz)}`],
-                actions: t ? [{ a: 'board', label: `Board to ${cB.name}`, on: true }] : [{ a: 'enter', label: 'Go to the terminal', on: true }] });
+                lines: t ? [`${AIRLINES[t.al].name} ${t.fn} · ${ap.code} → ${B.code} ${cB.name}`, `${city.name} · ${worldTzLabel(city.tz)}`] : ['Check in inside the terminal, or book on your phone', `${city.name} · ${worldTzLabel(city.tz)}`],
+                actions: t ? [{ a: 'board', label: `Board ${t.fn} to ${cB.name}`, on: true }] : [{ a: 'enter', label: 'Go to the terminal', on: true }] });
         } else if (dd < 160) {
-            consider(dd, { id: 'terminal:' + ap.city, kind: 'terminal', ctx: ap, ax: ap.term.x + ap.term.w / 2, ay: ap.term.y + ap.term.h / 2, title: ap.name, lines: ['Check-in · security · departure lounge · Gate 2', `${worldFlightOptions(ap).length} destinations`], actions: [{ a: 'enter', label: 'Enter the terminal', on: true }] });
+            consider(dd, { id: 'terminal:' + ap.city, kind: 'terminal', ctx: ap, ax: ap.term.x + ap.term.w / 2, ay: ap.term.y + ap.term.h / 2, title: ap.name, lines: ['Check-in · security · departure lounge · Gate 2', `${airItins(ap).size} destinations`], actions: [{ a: 'enter', label: 'Enter the terminal', on: true }] });
         }
     }
     const cx = clamp(Math.floor(p.x / W_CHUNK), 0, W_NCH - 1), cy = clamp(Math.floor(p.y / W_CHUNK), 0, W_NCH - 1);
@@ -5206,8 +5386,8 @@ function worldComputePrompt(client) {
                 const co = W_COMPANIES.find(c => c.id === work), mine = w.job?.co === co.id, branch = !b.work;
                 consider(d, { id: 'work:' + b.id, kind: 'work', ctx: b, ax, ay, title: co.name + (branch ? ' (branch)' : ''), lines: [mine ? `You work here as ${WORLD_RANKS[worldRank(w)]} ${co.role}` : `Hiring: ${co.role} · ~${worldPayFor(co, b.door)} coins per ${co.kind === 'desk' ? 'task' : co.kind === 'farm' ? '5 crops' : 'job'}`, co.perk ? 'Perk: ' + WORLD_PERKS[co.perk] : 'Staff entrance – reception inside'], actions: [{ a: 'enter', label: 'Go inside', on: true }] });
             } else if (b.shop) {
-                const sk = SHOP_KINDS[b.shop];
-                consider(d, { id: 'shop:' + b.id, kind: 'shop', ctx: { city, items: sk.items }, ax, ay, title: (b.fuel ? '⛽ ' : '') + (b.sn || sk.name), lines: [`${city ? city.name + ' prices' : 'Roadside prices'} · cash ${fmtMoney(cash)} · bank ${fmtMoney(coins)}`], actions: worldShopActions(client, sk.items, city), pick: true });
+                const sk = SHOP_KINDS[b.shop], sp = worldShopPrompt(client, b.shop, sk.items, city, b.fuel ? 'airport' : 'street');
+                consider(d, { id: 'shop:' + b.id, kind: 'shop', ctx: { city, items: worldCultureItems(b.shop, sk.items, city) }, ax, ay, title: (b.fuel ? '⛽ ' : '') + (b.sn || sk.name), lines: [`${city ? city.name + ' prices' : 'Roadside prices'} · cash ${fmtMoney(cash)} · bank ${fmtMoney(coins)}`, ...(sp.greet ? [sp.greet] : [])], actions: sp.actions, pick: true });
             } else if (b.k === 'megamall') {
                 consider(d, { id: 'mall:' + b.id, kind: 'mallenter', ctx: b, ax, ay, title: b.nm || 'Shopping mall', lines: [`${b.lv || 3} levels of shops, cafés and souvenirs`], actions: [{ a: 'enter', label: 'Go inside', on: true }] });
             } else if (b.k === 'hotel' || b.k === 'inn' || b.k === 'motel') {
@@ -5227,8 +5407,8 @@ function worldComputePrompt(client) {
         for (const a of ch.props) {
             if (a.k === 'stall') {
                 const d = Math.hypot(a.x + 32 - p.x, a.y + 20 - p.y); if (d > 90) continue;
-                const sk = STALL_KINDS[a.sk] || STALL_KINDS.food, city = W_CITIES.find(c => c.id === a.city) || null;
-                consider(d, { id: 'stall:' + a.id, kind: 'stall', ctx: { city, items: sk.items }, ax: a.x + 32, ay: a.y - 30, title: sk.name, lines: [city ? city.name : ''], actions: worldShopActions(client, sk.items, city), pick: true });
+                const sk = STALL_KINDS[a.sk] || STALL_KINDS.food, city = W_CITIES.find(c => c.id === a.city) || null, sp = worldShopPrompt(client, a.sk || 'food', sk.items, city, 'street');
+                consider(d, { id: 'stall:' + a.id, kind: 'stall', ctx: { city, items: worldCultureItems(a.sk || 'food', sk.items, city) }, ax: a.x + 32, ay: a.y - 30, title: sk.name, lines: [city ? city.name : '', ...(sp.greet ? [sp.greet] : [])], actions: sp.actions, pick: true });
                 continue;
             }
             if (a.k !== 'atm') continue;
@@ -5271,7 +5451,7 @@ function worldInteriorPrompt(client) {
     } else if (def.kind === 'mall') {
         const b = WL.buildingById.get(def.bid), city = b && W_CITIES.find(c => c.id === b.city);
         for (const s of def.stations) if (!s.use && near(s)) {
-            if (s.shop) consider(Math.hypot(s.x - p.x, s.y - p.y), { id: s.id, kind: 'shop', ctx: { city, items: SHOP_KINDS[s.shop].items }, ax: s.x, ay: s.y - 80, title: SHOP_KINDS[s.shop].name, lines: [def.theme.name], actions: worldShopActions(client, SHOP_KINDS[s.shop].items, city), pick: true });
+            if (s.shop) { const sp = worldShopPrompt(client, s.shop, SHOP_KINDS[s.shop].items, city, def.casino ? 'casino' : 'mall'); consider(Math.hypot(s.x - p.x, s.y - p.y), { id: s.id, kind: 'shop', ctx: { city, items: worldCultureItems(s.shop, SHOP_KINDS[s.shop].items, city) }, ax: s.x, ay: s.y - 80, title: SHOP_KINDS[s.shop].name, lines: [def.theme.name, ...(sp.greet ? [sp.greet] : [])], actions: sp.actions, pick: true }); }
             else consider(Math.hypot(s.x - p.x, s.y - p.y), { id: s.id, kind: 'escalator', ax: s.x, ay: s.y - 70, title: 'Escalator', lines: [s.id === 'up' ? `Up to level ${def.lv + 1}` : `Down to level ${def.lv - 1}`], actions: [{ a: s.id, label: s.id === 'up' ? '⬆ Go up' : '⬇ Go down', on: true }], mini: true });
         }
     } else {
@@ -5313,7 +5493,7 @@ function worldInteract(client, d) {
         case 'bed': worldDoRest(client); break;
         case 'gate': if (act.a === 'board') worldBoardWithTicket(client, pr.ctx); else if (act.a === 'enter') { const def = worldInteriorDef('term:' + pr.ctx.city); worldGoto(client, 'term:' + pr.ctx.city, def.spawn.x, def.spawn.y); } break;
         case 'terminal': if (act.a === 'enter') { const def = worldInteriorDef('term:' + pr.ctx.city); worldGoto(client, 'term:' + pr.ctx.city, def.spawn.x, def.spawn.y); } break;
-        case 'use': case 'tickets': worldUse(client, pr.ctx, act.a); break;
+        case 'use': case 'tickets': worldUse(client, pr.ctx, act.a, d); break;
         case 'shop': case 'stall': if (act.a.startsWith('buy:')) worldBuyItem(client, act.a.slice(4), pr.ctx.city); break;
         case 'attraction': if (act.a === 'visit') worldVisit(client, pr.ctx); else if (act.a === 'enter') { const def = worldInteriorDef('work:' + pr.ctx.id); worldGoto(client, 'work:' + pr.ctx.id, def.spawn.x, def.spawn.y); } break;
         case 'hotel':
@@ -5476,6 +5656,23 @@ function worldFarmHarvest(owner, e) {
 // ---- shops, stalls, attractions ---------------------------------------------------------------------------------
 function worldItemPrice(it, city) { return Math.max(1, Math.round(it.price * (city ? city.priceMul : 1))); }
 const WORLD_PU_NAMES = { fov: '🔭 wider view', forceField: '🛡 shield', reload: '⚡ faster reload', damage: '💥 +50% damage', healthRegen: '❤ health regen', bulletSpeed: '🎯 faster shots', movementSpeed: '+50% speed' };
+const W_FOOD_SHOPS = new Set(['cafe', 'bakery', 'noodle', 'grocery', 'general', 'sushi', 'pizza', 'burger', 'tacos', 'bubbletea', 'icecream', 'donut', 'deli', 'candy', 'food', 'farm']);
+function worldLocalHour(tz) { return ((6 + (Date.now() % WORLD_DAY_MS) / WORLD_DAY_MS * 24 + tz) % 24 + 24) % 24; }
+// Opening hours follow the local culture: Central never sleeps, the Sunward Coast closes for siesta, farm towns shut early.
+function worldShopClosed(city, where) {
+    const cu = city && W_CULTURES[city.culture]; if (!cu || where === 'airport' || where === 'casino') return null;
+    let open = cu.open, close = cu.close; if (city.style === 'rural') close = Math.min(close, 19);
+    if (where === 'mall' && city.culture !== 'central') { open = Math.max(open, 9); close = Math.min(close, 23); }
+    const h = worldLocalHour(city.tz), hh = v => String(v).padStart(2, '0') + ':00';
+    if (!(open === 0 && close === 24) && (h < open || h >= close)) return `Closed · opens ${hh(open)} local time`;
+    if (cu.siesta && where !== 'mall' && h >= cu.siesta[0] && h < cu.siesta[1]) return `Closed for siesta · back at ${hh(cu.siesta[1])}`;
+    return null;
+}
+function worldCultureItems(kind, items, city) { const cu = city && W_CULTURES[city.culture]; return cu && W_FOOD_SHOPS.has(kind) ? items.concat(cu.spec) : items; }
+function worldShopPrompt(client, kind, items, city, where) {          // greeting line + actions (or the closed sign)
+    const cu = city && W_CULTURES[city.culture], closed = worldShopClosed(city, where);
+    return { greet: cu ? `${cu.greet} · ${cu.name}` : '', actions: closed ? [{ a: 'closed', label: '🔒 ' + closed, on: false }] : worldShopActions(client, worldCultureItems(kind, items, city), city) };
+}
 function worldShopActions(client, items, city) {
     const w = client.world, money = Math.floor(w.sessionCoins || 0) + (w.bankCoins || 0);
     return items.map(id => {
@@ -5524,6 +5721,56 @@ function worldBookStay(client, b) {
     worldNotice(client, `Room booked at ${b.nm || 'the ' + b.k} for 30 minutes. Until it runs out you'll wake up here when you log in or respawn, even if you own a house.`, { level: 'good' });
     worldSave(client); worldPushState(client);
     const def = worldInteriorDef('stay:' + b.id); worldGoto(client, 'stay:' + b.id, def.spawn.x, def.spawn.y);
+}
+
+// ---- the phone ---------------------------------------------------------------------------------------------------
+// Book flights and hotels from anywhere, see your trip, message other players. Everything the phone can do is also
+// possible in person; the phone just saves the walk.
+function worldWhere(client) { const w = client.world, p = client.player; return w.scene === 'ext' && p ? { x: p.x, y: p.y } : (w.ext || WL.spawn); }
+function worldPhoneTrip(client) {
+    const it = client.world.itin, ok = it && it.until > Date.now();
+    sendWorld(client, 'phone', { act: 'trip', trip: ok ? { cls: it.cls, i: it.i, left: it.until - Date.now(), legs: it.legs.map(l => ({ fn: l.fn, al: l.al, alName: AIRLINES[l.al].name, ac: AIRCRAFT[l.ac].name, from: WL.airportByCity.get(l.from).code, to: WL.airportByCity.get(l.to).code, fromName: W_CITIES.find(c => c.id === l.from).name, toName: W_CITIES.find(c => c.id === l.to).name })) } : null });
+}
+function worldPhone(client, d) {
+    const w = client.world, p = client.player; if (!w || !p || !WL) return;
+    const now = Date.now(); if (now - (w.phoneT || 0) < 150) return; w.phoneT = now;
+    const at = worldWhere(client);
+    switch (String(d.act || '')) {
+        case 'flights': {
+            let A = d.from && WL.airportByCity.get(String(d.from));
+            if (!A) { let bd = Infinity; for (const a of WL.airports) { const dd = Math.hypot(wrapDx(a.door.x - at.x), a.door.y - at.y); if (dd < bd) { bd = dd; A = a; } } }
+            sendWorld(client, 'phone', { act: 'flights', from: A.city, fromCode: A.code, fromName: A.name, list: airItinActions(client, A), airports: WL.airports.map(a => ({ city: a.city, code: a.code })) });
+            break;
+        }
+        case 'buy': { const A = WL.airportByCity.get(String(d.from)); if (A && worldBuyItin(client, A, String(d.key), d.cls === 'J' ? 'J' : 'Y', true)) worldPhoneTrip(client); break; }
+        case 'trip': worldPhoneTrip(client); break;
+        case 'hotels': {
+            const list = WL.buildings.filter(b => b.k === 'hotel' || b.k === 'inn' || b.k === 'motel').map(b => ({ b, d: Math.hypot(wrapDx(b.door.x - at.x), b.door.y - at.y) })).sort((a, b) => a.d - b.d).slice(0, 10);
+            sendWorld(client, 'phone', { act: 'hotels', list: list.map(({ b, d }) => ({ bid: b.id, name: b.nm || (b.k === 'inn' ? 'Inn' : b.k === 'motel' ? 'Motel' : 'Hotel'), k: b.k, stars: b.stars || 0, price: worldStayPrice(b), km: Math.round(d / 100) / 10, x: Math.round(b.door.x), y: Math.round(b.door.y), city: (W_CITIES.find(c => c.id === b.city) || {}).name || 'Roadside' })), stay: worldStayValid(w) ? w.stay.bid : 0 });
+            break;
+        }
+        case 'book': {
+            const b = WL.buildingById.get(Number(d.bid)); if (!b || !['hotel', 'inn', 'motel'].includes(b.k)) return;
+            const price = worldStayPrice(b); if (!worldPayToll(client, price)) { worldNotice(client, `A room there costs ${price} coins.`, { level: 'bad' }); return; }
+            w.stay = { bid: b.id, until: Date.now() + STAY_MS }; worldSave(client); worldPushState(client);
+            worldNotice(client, `🏨 Booked ${b.nm || 'a room'} for 30 minutes (-${price}). Until it runs out you'll wake up there. Tap "Navigate" to get directions.`, { level: 'good' });
+            break;
+        }
+        case 'players': {
+            const list = [...worldRoom.clients, ...Object.values(interiorRooms).flatMap(r => r.clients || [])].filter(c => c.world && c.player).map(c => { const q = worldWhere(c), city = worldCityAt(wrapX(q.x), q.y); return { name: c.player.name, city: city ? city.name : 'On the road', me: c === client ? 1 : 0 }; });
+            sendWorld(client, 'phone', { act: 'players', list });
+            break;
+        }
+        case 'dm': {
+            const to = String(d.to || '').slice(0, 40), text = String(d.text || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200); if (!to || !text) return;
+            if (now - (w.dmT || 0) < 1500) { worldNotice(client, 'Slow down a little.'); return; } w.dmT = now;
+            const all = [...worldRoom.clients, ...Object.values(interiorRooms).flatMap(r => r.clients || [])], tgt = all.filter(c => c.player && c.player.name === to && c !== client);
+            if (!tgt.length) { sendWorld(client, 'phone', { act: 'msg', from: 'System', to: p.name, text: `${to} isn't online.`, t: now }); return; }
+            for (const c of tgt) sendWorld(c, 'phone', { act: 'msg', from: p.name, to, text, t: now });
+            sendWorld(client, 'phone', { act: 'msg', from: p.name, to, text, t: now, mine: 1 });
+            break;
+        }
+    }
 }
 
 // ---- fuel -----------------------------------------------------------------------------------------------------
@@ -5647,7 +5894,7 @@ function buildMallInterior(b, lv) {
     const X0 = 200, Y0 = 200, W = 1400, H = 1100, fl = { x: X0, y: Y0, w: W, h: H }, doorX = X0 + W / 2, levels = b.lv || 3, ft = mallFloorTheme(b, lv), FT = MALL_FLOORS[ft];
     const D = {
         kind: 'mall', ext: INT_EXT, floor: fl,
-        theme: { accent: ft === 'casino' ? '#d4a017' : b.neon ? '#ff2bd6' : '#c9a227', name: (b.nm || 'Mall') + ' · Level ' + lv + ' · ' + (ft === 'casino' ? '🎰 ' + CASINO_NAMES[(b.id || 0) % CASINO_NAMES.length] : FT.name), neon: b.neon ? 1 : 0, ft, floor: FT.floor, alt: +(1 + 0.45 * (lv - 1)).toFixed(2) },
+        theme: { accent: ft === 'casino' ? '#d4a017' : b.neon ? '#ff2bd6' : '#c9a227', name: (b.nm || 'Mall') + ' · Level ' + lv + ' · ' + (ft === 'casino' ? '🎰 ' + CASINO_NAMES[(b.id || 0) % CASINO_NAMES.length] : FT.name), neon: b.neon ? 1 : 0, ft, floor: FT.floor, alt: +(1 + 0.45 * (lv - 1)).toFixed(2), eh: (lv - 1) * 40 },
         walls: intWallsAround(fl, doorX, lv === 1 ? 160 : 0), furn: [], stations: [], rooms: [{ x: X0, y: Y0, w: W, h: H, c: 'mall' }],
         door: { x: doorX - 80, y: Y0 + H, w: lv === 1 ? 160 : 0, h: INT_WALL, px: doorX, py: Y0 + H - 36, r: lv === 1 ? 120 : 0 },
         spawn: { x: doorX, y: Y0 + H - 110 }, lv, levels, bid: b.id
@@ -5747,11 +5994,12 @@ function worldOnDisconnect(client) {
 }
 function worldHandle(client, d) {
     const w = client.world; if (!w || !client.dbId) return;
-    if (d.type === 'world_interact') worldInteract(client, { id: String(d.id), a: String(d.a) });
+    if (d.type === 'world_interact') worldInteract(client, { id: String(d.id), a: String(d.a), cls: d.cls === 'J' ? 'J' : 'Y' });
     else if (d.type === 'world_leave') { worldOnDisconnect(client); }
     else if (d.type === 'world_nav') worldNav(client, String(d.t), d);
     else if (d.type === 'world_inflight') worldInflightOrder(client, String(d.item || ''));
     else if (d.type === 'world_casino') worldCasino(client, d);
+    else if (d.type === 'world_phone') worldPhone(client, d);
     else if (d.type === 'world_gig') { if (d.act === 'cancel') { if (w.mission) { w.mission = null; worldNotice(client, 'Job cancelled.'); worldPushMission(client); } } else worldStartGig(client); }
     else if (d.type === 'world_taxi') { if (d.act === 'cancel') { if (client.player?.taxiRide) worldEndTaxi(client, false); else { taxiRides.delete(client); worldPushTaxi(client); } } else worldHailTaxi(client, worldResolveTarget(client, String(d.t || 'pin'), d)); }
     else if (d.type === 'world_map' && WL) sendWorld(client, 'world_map', { p: worldMapPlaces() });
@@ -5925,13 +6173,15 @@ function worldFarmTick() {
 
 // ---- NPC traffic and pedestrians --------------------------------------------------------------------
 function worldChunkList(x, y, R, name) {
-    const cx = clamp(Math.floor(x / W_CHUNK), 0, W_NCH - 1), cy = clamp(Math.floor(y / W_CHUNK), 0, W_NCH - 1), out = [];
-    for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) { const ch = WL.chunks.get((cx + dx) + (cy + dy) * W_NCH); if (ch) for (const o of ch[name]) out.push(o); }
+    const NX = Math.round(W_CIRC / W_CHUNK), cx = Math.floor(wrapX(x) / W_CHUNK) % NX, cy = clamp(Math.floor(y / W_CHUNK), 0, W_NCH - 1), out = [];
+    for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) { const ch = WL.chunks.get(((cx + dx) % NX + NX) % NX + (cy + dy) * W_NCH); if (ch) for (const o of ch[name]) out.push(o); }
     return out;
 }
 function worldAssignRoad(car, road, dir, fromS) {
     car.road = road; car.dir = dir;
     const hv = road.hw, lane = road.ln === 4 ? (Math.random() < 0.5 ? 0.3 : 0.72) : 0.5; car.off = hv * lane;
+    const rx = road.a === 'v' ? road.p : fromS, cu = W_CULTURES[W_CULTURE_COL((rx - (W_CX - W_GAP)) / W_GAP)];
+    if (cu && cu.lht) car.off = -car.off;                                       // the Kaimana Isles drive on the left
     const nodes = roadNodes.get(road); let next = null;
     if (!nodes) return false;
     if (dir > 0) { for (let i = 0; i < nodes.length; i++) if (nodes[i] > fromS + 8) { next = nodes[i]; break; } }
@@ -6365,7 +6615,7 @@ setInterval(() => {
                     if (e.markedForDeletion) continue;
                     if (['tank', 'ai'].includes(e.type)) {
                         processedEntities.add(e.id);
-                        let isVisible = Math.abs(e.x - focalX) < VD && 
+                        let isVisible = Math.abs(room.worldKind === 'exterior' ? wrapDx(e.x - focalX) : e.x - focalX) < VD && 
                                         Math.abs(e.y - focalY) < VDY;
 
                         // Invisible Manager: hide coordinates from everyone except the player themselves.
@@ -6385,7 +6635,7 @@ setInterval(() => {
                             opacity: (e.opacity !== undefined) ? Math.round(e.opacity * 100) / 100 : 1,
                             powerups: getActivePowerups(e),
                             veh: e.vehicle ? { a: Math.round(e.vehicle.a * 100) / 100, v: Math.round(e.vehicle.v * 10) / 10, m: e.vehicle.model } : e.taxiRide ? { a: Math.round(e.taxiRide.a * 100) / 100, v: Math.round(e.taxiRide.v * 10) / 10, m: 'taxi' } : undefined,
-                            fl: e.flight ? { a: Math.round(e.flight.a * 1000) / 1000, alt: Math.round(e.flight.alt * 1000) / 1000, v: Math.round(e.flight.v * 10) / 10, liv: e.flight.liv } : undefined
+                            fl: e.flight ? { a: Math.round(e.flight.a * 1000) / 1000, alt: Math.round(e.flight.alt * 1000) / 1000, v: Math.round(e.flight.v * 10) / 10, liv: e.flight.liv, al: e.flight.al, ac: e.flight.ac } : undefined
                         });
                     }
                 }
