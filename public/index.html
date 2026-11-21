@@ -512,7 +512,42 @@
             width: min(95%, 600px); max-height: min(90vh, 750px);
         }
 
-    </style>
+    
+/* boarding-pass picker */
+#wc-cards{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:150;width:min(980px,94vw);max-height:84vh;display:none;flex-direction:column;background:rgba(9,20,36,.96);border:1px solid #2fa8f0;border-radius:16px;box-shadow:0 14px 40px rgba(0,0,0,.55);font-family:'Ubuntu',sans-serif;color:#fff}
+#wc-cards .wcc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:14px 18px 10px;border-bottom:1px solid rgba(255,255,255,.1)}
+#wc-cards .wcc-title{font-weight:700;font-size:18px}
+#wc-cards .wcc-sub{color:#9fd8ff;font-size:13px;margin-top:3px}
+#wc-cards .wcc-x{background:none;border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:8px;cursor:pointer;font-size:16px;padding:3px 10px}
+#wc-cards .wcc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));grid-auto-rows:max-content;gap:14px;padding:16px 18px 18px;overflow-y:auto;min-height:0;flex:1 1 auto;overscroll-behavior:contain}
+#wc-cards .wcc-card{flex-shrink:0;background:#13263d;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column;transition:transform .12s,box-shadow .12s}
+#wc-cards .wcc-card:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.4)}
+#wc-cards .wcc-card.off{opacity:.55}
+#wc-cards .wcc-img{position:relative;aspect-ratio:300/170;background-size:cover;background-position:center}
+#wc-cards .wcc-code{position:absolute;left:8px;top:8px;background:rgba(0,0,0,.55);border-radius:6px;padding:2px 8px;font-weight:700;letter-spacing:1px}
+#wc-cards .wcc-tz{position:absolute;right:8px;top:8px;background:rgba(29,79,122,.85);border-radius:6px;padding:2px 7px;font-size:12px}
+#wc-cards .wcc-cap{padding:9px 11px 11px;display:flex;flex-direction:column;gap:6px}
+#wc-cards .wcc-name{font-weight:700;font-size:15px}
+#wc-cards .wcc-meta{color:#9fb3c4;font-size:12px}
+#wc-cards .wcc-buy{cursor:pointer;border:none;border-radius:8px;padding:8px 10px;font:700 13px 'Ubuntu',sans-serif;color:#0b1a2a;background:linear-gradient(90deg,#ffd23d,#ffb000)}
+#wc-cards .wcc-buy:disabled{cursor:default;background:#56606a;color:#cfd6dc}
+/* long-haul in-flight screen */
+#wc-ife{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:150;width:min(800px,96vw);display:none;flex-direction:column;background:rgba(6,14,28,.95);border:1px solid #2fa8f0;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.5);font-family:'Ubuntu',sans-serif;color:#fff;overflow:hidden}
+#wc-ife .ife-tabs{display:flex;gap:4px;padding:6px 8px;background:rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.08)}
+#wc-ife .ife-tabs button{background:none;border:none;color:#9fb3c4;font:600 13px 'Ubuntu',sans-serif;padding:6px 12px;border-radius:8px;cursor:pointer}
+#wc-ife .ife-tabs button.on{background:#1d4f7a;color:#fff}
+#wc-ife .ife-sp{flex:1}
+#wc-ife .ife-body{padding:8px}
+#wc-ife .ife-cv{width:100%;height:auto;display:block;border-radius:10px;cursor:grab;touch-action:none}
+#wc-ife .ife-menu{max-height:270px;overflow-y:auto}
+#wc-ife .ife-mh{color:#9fd8ff;font-size:12px;margin:2px 4px 8px}
+#wc-ife .ife-mi{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;background:#13263d;margin-bottom:7px}
+#wc-ife .ife-mi small{display:block;color:#9fb3c4;font-size:12px;margin-top:2px}
+#wc-ife .ife-mi button{cursor:pointer;border:none;border-radius:8px;padding:7px 12px;font:700 13px 'Ubuntu',sans-serif;background:#ffd23d;color:#0b1a2a}
+#wc-ife .ife-info{grid-template-columns:170px 1fr;gap:6px 14px;padding:6px 10px 10px;font-size:13px}
+#wc-ife .ife-k{color:#9fb3c4}
+#wc-ife-pill{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:150;display:none;cursor:pointer;border:1px solid #2fa8f0;background:rgba(6,14,28,.92);color:#fff;border-radius:20px;padding:8px 16px;font:600 13px 'Ubuntu',sans-serif}
+</style>
 </head>
 <body>
 
