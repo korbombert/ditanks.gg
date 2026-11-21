@@ -2140,6 +2140,7 @@ function handleWorldMessage(d) {
         case 'world_house': if (d.o) WC.houses.set(d.hid, { o: d.o, m: d.m }); else WC.houses.delete(d.hid); wcSpriteCache.delete('hs' + d.hid); return true;
         case 'world_chunk': wcIngestChunk(d.c); return true;
         case 'world_scene': {
+            casClose(); WC.casFx = new Map(); WC.coins = [];
             WC.scene = d.scene; WC.intKey = d.key; WC.interior = d.interior; WC.fstate = d.fs || {}; WC.pos = { x: d.x, y: d.y }; wcIntCache = null; WC.prompt = null; wcRenderPrompt(); WC.task = -1; wcRenderTask();
             gameState = { entities: [], bullets: [], drones: [] }; renderEntities.clear(); lastBullets.clear(); lastDrones.clear(); dyingEntities = [];
             myId = null; camera.x = d.x - (canvas.width * fov) / 2; camera.y = d.y - (canvas.height * fov) / 2; return true;
@@ -2153,6 +2154,9 @@ function handleWorldMessage(d) {
         case 'world_death': wcToast(d.reason || 'You died.', 'bad'); return true;
         case 'world_flight': wcFlight = d.f; wcRenderFlight(); wcIfeRender(); return true;
         case 'world_furn': if (d.key === WC.intKey) WC.fstate = d.s || {}; return true;
+        case 'casino_open': casOpen(d); return true;
+        case 'casino_res': casOnRes(d); return true;
+        case 'world_casino_fx': wcCasinoFxMsg(d); return true;
         case 'world_branches': WC.branch = new Map(d.list); for (const b of WC.allBld.values()) wcApplyBranch(b); return true;
         case 'world_mission': {
             const had = wcMission; wcMission = d.m; wcMissionT = performance.now(); WC._trail = [];
@@ -2171,7 +2175,7 @@ function handleWorldMessage(d) {
 }
 function wcIngestChunk(c) {
     WC.chunks.set(c.cx + c.cy * WC.nch, c);
-    if (WC.chunks.size > 260) {                         // drop chunks far behind (the server forgets them first and re-sends on return)
+    if (WC.scene === 'ext' && WC.chunks.size > 260) {                         // drop chunks far behind (the server forgets them first and re-sends on return)
         const kx = Math.floor((camera.x + canvas.width * fov / 2) / WC.chunk), ky = Math.floor((camera.y + canvas.height * fov / 2) / WC.chunk);
         for (const [k, ch] of WC.chunks) if (Math.max(Math.abs(ch.cx - kx), Math.abs(ch.cy - ky)) > 10) { WC.chunks.delete(k); for (const b of ch.buildings) WC.allBld.delete(b.id); }
     }
@@ -3082,15 +3086,15 @@ function wcDrawExterior() {
     for (const c of list) for (const p of c.props) if (p.k === 'plane' && vis(p.x - 60, p.y - 60, p.w + 120, p.h + 120) && once('pl' + p.cx + ',' + p.cy)) wcDrawStaticPlane(p, s);
     for (const c of list) for (const p of c.props) if (p.k === 'silo' && vis(p.x, p.y, p.w, p.h) && once('s' + p.x + ',' + p.y)) wcDrawProp(p, s, 0);
     for (const c of list) for (const p of c.props) if ((p.k === 'pump' || p.k === 'stall' || p.k === 'billboard') && vis(p.x - 20, p.y - 20, p.w + 40, p.h + 40) && once('sp' + p.k + p.x + ',' + p.y)) wcDrawStreetProp(p, s, nightL);
-    wcUpdateDyn(); wcDrawDyn(vx0, vy0, vx1, vy1, s);
+    if (!WC.viewMode) { wcUpdateDyn(); wcDrawDyn(vx0, vy0, vx1, vy1, s); }
     for (const c of list) for (const p of c.props) if ((p.k === 'canopy' || p.k === 'holo') && vis(p.x - 60, p.y - 60, p.w + 120, p.h + 120) && once('cp' + p.k + p.x + ',' + p.y)) wcDrawStreetProp(p, s, nightL);
-    wcDrawMissionExtras(s);
+    if (!WC.viewMode) wcDrawMissionExtras(s);
     if (!lod) for (const c of list) for (const p of c.props) if ((p.k === 'lamp' || p.k === 'bench' || p.k === 'atm') && vis(p.x - 10, p.y - 10, (p.w || 0) + 20, (p.h || 0) + 20) && once('q' + p.k + p.x + ',' + p.y)) wcDrawProp(p, s, 1);
     for (const c of list) for (const p of c.props) if (p.k === 'tree' && p.x > vx0 - 60 && p.x < vx1 + 60 && p.y > vy0 - 60 && p.y < vy1 + 60) { if (s < 0.22) { ctx.fillStyle = (p.v >> 2) & 1 ? '#3a7e46' : '#5a9c46'; const tr = 24 + (p.v % 4) * 6; ctx.fillRect(worldToScreenX(p.x) - tr * s, worldToScreenY(p.y) - tr * s, 2 * tr * s, 2 * tr * s); } else wcDrawTree25(p, s, cam); }
     wcDrawBorder(s, W, H); wcDrawWater(s, W, H);
     const meF = myId != null ? gameState.entities.find(e => e.id === myId) : null;
-    if (meF && meF.fl) wcDrawClouds(W, H, renderEntities.get(meF.id)?.flAlt ?? meF.fl.alt);
-    wcDrawDayNight(W, H); wcDrawNav(s, W, H);
+    if (meF && meF.fl && !WC.viewMode) wcDrawClouds(W, H, renderEntities.get(meF.id)?.flAlt ?? meF.fl.alt);
+    wcDrawDayNight(W, H); if (!WC.viewMode) wcDrawNav(s, W, H);
 }
 // Water beyond the shoreline (server keeps everything inside WC_SHORE) and a shared-clock day/night cycle.
 const WC_SHORE = 1800, WC_DAY_MS = 12 * 60 * 1000;
@@ -3358,7 +3362,8 @@ function wcPaintFurniture(g, f, D) {
             const c = WC_STALL_COL[(f.col || 0) % 6]; sh(); g.fillStyle = D.theme.neon ? '#141225' : '#6b5a48'; g.fillRect(x, y, w, h);
             g.fillStyle = D.theme.neon ? '#231f3d' : '#f3efe6'; g.fillRect(x + 6, y + 6, w - 12, h - 30);
             for (let i = 0; i < 8; i++) { g.fillStyle = c[i % 2]; g.fillRect(x + i * w / 8, y + h - 24, w / 8 + 0.5, 24); }
-            for (let i = 0; i < 6; i++) { g.fillStyle = ['#e0b04a', '#7fb46a', '#c95c4c', '#5a8fd0'][i % 4]; g.fillRect(x + 20 + i * (w - 40) / 6, y + 20, (w - 40) / 6 - 8, 14); }
+            if (f.ic) { g.font = '17px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; for (let i = 0; i < 6; i++) g.fillText(f.ic, x + 20 + (i + 0.5) * (w - 40) / 6, y + 27); }
+            else for (let i = 0; i < 6; i++) { g.fillStyle = ['#e0b04a', '#7fb46a', '#c95c4c', '#5a8fd0'][i % 4]; g.fillRect(x + 20 + i * (w - 40) / 6, y + 20, (w - 40) / 6 - 8, 14); }
             if (D.theme.neon) { g.save(); g.shadowColor = '#00e5ff'; g.shadowBlur = 10; g.strokeStyle = '#00e5ff'; g.lineWidth = 2; g.strokeRect(x + 2, y + 2, w - 4, h - 4); g.restore(); }
             wcBanner(g, (f.label || 'SHOP').toUpperCase(), x + w / 2, y + h / 2, w - 30, 24, D.theme.accent); break;
         }
@@ -3374,35 +3379,10 @@ function wcPaintFurniture(g, f, D) {
 const WC_BH = { tower: b => 70 + (b.f || 30) * 2.6, mid: b => 46 + (b.f || 8) * 4, apt: 72, mall: 46, megamall: b => 34 * (b.lv || 3), hotel: b => 60 + (b.f || 20) * 2.4, shop: 24, old: b => 22 + (b.f || 2) * 7, house: 22, farmhouse: 22, barn: 30, shed: 14, school: 30, bank: 70, dealer: 34, hall: 56, terminal: 46, ctower: 150, hangar: 54, gallery: 34, cathedral: 96, inn: 28, motel: 24, mill: 32 };
 const WC_WALL = { tower: '#55687c', mid: '#66788a', apt: '#9d8f7e', mall: '#8a8f96', megamall: '#7d8590', hotel: '#7d7a8c', shop: '#b9ae9c', old: '#d8c4a0', house: '#e2d6bd', farmhouse: '#e2d6bd', barn: '#8a2f28', shed: '#7b6a55', school: '#b7a27f', bank: '#c8bfa8', dealer: '#9fb3c4', hall: '#c9c0aa', terminal: '#9fb3c4', ctower: '#d5d9dc', hangar: '#8d99a1', gallery: '#e3d9c0', cathedral: '#a89f8b', inn: '#d8c4a0', motel: '#c9bfa6', mill: '#6e5638' };
 // heights are exaggerated (×2.2) against a low virtual camera so towers lean visibly away from the screen centre
-function wcBHeight(b) { const h = WC_BH[b.k]; return Math.min(760, 2.2 * (typeof h === 'function' ? h(b) : (h || 30))); }
+function wcBHeight(b) { const h = WC_BH[b.k]; let H = 2.2 * (typeof h === 'function' ? h(b) : (h || 30)); if (H > 520) H = 520 + 560 * (1 - Math.exp(-(H - 520) / 650)); return H; }   // supertalls are eased so the roof never runs off to infinity
 function wcCam() { const W = canvas.width, H = canvas.height; return { x: camera.x + W * fov / 2, y: camera.y + H * fov / 2, hc: 1900 * fov }; }
 function wcProj(cam, x, y, h) { const k = cam.hc / (cam.hc - h); return [worldToScreenX(cam.x + (x - cam.x) * k), worldToScreenY(cam.y + (y - cam.y) * k), k]; }
 function wcQuad(a, b, c, d, fill) { ctx.fillStyle = fill; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); ctx.closePath(); ctx.fill(); }
-function wcDrawBuilding25(b, s, cam, night) {
-    const h = wcBHeight(b), x0 = b.x, y0 = b.y, x1 = b.x + b.w, y1 = b.y + b.h, X = worldToScreenX, Y = worldToScreenY;
-    // ground shadow: the footprint swept away from a sun in the north-west
-    const sl = h * 0.22, dx = sl * 0.75 * s, dy = sl * s;
-    ctx.fillStyle = 'rgba(8,12,16,.26)'; ctx.beginPath();
-    ctx.moveTo(X(x0), Y(y0)); ctx.lineTo(X(x1), Y(y0)); ctx.lineTo(X(x1) + dx, Y(y0) + dy); ctx.lineTo(X(x1) + dx, Y(y1) + dy); ctx.lineTo(X(x0) + dx, Y(y1) + dy); ctx.lineTo(X(x0), Y(y1)); ctx.closePath(); ctx.fill();
-    const B = [[X(x0), Y(y0)], [X(x1), Y(y0)], [X(x1), Y(y1)], [X(x0), Y(y1)]], T = [wcProj(cam, x0, y0, h), wcProj(cam, x1, y0, h), wcProj(cam, x1, y1, h), wcProj(cam, x0, y1, h)];
-    const base = b.neon ? '#1e1b33' : (WC_WALL[b.k] || '#8a8f96');
-    const faces = [];
-    if (cam.y < y0) faces.push([0, 1, 14]); if (cam.x > x1) faces.push([1, 2, -26]); if (cam.y > y1) faces.push([2, 3, -40]); if (cam.x < x0) faces.push([3, 0, 0]);
-    for (const [i, j, shade] of faces) {
-        wcQuad(B[i], B[j], T[j], T[i], wcShade(base.length === 7 ? base : '#8a8f96', shade));
-        if (h > 40 && s > 0.45) {                                        // storeys: window bands (lit at night)
-            const n = Math.min(22, Math.floor(h / 26));
-            ctx.strokeStyle = night > 0.25 ? `rgba(255,214,120,${0.25 + night * 0.5})` : b.neon ? (i % 2 ? '#ff2bd6' : '#00e5ff') : 'rgba(255,255,255,.18)';
-            ctx.lineWidth = Math.max(1, 2 * s); if (night > 0.25) ctx.setLineDash([5 * s, 4 * s]);
-            ctx.beginPath();
-            for (let q = 1; q <= n; q++) { const t = q / (n + 1); ctx.moveTo(B[i][0] + (T[i][0] - B[i][0]) * t, B[i][1] + (T[i][1] - B[i][1]) * t); ctx.lineTo(B[j][0] + (T[j][0] - B[j][0]) * t, B[j][1] + (T[j][1] - B[j][1]) * t); }
-            ctx.stroke(); ctx.setLineDash([]);
-        }
-        if (b.neon) { ctx.save(); ctx.shadowColor = '#ff2bd6'; ctx.shadowBlur = 8; ctx.strokeStyle = '#ff2bd6'; ctx.lineWidth = Math.max(1, 1.6 * s); ctx.beginPath(); ctx.moveTo(B[i][0], B[i][1]); ctx.lineTo(T[i][0], T[i][1]); ctx.moveTo(B[j][0], B[j][1]); ctx.lineTo(T[j][0], T[j][1]); ctx.stroke(); ctx.restore(); }
-    }
-    const spr = wcBuildingSprite(b), k = T[0][2];
-    ctx.drawImage(spr, T[0][0] - WC_PAD * s * k, T[0][1] - WC_PAD * s * k, spr.width / wcSPR * s * k, spr.height / wcSPR * s * k);
-}
 function wcDrawTree25(p, s, cam) {
     const spr = wcTreeSprite(p.v), [sx, sy, k] = wcProj(cam, p.x, p.y, 70);
     ctx.fillStyle = 'rgba(8,12,16,.22)'; ctx.beginPath(); ctx.ellipse(worldToScreenX(p.x) + 10 * s, worldToScreenY(p.y) + 14 * s, (22 + (p.v % 4) * 5) * s, (16 + (p.v % 4) * 4) * s, 0, 0, 7); ctx.fill();
@@ -3434,6 +3414,7 @@ const WC_FH = { desk: 22, monitor: 30, reception: 34, sofa: 20, plant: 46, cabin
 const WC_FSIDE = { desk: '#7a5a38', reception: '#4a3626', sofa: '#2e4256', plant: '#6b4a30', cabinet: '#69737b', cooler: '#aab4ba', table: '#57402a', dining: '#57402a', tv: '#101316', counter: '#6f7479', island: '#6f7479', bed: '#4a3222', wardrobe: '#5a3f2a', nightstand: '#5f4630', kiosk: '#3a3026', bath: '#c6cdd1', fridge: '#b9c2c8', lamp: '#3b3b3b', radio: '#4a3a2c', coffee: '#2b2b2b', fireplace: '#7d4a3a', aquarium: '#2f5f7a', shower: '#9fb3bf', laptop: '#3a3f45', elevator: '#5d7a8c', arcade: '#1b1d2e', directory: '#2e3a46', fountain: '#9aa4ad', photobooth: '#7a1f2b', vending: '#7a2222', atmi: '#2e5a3a', checkin: '#2d3a46', post: '#9aa4ad', board: '#14181c', arch: '#7f8a92', scanner: '#495560', window: '#3d5a70', seats: '#2a3a52', gatedesk: '#2d3a46', chair: '#24303b', monitor: '#15191d' };
 let wcFurnNoShadow = false, wcFurnSpr = new Map();
 function wcPaintFurniture2(g, f, D) {
+    if (wcPaintFurniture4(g, f, D)) return true;
     const x = f.x, y = f.y, w = f.w, h = f.h, k = f.k;
     switch (k) {
         case 'lamp': g.fillStyle = '#e8d8a8'; g.beginPath(); g.arc(x, y, f.r, 0, 7); g.fill(); g.strokeStyle = '#b39b5c'; g.lineWidth = 2; g.stroke(); return true;
@@ -3478,8 +3459,9 @@ function wcGetInterior() {
     wcFurnSpr = new Map();
     const c = document.createElement('canvas'); c.width = Math.ceil((fl.w + 2 * M) * sc); c.height = Math.ceil((fl.h + 2 * M) * sc);
     const g = c.getContext('2d'); g.scale(sc, sc); g.translate(M - fl.x, M - fl.y);
-    g.fillStyle = '#12171c'; g.fillRect(fl.x - M, fl.y - M, fl.w + 2 * M, fl.h + 2 * M);
+    if (!(D.bid || D.hid)) { g.fillStyle = '#12171c'; g.fillRect(fl.x - M, fl.y - M, fl.w + 2 * M, fl.h + 2 * M); }
     for (const r of D.rooms) {
+        if (r.c === 'mall' && D.theme.floor && wcPaintFloor(g, r, D)) continue;
         const col = { office: '#8d9aa8', lobby: '#d8d1c0', living: '#c9a070', kitchen: '#cfd3d0', bedroom: '#b9a7a0', mall: D.theme.neon ? '#2a2540' : '#e4dfd2', hall: '#dcdad3', lounge: '#c7ccd3' }[r.c] || '#bbb';
         g.fillStyle = col; g.fillRect(r.x, r.y, r.w, r.h);
         const tile = r.c === 'mall' || r.c === 'hall' ? 60 : r.c === 'lobby' || r.c === 'kitchen' ? 40 : 0;
@@ -3501,7 +3483,8 @@ function wcDrawInterior() {
     if (!WC.interior) return;
     const D = WC.interior, I = wcGetInterior(), s = 1 / fov, W = canvas.width, H = canvas.height, now = performance.now() / 1000, st = WC.fstate || {};
     const cam = { x: camera.x + W * fov / 2, y: camera.y + H * fov / 2, hc: 1250 * fov };
-    ctx.fillStyle = '#0d1115'; ctx.fillRect(0, 0, W, H);
+    const view = (D.bid || D.hid) && wcDrawOutsideView(D);
+    if (!view) { ctx.fillStyle = '#0d1115'; ctx.fillRect(0, 0, W, H); }
     ctx.drawImage(I.c, worldToScreenX(I.fl.x - I.M), worldToScreenY(I.fl.y - I.M), I.c.width / I.sc * s, I.c.height / I.sc * s);
     if (D.kind === 'office') {
         const me = gameState.entities.find(e => e.id === myId);
@@ -3519,6 +3502,16 @@ function wcDrawInterior() {
     for (const it of items) {
         if (it.wall) {
             const x0 = it.x, y0 = it.y, x1 = it.x + it.w, y1 = it.y + it.h, B = [[X(x0), Y(y0)], [X(x1), Y(y0)], [X(x1), Y(y1)], [X(x0), Y(y1)]], T = [wcProj(cam, x0, y0, it.hh), wcProj(cam, x1, y0, it.hh), wcProj(cam, x1, y1, it.hh), wcProj(cam, x0, y1, it.hh)];
+            if (view && wcIsOuterWall(D, it)) {                              // floor-to-ceiling glass: the city shows through
+                const gl = 'rgba(170,215,245,.16)';
+                if (cam.y < y0) wcQuad(B[0], B[1], T[1], T[0], gl); if (cam.x > x1) wcQuad(B[1], B[2], T[2], T[1], gl); if (cam.y > y1) wcQuad(B[2], B[3], T[3], T[2], gl); if (cam.x < x0) wcQuad(B[3], B[0], T[0], T[3], gl);
+                wcQuad(T[0], T[1], T[2], T[3], 'rgba(200,230,250,.35)');
+                ctx.strokeStyle = 'rgba(60,70,80,.85)'; ctx.lineWidth = Math.max(1, 2.5 * s); ctx.beginPath();
+                const L = Math.max(it.w, it.h), n = Math.max(1, Math.round(L / 120));
+                for (let q = 0; q <= n; q++) { const t = q / n, mx = it.w > it.h ? x0 + (x1 - x0) * t : (x0 + x1) / 2, my = it.w > it.h ? (y0 + y1) / 2 : y0 + (y1 - y0) * t, [ux, uy] = wcProj(cam, mx, my, it.hh); ctx.moveTo(X(mx), Y(my)); ctx.lineTo(ux, uy); }
+                ctx.stroke(); ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = Math.max(1, 1.5 * s); ctx.beginPath(); ctx.moveTo(T[0][0], T[0][1]); ctx.lineTo(T[1][0], T[1][1]); ctx.lineTo(T[2][0], T[2][1]); ctx.lineTo(T[3][0], T[3][1]); ctx.closePath(); ctx.stroke();
+                continue;
+            }
             if (cam.y < y0) wcQuad(B[0], B[1], T[1], T[0], '#4a5562'); if (cam.x > x1) wcQuad(B[1], B[2], T[2], T[1], '#3b4550'); if (cam.y > y1) wcQuad(B[2], B[3], T[3], T[2], '#56626f'); if (cam.x < x0) wcQuad(B[3], B[0], T[0], T[3], '#46515d');
             wcQuad(T[0], T[1], T[2], T[3], '#2a323b'); ctx.strokeStyle = '#6b7889'; ctx.lineWidth = Math.max(1, 2 * s); ctx.beginPath(); ctx.moveTo(T[0][0], T[0][1]); ctx.lineTo(T[1][0], T[1][1]); ctx.lineTo(T[2][0], T[2][1]); ctx.lineTo(T[3][0], T[3][1]); ctx.closePath(); ctx.stroke();
             continue;
@@ -3552,8 +3545,10 @@ function wcDrawInterior() {
             const shift = Math.floor(now / 3) % Math.max(1, list.length);
             for (let q = 0; q < 3; q++) { const row = list[(shift + q) % list.length]; if (!row) break; ctx.fillStyle = q === 0 ? '#ffd23d' : '#f2b233'; ctx.fillText(row, ax + 6 * s, ay + 3 * s + q * hh2 / 3.2); }
         }
+        wcCasinoOverlay(f, it, top, s, k, now, glows);
         if (f.k === 'window') { const [ax, ay] = top(f.x, f.y), [bx2, by2] = top(f.x + f.w, f.y + f.h), t = (now * 0.03) % 1; ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.font = `${Math.max(8, (by2 - ay) * 0.9)}px sans-serif`; ctx.fillText('✈', ax + (bx2 - ax) * t, by2 - 2); }
     }
+    wcCasinoAmbient(D, cam, s, now, glows);
     // the lights
     if (st.off) {
         ctx.fillStyle = 'rgba(4,7,18,.8)'; ctx.fillRect(0, 0, W, H);
@@ -3732,6 +3727,511 @@ function wcIfeDraw() {
     g.fillStyle = 'rgba(255,255,255,.75)'; g.font = '11px Ubuntu, sans-serif'; g.textAlign = 'left';
     g.fillText(`${f.fromCode} → ${f.toCode} · ${Math.round(f.rem / 1000).toLocaleString()} km to go · drag to spin the globe`, 10, Hc - 10);
     g.fillStyle = '#ff9ad2'; g.textAlign = 'right'; g.fillText('✕ = your antipode', Wc - 10, Hc - 10);
+}
+
+// ===================== round 4: supertalls, themed malls, views out of the window, the casino =====================
+// ---- skyscrapers: setback tiers and spires; very tall towers are eased so the projection never blows up ----
+function wcTierList(b) {
+    if (b.k !== 'tower' || (b.f || 0) < 90) return [[0, 1, 0]];
+    return b.st ? [[0, 0.46, 0], [0.46, 0.74, 0.11], [0.74, 1, 0.22]] : [[0, 0.7, 0], [0.7, 1, 0.12]];
+}
+function wcDrawBuilding25(b, s, cam, night) {
+    const h = wcBHeight(b), X = worldToScreenX, Y = worldToScreenY;
+    const sl = h * 0.22, dx = sl * 0.75 * s, dy = sl * s, gx0 = b.x, gy0 = b.y, gx1 = b.x + b.w, gy1 = b.y + b.h;
+    ctx.fillStyle = 'rgba(8,12,16,.26)'; ctx.beginPath();
+    ctx.moveTo(X(gx0), Y(gy0)); ctx.lineTo(X(gx1), Y(gy0)); ctx.lineTo(X(gx1) + dx, Y(gy0) + dy); ctx.lineTo(X(gx1) + dx, Y(gy1) + dy); ctx.lineTo(X(gx0) + dx, Y(gy1) + dy); ctx.lineTo(X(gx0), Y(gy1)); ctx.closePath(); ctx.fill();
+    const base = b.neon ? '#1e1b33' : (WC_WALL[b.k] || '#8a8f96'), base7 = base.length === 7 ? base : '#8a8f96', tiers = wcTierList(b);
+    let topT = null, topBox = null;
+    for (let ti = 0; ti < tiers.length; ti++) {
+        const [a0, a1, ins] = tiers[ti], ix = b.w * ins, iy = b.h * ins, x0 = b.x + ix, y0 = b.y + iy, x1 = b.x + b.w - ix, y1 = b.y + b.h - iy, hb = h * a0, ht = h * a1;
+        const B = [wcProj(cam, x0, y0, hb), wcProj(cam, x1, y0, hb), wcProj(cam, x1, y1, hb), wcProj(cam, x0, y1, hb)], T = [wcProj(cam, x0, y0, ht), wcProj(cam, x1, y0, ht), wcProj(cam, x1, y1, ht), wcProj(cam, x0, y1, ht)];
+        const faces = [];
+        if (cam.y < y0) faces.push([0, 1, 14]); if (cam.x > x1) faces.push([1, 2, -26]); if (cam.y > y1) faces.push([2, 3, -40]); if (cam.x < x0) faces.push([3, 0, 0]);
+        for (const [i, j, shade] of faces) {
+            wcQuad(B[i], B[j], T[j], T[i], wcShade(base7, shade + ti * 6));
+            const th = ht - hb;
+            if (th > 40 && s > 0.45) {                                     // storeys: window bands (lit at night)
+                const n = Math.min(22, Math.floor(th / 26));
+                ctx.strokeStyle = night > 0.25 ? `rgba(255,214,120,${0.25 + night * 0.5})` : b.neon ? (i % 2 ? '#ff2bd6' : '#00e5ff') : 'rgba(255,255,255,.18)';
+                ctx.lineWidth = Math.max(1, 2 * s); if (night > 0.25) ctx.setLineDash([5 * s, 4 * s]);
+                ctx.beginPath();
+                for (let q = 1; q <= n; q++) { const t = q / (n + 1); ctx.moveTo(B[i][0] + (T[i][0] - B[i][0]) * t, B[i][1] + (T[i][1] - B[i][1]) * t); ctx.lineTo(B[j][0] + (T[j][0] - B[j][0]) * t, B[j][1] + (T[j][1] - B[j][1]) * t); }
+                ctx.stroke(); ctx.setLineDash([]);
+            }
+            if (b.neon) { ctx.save(); ctx.shadowColor = '#ff2bd6'; ctx.shadowBlur = 8; ctx.strokeStyle = ti % 2 ? '#00e5ff' : '#ff2bd6'; ctx.lineWidth = Math.max(1, 1.6 * s); ctx.beginPath(); ctx.moveTo(B[i][0], B[i][1]); ctx.lineTo(T[i][0], T[i][1]); ctx.moveTo(B[j][0], B[j][1]); ctx.lineTo(T[j][0], T[j][1]); ctx.stroke(); ctx.restore(); }
+        }
+        if (ti < tiers.length - 1) {                                       // setback terrace with a little roof garden / plant room
+            wcQuad(T[0], T[1], T[2], T[3], wcShade(base7, -34));
+            ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.lineWidth = Math.max(1, 1.5 * s); ctx.beginPath(); ctx.moveTo(T[0][0], T[0][1]); ctx.lineTo(T[1][0], T[1][1]); ctx.lineTo(T[2][0], T[2][1]); ctx.lineTo(T[3][0], T[3][1]); ctx.closePath(); ctx.stroke();
+        }
+        topT = T; topBox = [x0, y0, x1, y1];
+    }
+    const spr = wcBuildingSprite(b), k = topT[0][2], fx = (topBox[2] - topBox[0]) / b.w, fy = (topBox[3] - topBox[1]) / b.h;
+    ctx.drawImage(spr, topT[0][0] - WC_PAD * s * k * fx, topT[0][1] - WC_PAD * s * k * fy, spr.width / wcSPR * s * k * fx, spr.height / wcSPR * s * k * fy);
+    if (b.st) {                                                            // spire with an aircraft-warning light
+        const cxw = b.x + b.w / 2, cyw = b.y + b.h / 2, hs = Math.min(cam.hc / fov * 0.86 * fov, h + 170), [ax, ay] = wcProj(cam, cxw, cyw, h), [bx2, by2] = wcProj(cam, cxw, cyw, hs);
+        ctx.strokeStyle = '#c9d3dc'; ctx.lineWidth = Math.max(1.5, 5 * s); ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx2, by2); ctx.stroke();
+        if ((performance.now() / 600 | 0) % 2 === 0) { ctx.save(); ctx.fillStyle = '#ff3030'; ctx.shadowColor = '#ff3030'; ctx.shadowBlur = 14; ctx.beginPath(); ctx.arc(bx2, by2, Math.max(2.5, 6 * s), 0, 7); ctx.fill(); ctx.restore(); }
+    }
+}
+
+// ---- themed mall floors ----
+function wcPaintFloor(g, r, D) {
+    const t = D.theme.floor, x0 = r.x, y0 = r.y, w = r.w, h = r.h;
+    const checker = (a, b, n) => { g.fillStyle = a; g.fillRect(x0, y0, w, h); g.fillStyle = b; for (let x = 0; x < w; x += n) for (let y = 0; y < h; y += n) if (((x + y) / n) % 2 === 0) g.fillRect(x0 + x, y0 + y, n, n); };
+    switch (t) {
+        case 'market': checker('#d7a97e', '#c8946a', 60); g.strokeStyle = 'rgba(90,50,30,.25)'; g.lineWidth = 2; for (let x = 0; x <= w; x += 60) { g.beginPath(); g.moveTo(x0 + x, y0); g.lineTo(x0 + x, y0 + h); g.stroke(); } for (let y = 0; y <= h; y += 60) { g.beginPath(); g.moveTo(x0, y0 + y); g.lineTo(x0 + w, y0 + y); g.stroke(); } return true;
+        case 'marble': {
+            g.fillStyle = '#eeece6'; g.fillRect(x0, y0, w, h); const r2 = wcRng(D.lv * 77 + 5);
+            g.strokeStyle = 'rgba(120,120,130,.18)'; g.lineWidth = 1.5; for (let i = 0; i < 70; i++) { let x = x0 + r2() * w, y = y0 + r2() * h; g.beginPath(); g.moveTo(x, y); for (let q = 0; q < 6; q++) { x += (r2() - 0.3) * 60; y += (r2() - 0.5) * 40; g.lineTo(x, y); } g.stroke(); }
+            g.strokeStyle = 'rgba(0,0,0,.06)'; for (let x = 0; x <= w; x += 100) { g.beginPath(); g.moveTo(x0 + x, y0); g.lineTo(x0 + x, y0 + h); g.stroke(); } for (let y = 0; y <= h; y += 100) { g.beginPath(); g.moveTo(x0, y0 + y); g.lineTo(x0 + w, y0 + y); g.stroke(); } return true;
+        }
+        case 'tech': g.fillStyle = '#1a2030'; g.fillRect(x0, y0, w, h); g.strokeStyle = 'rgba(0,229,255,.16)'; g.lineWidth = 2; for (let x = 0; x <= w; x += 50) { g.beginPath(); g.moveTo(x0 + x, y0); g.lineTo(x0 + x, y0 + h); g.stroke(); } for (let y = 0; y <= h; y += 50) { g.beginPath(); g.moveTo(x0, y0 + y); g.lineTo(x0 + w, y0 + y); g.stroke(); } return true;
+        case 'wood': g.fillStyle = '#c99d6c'; g.fillRect(x0, y0, w, h); for (let y = 0; y < h; y += 28) { g.fillStyle = (y / 28) % 2 ? 'rgba(90,50,20,.07)' : 'rgba(255,255,255,.05)'; g.fillRect(x0, y0 + y, w, 28); g.strokeStyle = 'rgba(80,45,20,.22)'; g.lineWidth = 1; g.beginPath(); g.moveTo(x0, y0 + y); g.lineTo(x0 + w, y0 + y); g.stroke(); for (let x = ((y * 37) % 220); x < w; x += 220) { g.beginPath(); g.moveTo(x0 + x, y0 + y); g.lineTo(x0 + x, y0 + y + 28); g.stroke(); } } return true;
+        case 'food': checker('#f1e3c6', '#e3cba2', 50); return true;
+        case 'casino': {
+            g.fillStyle = '#5a1222'; g.fillRect(x0, y0, w, h);
+            g.strokeStyle = 'rgba(232,180,60,.35)'; g.lineWidth = 3;
+            for (let x = -h; x < w + h; x += 80) { g.beginPath(); g.moveTo(x0 + x, y0); g.lineTo(x0 + x + h, y0 + h); g.stroke(); g.beginPath(); g.moveTo(x0 + x + h, y0); g.lineTo(x0 + x, y0 + h); g.stroke(); }
+            g.fillStyle = 'rgba(232,180,60,.55)'; for (let x = 0; x < w; x += 80) for (let y = 0; y < h; y += 80) { g.beginPath(); g.arc(x0 + x + 40, y0 + y + 40, 5, 0, 7); g.fill(); }
+            g.strokeStyle = '#d4a017'; g.lineWidth = 6; g.strokeRect(x0 + 14, y0 + 14, w - 28, h - 28); return true;
+        }
+    }
+    return false;
+}
+const WC_FH4 = { cart: 40, mannequin: 58, ledwall: 96, vrbooth: 84, petpen: 26, shelf: 74, statue: 92, foodtable: 22, slot: 74, bjtable: 24, roulette: 24, casinobar: 36, stage: 20, patron: 30 };
+const WC_FSIDE4 = { cart: '#7a4f2c', mannequin: '#c9c3bb', ledwall: '#16181d', vrbooth: '#252a3a', petpen: '#8a6238', shelf: '#6a4a2c', statue: '#a8a49a', foodtable: '#7a5a3a', slot: '#3a1d3f', bjtable: '#3b2412', roulette: '#3b2412', casinobar: '#4a2a14', stage: '#2b1b12', patron: 'rgba(0,0,0,0)' };
+Object.assign(WC_FH, WC_FH4); Object.assign(WC_FSIDE, WC_FSIDE4);
+const WC_SLOT_COL = [['#7a1f2b', '#f2b233'], ['#1d3f7a', '#00e5ff'], ['#4a1d6b', '#ff2bd6'], ['#1f6b3a', '#9dff00'], ['#7a5a12', '#ffd23d'], ['#6b1d4a', '#ff8a3d']];
+const WC_SLOT_SYM = ['🍒', '🍋', '🔔', '🍉', '⭐', '7', '💎'];
+const WC_PATRON = ['#c0392b', '#2f6fb0', '#8e44ad', '#16a085', '#d35400', '#2c3e50', '#b8962b', '#7f8c8d', '#e84393', '#00a8a8', '#6c5ce7', '#e17055', '#00b894', '#fdcb6e', '#a29bfe', '#fab1a0'];
+function wcSym(g, i, x, y, sz) { if (i === 5) { g.fillStyle = '#e52b2b'; g.font = `900 ${sz}px Georgia, serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('7', x, y + 1); } else { g.font = `${sz * 0.9}px sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(WC_SLOT_SYM[i], x, y + 1); } }
+function wcPaintFurniture4(g, f, D) {
+    const x = f.x, y = f.y, w = f.w, h = f.h;
+    switch (f.k) {
+        case 'cart': {
+            g.fillStyle = '#9a6a3c'; wcRR(g, x, y + 8, w, h - 8, 6); g.fill(); g.fillStyle = '#5a3a1e'; g.beginPath(); g.arc(x + 14, y + h, 7, 0, 7); g.arc(x + w - 14, y + h, 7, 0, 7); g.fill();
+            for (let i = 0; i < 6; i++) { g.fillStyle = i % 2 ? '#fff' : ['#e84393', '#e17055', '#00b894', '#0984e3', '#fdcb6e', '#6c5ce7'][(f.col || 0) % 6]; g.fillRect(x + i * w / 6, y, w / 6 + 0.5, 12); }
+            g.font = '20px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; for (let i = 0; i < 3; i++) g.fillText(f.ic || '🛍', x + 20 + i * (w - 40) / 2, y + 30); return true;
+        }
+        case 'mannequin': { const c = ['#c0392b', '#2c3e50', '#e84393', '#16a085', '#f1c40f'][(f.col || 0) % 5]; g.fillStyle = '#bdb6ad'; g.beginPath(); g.arc(x, y, f.r, 0, 7); g.fill(); g.fillStyle = c; g.beginPath(); g.ellipse(x, y + 2, f.r * 0.9, f.r * 0.6, 0, 0, 7); g.fill(); g.fillStyle = '#e8e2da'; g.beginPath(); g.arc(x, y - 4, f.r * 0.42, 0, 7); g.fill(); return true; }
+        case 'ledwall': g.fillStyle = '#0a0c10'; g.fillRect(x, y, w, h); return true;
+        case 'vrbooth': g.fillStyle = '#1e2333'; wcRR(g, x, y, w, h, 14); g.fill(); g.strokeStyle = '#00e5ff'; g.lineWidth = 3; g.beginPath(); g.arc(x + w / 2, y + h / 2, Math.min(w, h) * 0.36, 0, 7); g.stroke(); g.fillStyle = '#fff'; g.font = 'bold 13px Ubuntu'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('VR', x + w / 2, y + h / 2); return true;
+        case 'petpen': { g.fillStyle = '#e8cf8a'; g.fillRect(x, y, w, h); g.strokeStyle = '#8a6238'; g.lineWidth = 6; g.strokeRect(x + 3, y + 3, w - 6, h - 6); g.fillStyle = 'rgba(160,120,60,.35)'; for (let i = 0; i < 40; i++) g.fillRect(x + 8 + (i * 37 % (w - 16)), y + 8 + (i * 23 % (h - 16)), 6, 2); g.fillStyle = '#c0392b'; g.beginPath(); g.arc(x + w - 30, y + 26, 10, 0, 7); g.fill(); return true; }
+        case 'shelf': { g.fillStyle = '#6a4a2c'; g.fillRect(x, y, w, h); for (let i = 0; i < w / 9; i++) { g.fillStyle = ['#c0392b', '#2980b9', '#27ae60', '#f39c12', '#8e44ad', '#16a085'][i % 6]; g.fillRect(x + 3 + i * 9, y + 4, 7, h - 8); } return true; }
+        case 'statue': g.fillStyle = '#b9b5ab'; g.beginPath(); g.arc(x, y, f.r, 0, 7); g.fill(); g.fillStyle = '#d8d4ca'; g.beginPath(); g.arc(x, y, f.r * 0.6, 0, 7); g.fill(); g.fillStyle = '#8e8a80'; g.beginPath(); g.arc(x - 4, y - 6, f.r * 0.25, 0, 7); g.fill(); return true;
+        case 'foodtable': g.fillStyle = '#8c6440'; g.beginPath(); g.arc(x, y, f.r, 0, 7); g.fill(); g.fillStyle = '#a87c52'; g.beginPath(); g.arc(x, y, f.r - 4, 0, 7); g.fill(); g.font = '15px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(['🍜', '🍕', '🍔', '🍣', '🧋'][(f.col || 0) % 5], x, y); return true;
+        case 'stool': g.fillStyle = 'rgba(0,0,0,.2)'; g.beginPath(); g.arc(x + 2, y + 3, f.r, 0, 7); g.fill(); g.fillStyle = '#c0392b'; g.beginPath(); g.arc(x, y, f.r, 0, 7); g.fill(); return true;
+        case 'floorart': { const cx = x + w / 2, cy = y + h / 2; for (let i = 5; i > 0; i--) { g.fillStyle = (f.v ? ['#2f6fb0', '#f2b233', '#2f6fb0', '#e8e2da', '#c0392b'] : ['#c0392b', '#f2b233', '#2c7a5b', '#f2b233', '#c0392b'])[i - 1]; g.beginPath(); g.ellipse(cx, cy, w / 2 * i / 5, h / 2 * i / 5, 0, 0, 7); g.fill(); } return true; }
+        case 'runway': { g.fillStyle = '#8a1424'; g.fillRect(x, y, w, h); g.fillStyle = '#d4a017'; g.fillRect(x, y, w, 5); g.fillRect(x, y + h - 5, w, 5); g.fillStyle = '#fff6c4'; for (let i = 20; i < w; i += 40) { g.beginPath(); g.arc(x + i, y + 12, 3, 0, 7); g.arc(x + i, y + h - 12, 3, 0, 7); g.fill(); } return true; }
+        case 'neonfloor': { g.fillStyle = '#10131c'; g.fillRect(x, y, w, h); g.strokeStyle = '#ff2bd6'; g.lineWidth = 3; g.strokeRect(x + 4, y + 4, w - 8, h - 8); g.strokeStyle = '#00e5ff'; for (let i = 30; i < w; i += 60) { g.beginPath(); g.moveTo(x + i, y + 10); g.lineTo(x + i + 30, y + h - 10); g.stroke(); } return true; }
+        case 'rugbig': { g.fillStyle = '#5b6f4a'; wcRR(g, x, y, w, h, 18); g.fill(); g.strokeStyle = '#e8dcc0'; g.lineWidth = 4; wcRR(g, x + 10, y + 10, w - 20, h - 20, 12); g.stroke(); g.fillStyle = '#c8a368'; for (let i = 50; i < w - 40; i += 70) { g.beginPath(); g.moveTo(x + i, y + h / 2); g.lineTo(x + i + 15, y + h / 2 - 15); g.lineTo(x + i + 30, y + h / 2); g.lineTo(x + i + 15, y + h / 2 + 15); g.closePath(); g.fill(); } return true; }
+        case 'slot': {
+            const [a, b] = WC_SLOT_COL[(f.col || 0) % 6]; g.fillStyle = a; wcRR(g, x, y, w, h, 8); g.fill();
+            g.fillStyle = b; g.fillRect(x + 4, f.flip ? y + h - 12 : y + 4, w - 8, 8);
+            g.fillStyle = '#0b0b12'; wcRR(g, x + 6, y + 16, w - 12, h - 32, 4); g.fill();
+            g.fillStyle = '#f7f3e8'; for (let i = 0; i < 3; i++) g.fillRect(x + 8 + i * (w - 16) / 3, y + 20, (w - 16) / 3 - 2, h - 40);
+            return true;
+        }
+        case 'bjtable': {
+            g.fillStyle = '#5a3418'; g.beginPath(); g.moveTo(x, y); g.lineTo(x + w, y); g.lineTo(x + w, y + h * 0.35); g.ellipse(x + w / 2, y + h * 0.35, w / 2, h * 0.65, 0, 0, Math.PI); g.closePath(); g.fill();
+            g.fillStyle = '#0f6b3e'; g.beginPath(); g.moveTo(x + 8, y + 8); g.lineTo(x + w - 8, y + 8); g.lineTo(x + w - 8, y + h * 0.35); g.ellipse(x + w / 2, y + h * 0.35, w / 2 - 8, h * 0.65 - 10, 0, 0, Math.PI); g.closePath(); g.fill();
+            g.strokeStyle = 'rgba(255,230,150,.6)'; g.lineWidth = 2; g.beginPath(); g.ellipse(x + w / 2, y + h * 0.3, w * 0.34, h * 0.42, 0, 0.15, Math.PI - 0.15); g.stroke();
+            g.fillStyle = 'rgba(255,230,150,.75)'; g.font = 'bold 10px Ubuntu'; g.textAlign = 'center'; g.fillText('BLACKJACK PAYS 3 TO 2', x + w / 2, y + h * 0.55);
+            for (let i = 0; i < 5; i++) { const a = Math.PI * (0.15 + 0.7 * i / 4); g.strokeStyle = 'rgba(255,255,255,.5)'; g.strokeRect(x + w / 2 + Math.cos(a) * w * 0.36 - 9, y + h * 0.35 + Math.sin(a) * h * 0.48 - 12, 18, 24); }
+            g.fillStyle = '#1b1b1b'; g.fillRect(x + w / 2 - 40, y + 12, 80, 14); for (let i = 0; i < 8; i++) { g.fillStyle = ['#c0392b', '#2980b9', '#27ae60', '#f1c40f'][i % 4]; g.beginPath(); g.arc(x + w / 2 - 34 + i * 9.5, y + 19, 4, 0, 7); g.fill(); }
+            g.fillStyle = '#e4b995'; g.beginPath(); g.arc(x + w / 2, y - 12, 10, 0, 7); g.fill(); g.fillStyle = '#111'; g.beginPath(); g.ellipse(x + w / 2, y + 1, 18, 9, 0, 0, 7); g.fill(); g.fillStyle = '#c0392b'; g.fillRect(x + w / 2 - 4, y - 3, 8, 5);
+            return true;
+        }
+        case 'roulette': {
+            g.fillStyle = '#5a3418'; wcRR(g, x, y, w, h, 14); g.fill(); g.fillStyle = '#0f6b3e'; wcRR(g, x + 8, y + 8, w - 16, h - 16, 10); g.fill();
+            const gx = x + h * 0.55 + 70, gy = y + 22, cw = (x + w - 18 - gx) / 12, ch = (h - 44) / 3;
+            for (let c = 0; c < 12; c++) for (let r = 0; r < 3; r++) { const n = 3 * c + (3 - r), red = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36].includes(n); g.fillStyle = red ? '#b3202c' : '#151515'; g.fillRect(gx + c * cw + 1, gy + r * ch + 1, cw - 2, ch - 2); }
+            g.fillStyle = '#1f8f4e'; g.fillRect(gx - cw - 2, gy, cw, ch * 3);
+            g.strokeStyle = 'rgba(255,255,255,.6)'; g.lineWidth = 1; g.strokeRect(gx - cw - 2, gy, cw * 13 + 2, ch * 3);
+            g.fillStyle = '#7a4a22'; g.beginPath(); g.arc(x + 14 + h * 0.42, y + h / 2, h * 0.42, 0, 7); g.fill();
+            return true;
+        }
+        case 'casinobar': {
+            const r = f.r; g.fillStyle = '#6a3a1a'; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.fillStyle = '#1b1b22'; g.beginPath(); g.arc(x, y, r - 26, 0, 7); g.fill();
+            g.strokeStyle = '#d4a017'; g.lineWidth = 3; g.beginPath(); g.arc(x, y, r - 3, 0, 7); g.stroke();
+            for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; g.fillStyle = ['#2ecc71', '#e67e22', '#9b59b6', '#ecf0f1', '#f1c40f', '#3498db'][i % 6]; g.beginPath(); g.arc(x + Math.cos(a) * (r - 44), y + Math.sin(a) * (r - 44), 6, 0, 7); g.fill(); }
+            g.fillStyle = '#d4a017'; g.font = 'bold 15px Ubuntu'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('BAR', x, y + 34); return true;
+        }
+        case 'stage': {
+            g.fillStyle = '#3a2416'; g.fillRect(x, y, w, h); for (let i = 0; i < w; i += 24) { g.fillStyle = (i / 24) % 2 ? '#4a2e1c' : '#43291a'; g.fillRect(x + i, y + 30, 24, h - 30); }
+            g.fillStyle = '#7a0f1e'; for (let i = 0; i < w; i += 18) { g.fillRect(x + i, y, 14, 30); } g.fillStyle = '#d4a017'; g.fillRect(x, y + 28, w, 4);
+            g.fillStyle = '#222'; g.beginPath(); g.arc(x + w / 2, y + 60, 6, 0, 7); g.fill(); return true;
+        }
+        case 'patron': return true;                                     // drawn live (they fidget and cheer)
+    }
+    return false;
+}
+// kiosk fronts get their shop's icon
+function wcKioskIcons(g, f) {
+    if (!f.ic) return; const x = f.x, y = f.y, w = f.w;
+    g.font = '26px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(f.ic, x + 26, y + 26); g.fillText(f.ic, x + w - 26, y + 26);
+}
+
+// ---- live casino / mall effects (drawn on the projected top faces) ----
+WC.casFx = new Map(); WC.coins = [];
+const WC_ROUL_ORDER = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26];
+const WC_ROUL_RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
+function wcDrawWheel(c, cx, cy, R, ang, ballA, ballR) {
+    const n = 37;
+    c.save(); c.translate(cx, cy);
+    c.fillStyle = '#5a3418'; c.beginPath(); c.arc(0, 0, R, 0, 7); c.fill();
+    c.fillStyle = '#c9a227'; c.beginPath(); c.arc(0, 0, R * 0.92, 0, 7); c.fill();
+    for (let i = 0; i < n; i++) {
+        const a0 = ang + (i - 0.5) * 2 * Math.PI / n, a1 = a0 + 2 * Math.PI / n, num = WC_ROUL_ORDER[i];
+        c.fillStyle = num === 0 ? '#11823b' : WC_ROUL_RED.has(num) ? '#c0202c' : '#151515';
+        c.beginPath(); c.moveTo(0, 0); c.arc(0, 0, R * 0.88, a0, a1); c.closePath(); c.fill();
+        if (R > 60) { c.save(); c.rotate(a0 + Math.PI / n); c.fillStyle = '#fff'; c.font = `bold ${Math.max(7, R * 0.075)}px Ubuntu, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.translate(R * 0.79, 0); c.rotate(Math.PI / 2); c.fillText(num, 0, 0); c.restore(); }
+    }
+    c.fillStyle = '#7a4a22'; c.beginPath(); c.arc(0, 0, R * 0.62, 0, 7); c.fill();
+    c.strokeStyle = 'rgba(255,255,255,.18)'; c.lineWidth = Math.max(1, R * 0.01); for (let i = 0; i < n; i++) { const a = ang + (i + 0.5) * 2 * Math.PI / n; c.beginPath(); c.moveTo(Math.cos(a) * R * 0.62, Math.sin(a) * R * 0.62); c.lineTo(Math.cos(a) * R * 0.88, Math.sin(a) * R * 0.88); c.stroke(); }
+    c.fillStyle = '#c9a227'; c.beginPath(); c.arc(0, 0, R * 0.2, 0, 7); c.fill();
+    c.strokeStyle = '#e8d08a'; c.lineWidth = Math.max(2, R * 0.04); c.beginPath(); for (let i = 0; i < 4; i++) { const a = ang * 1 + i * Math.PI / 2; c.moveTo(0, 0); c.lineTo(Math.cos(a) * R * 0.34, Math.sin(a) * R * 0.34); } c.stroke();
+    if (ballA != null) { c.fillStyle = '#fff'; c.shadowColor = 'rgba(0,0,0,.5)'; c.shadowBlur = 4; c.beginPath(); c.arc(Math.cos(ballA) * R * ballR, Math.sin(ballA) * R * ballR, Math.max(2, R * 0.045), 0, 7); c.fill(); }
+    c.restore();
+}
+function wcCasinoOverlay(f, it, top, s, k, now, glows) {
+    const fx = WC.casFx.get(it.i), age = fx ? now - fx.t0 : 99;
+    switch (f.k) {
+        case 'slot': {
+            const [ax, ay] = top(f.x + 8, f.y + 20), [bx2, by2] = top(f.x + f.w - 8, f.y + f.h - 20), cw = (bx2 - ax) / 3, hh = by2 - ay;
+            ctx.fillStyle = '#f7f3e8'; for (let i = 0; i < 3; i++) ctx.fillRect(ax + i * cw + 1, ay, cw - 2, hh);
+            const spinning = fx && age < 0.6 + 0.35 * 3;
+            for (let i = 0; i < 3; i++) { const stopped = !fx || age > 0.6 + 0.35 * i; const sym = stopped ? (fx && fx.l ? fx.l[i] : (f.col + i * 2) % 7) : Math.floor(now * 14 + i * 3) % 7; wcSym(ctx, sym, ax + (i + 0.5) * cw, ay + hh / 2, Math.min(cw, hh) * 0.8); }
+            const blink = (Math.floor(now * 4) + f.col) % 2, win = fx && fx.win > 0 && !spinning && age < 6;
+            const [lx, ly] = top(f.x + 4, f.flip ? f.y + f.h - 12 : f.y + 4), [lx2, ly2] = top(f.x + f.w - 4, f.flip ? f.y + f.h - 4 : f.y + 12);
+            for (let q = 0; q < 6; q++) { ctx.fillStyle = (q + Math.floor(now * (win ? 14 : 4))) % 2 ? WC_SLOT_COL[f.col % 6][1] : '#fff8d0'; ctx.beginPath(); ctx.arc(lx + (lx2 - lx) * (q + 0.5) / 6, (ly + ly2) / 2, Math.max(1.5, 3 * s * k), 0, 7); ctx.fill(); }
+            if (win || blink) glows.push([(ax + bx2) / 2, (ay + by2) / 2, win ? 160 : 60, win ? 'rgba(255,210,60,.55)' : 'rgba(255,80,200,.18)']);
+            break;
+        }
+        case 'roulette': {
+            const [wx, wy, kk] = top(f.x + 14 + f.h * 0.42, f.y + f.h / 2), R = f.h * 0.4 * s * kk;
+            let ang = now * 0.4 + f.n, ball = null, br = 0.75;
+            if (fx && age < 6) { const T = 5, t = Math.min(age, T); ang = fx.a0 + 5.2 * (t - t * t / (2 * T)); const idx = WC_ROUL_ORDER.indexOf(fx.n), endW = fx.a0 + 5.2 * T / 2, pa = endW + idx * 2 * Math.PI / 37; ball = pa + 9.5 * (T - t) * (T - t) / (2 * T); br = 0.75 + 0.15 * Math.max(0, 1 - t / (0.75 * T)); if (age > T) { ang = endW + (age - T) * 0.4; ball = ang + idx * 2 * Math.PI / 37; br = 0.75; } }
+            wcDrawWheel(ctx, wx, wy, R, ang, ball, br);
+            if (fx && age > 5 && age < 9 && fx.win > 0) glows.push([wx, wy, 180, 'rgba(255,210,60,.45)']);
+            break;
+        }
+        case 'bjtable': {
+            if (!fx || age > 8) break;
+            const [cx2, cy2, kk] = top(f.x + f.w / 2, f.y + f.h * 0.55), cw = 16 * s * kk, chh = 22 * s * kk;
+            for (let i = 0; i < 2; i++) { ctx.fillStyle = '#fff'; ctx.fillRect(cx2 - cw * 1.2 + i * cw * 1.25, cy2, cw, chh); ctx.fillStyle = i ? '#c0392b' : '#111'; ctx.font = `bold ${Math.max(7, 12 * s * kk)}px Ubuntu`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(['A', 'K', '7', '10', 'Q', '9'][(fx.t0 * 7 + i) % 6 | 0], cx2 - cw * 0.7 + i * cw * 1.25, cy2 + chh / 2); }
+            if (fx.win > 0 && age < 5) glows.push([cx2, cy2, 150, 'rgba(255,210,60,.45)']);
+            break;
+        }
+        case 'stage': {
+            const [ax, ay, kk] = top(f.x + f.w / 2, f.y + 64);
+            for (let q = 0; q < 3; q++) { const a = Math.sin(now * 0.9 + q * 2.1) * 0.6, len = 260 * s, col = ['rgba(255,80,200,.20)', 'rgba(0,229,255,.18)', 'rgba(255,220,120,.2)'][q]; ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(ax + (q - 1) * 120 * s, ay - 70 * s); ctx.lineTo(ax + Math.sin(a) * len - 40 * s, ay + Math.cos(a) * 50 * s); ctx.lineTo(ax + Math.sin(a) * len + 40 * s, ay + Math.cos(a) * 50 * s); ctx.closePath(); ctx.fill(); }
+            const bob = Math.sin(now * 5) * 3 * s; ctx.fillStyle = '#e84393'; ctx.beginPath(); ctx.ellipse(ax, ay + bob, 14 * s * kk, 11 * s * kk, 0, 0, 7); ctx.fill(); ctx.fillStyle = '#e4b995'; ctx.beginPath(); ctx.arc(ax, ay - 8 * s * kk + bob, 7 * s * kk, 0, 7); ctx.fill();
+            ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = `bold ${Math.max(10, 20 * s)}px Ubuntu`; ctx.textAlign = 'center'; for (let q = 0; q < 3; q++) { const t = (now * 0.6 + q / 3) % 1; ctx.globalAlpha = 1 - t; ctx.fillText(q % 2 ? '♫' : '♪', ax + Math.sin(t * 6 + q) * 30 * s, ay - 20 * s - t * 90 * s); } ctx.globalAlpha = 1;
+            glows.push([ax, ay, 220, 'rgba(255,120,220,.3)']);
+            break;
+        }
+        case 'patron': {
+            const [ax, ay, kk] = top(f.x, f.y), cheer = fx && age < 3, bob = Math.sin(now * (cheer ? 14 : 2) + f.col) * (cheer ? 5 : 1.5) * s;
+            ctx.fillStyle = WC_PATRON[f.col % WC_PATRON.length]; ctx.beginPath(); ctx.ellipse(ax, ay + 3 * s * kk + bob, f.r * s * kk, f.r * 0.8 * s * kk, 0, 0, 7); ctx.fill();
+            ctx.fillStyle = '#e4b995'; ctx.beginPath(); ctx.arc(ax, ay - 4 * s * kk + bob, f.r * 0.5 * s * kk, 0, 7); ctx.fill();
+            if (cheer) { ctx.font = `${Math.max(10, 18 * s)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🎉', ax + 14 * s, ay - 22 * s); }
+            break;
+        }
+        case 'casinobar': {
+            const [ax, ay, kk] = top(f.x, f.y), sh = Math.sin(now * 9) * 6 * s;
+            ctx.fillStyle = '#2c3e50'; ctx.beginPath(); ctx.ellipse(ax, ay - 10 * s * kk, 15 * s * kk, 11 * s * kk, 0, 0, 7); ctx.fill(); ctx.fillStyle = '#e4b995'; ctx.beginPath(); ctx.arc(ax, ay - 20 * s * kk, 7 * s * kk, 0, 7); ctx.fill();
+            ctx.fillStyle = '#d8dde1'; ctx.fillRect(ax + 14 * s * kk, ay - 26 * s * kk + sh, 6 * s * kk, 14 * s * kk);
+            glows.push([ax, ay, 200, 'rgba(255,190,90,.3)']); break;
+        }
+        case 'ledwall': {
+            const [ax, ay] = top(f.x, f.y), [bx2, by2] = top(f.x + f.w, f.y + f.h), w = bx2 - ax, hh = by2 - ay;
+            for (let q = 0; q < 12; q++) { ctx.fillStyle = `hsl(${(now * 60 + q * 30) % 360},80%,${45 + 15 * Math.sin(now * 3 + q)}%)`; ctx.fillRect(ax + q * w / 12, ay, w / 12 + 0.5, hh); }
+            ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.max(8, hh * 0.7)}px Ubuntu`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.save(); ctx.beginPath(); ctx.rect(ax, ay, w, hh); ctx.clip(); ctx.fillText('★ NEW CONSOLES IN STORE ★ VR ARENA OPEN ★ ARCADE HIGH SCORES ★', ax + w - ((now * 60 * s) % (w * 3)), ay + hh / 2); ctx.restore();
+            glows.push([(ax + bx2) / 2, by2, 160, 'rgba(120,180,255,.35)']); break;
+        }
+        case 'vrbooth': { const [ax, ay, kk] = top(f.x + f.w / 2, f.y + f.h / 2); ctx.strokeStyle = `rgba(0,229,255,${0.5 + 0.4 * Math.sin(now * 4)})`; ctx.lineWidth = Math.max(2, 4 * s); ctx.beginPath(); ctx.arc(ax, ay, f.h * 0.36 * s * kk * (1 + 0.08 * Math.sin(now * 4)), 0, 7); ctx.stroke(); glows.push([ax, ay, 120, 'rgba(0,229,255,.3)']); break; }
+        case 'petpen': {
+            for (let q = 0; q < 3; q++) { const t = now * (0.35 + q * 0.12) + q * 2, px = f.x + 30 + (f.w - 60) * (0.5 + 0.45 * Math.sin(t)), py = f.y + 30 + (f.h - 60) * (0.5 + 0.45 * Math.sin(t * 1.7 + q)), [ax, ay, kk] = top(px, py);
+                ctx.fillStyle = ['#c8955a', '#f3efe6', '#3a2a1a'][q]; ctx.beginPath(); ctx.ellipse(ax, ay, 11 * s * kk, 8 * s * kk, Math.cos(t), 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(ax + Math.cos(Math.cos(t)) * 10 * s * kk, ay + Math.sin(Math.cos(t)) * 4 * s * kk, 5.5 * s * kk, 0, 7); ctx.fill(); }
+            break;
+        }
+    }
+}
+function wcCasinoAmbient(D, cam, s, now, glows) {
+    if (!D.casino) return;
+    const fl = D.floor, X = worldToScreenX, Y = worldToScreenY, step = 45, pts = [];
+    for (let x = fl.x; x <= fl.x + fl.w; x += step) pts.push([x, fl.y], [x, fl.y + fl.h]);
+    for (let y = fl.y + step; y < fl.y + fl.h; y += step) pts.push([fl.x, y], [fl.x + fl.w, y]);
+    const ph = Math.floor(now * 8);
+    pts.forEach(([x, y], i) => { const [sx, sy, k] = wcProj(cam, x, y, 100); ctx.fillStyle = (i + ph) % 3 === 0 ? '#ffe27a' : 'rgba(255,200,80,.25)'; ctx.beginPath(); ctx.arc(sx, sy, Math.max(1.5, 3.2 * s * k), 0, 7); ctx.fill(); });
+    for (const [x, y] of D.theme.chand || []) { const [sx, sy, k] = wcProj(cam, x, y, 150); glows.push([sx, sy, 260, 'rgba(255,214,140,.35)']); ctx.fillStyle = 'rgba(255,240,200,.8)'; for (let q = 0; q < 8; q++) { const a = q / 8 * Math.PI * 2 + now * 0.3; ctx.beginPath(); ctx.arc(sx + Math.cos(a) * 18 * s * k, sy + Math.sin(a) * 18 * s * k, 2.5 * s * k, 0, 7); ctx.fill(); } }
+    // coins from big wins fly up and fall back to the floor
+    WC.coins = WC.coins.filter(c => now - c.t0 < 2.2);
+    for (const c of WC.coins) { const t = now - c.t0, x = c.x + c.vx * t, y = c.y + c.vy * t, h = Math.max(0, c.vz * t - 260 * t * t), [sx, sy, k] = wcProj(cam, x, y, h); ctx.fillStyle = '#f5c542'; ctx.strokeStyle = '#a77d12'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(sx, sy, 6 * s * k, 6 * s * k * Math.abs(Math.cos(t * 9 + c.vx)), 0, 0, 7); ctx.fill(); ctx.stroke(); }
+}
+function wcCasinoFxMsg(d) {
+    if (d.key !== WC.intKey || !WC.interior) return;
+    const now = performance.now() / 1000, f = WC.interior.furn[d.fi]; if (!f) return;
+    WC.casFx.set(d.fi, { ...d, t0: now, a0: Math.random() * 6.28 });
+    // the regulars react to anyone's win
+    if (d.win > 0) WC.interior.furn.forEach((p, i) => { if (p.k === 'patron' && Math.hypot(p.x - (f.x + (f.w || 0) / 2), p.y - (f.y + (f.h || 0) / 2)) < 420) WC.casFx.set(i, { t0: now + (d.g === 'roulette' ? 5 : d.g === 'slots' ? 1.4 : 0.5) }); });
+    if (d.big) {
+        const delay = d.g === 'roulette' ? 5.2 : d.g === 'slots' ? 1.6 : 0.6, cx = f.x + (f.w || 0) / 2, cy = f.y + (f.h || 0) / 2;
+        setTimeout(() => { const t = performance.now() / 1000; for (let i = 0; i < 40; i++) WC.coins.push({ x: cx, y: cy, vx: (Math.random() - 0.5) * 260, vy: (Math.random() - 0.5) * 260, vz: 220 + Math.random() * 260, t0: t }); if (d.name && !CAS.open) wcToast(`🎉 ${d.name} won ${fmtWc(d.win)} coins at ${d.g === 'slots' ? 'the slots' : d.g === 'roulette' ? 'roulette' : 'blackjack'}!`, 'good'); }, delay * 1000);
+    }
+}
+function fmtWc(n) { return Math.round(n).toLocaleString('en-GB'); }
+
+// ---- the view out of the window: the real city round the building, seen from this floor ----
+function wcViewBuilding(D) {
+    if (D._vb) return D._vb;
+    let b = null;
+    if (D.bid) b = WC.allBld.get(D.bid) || null;
+    else if (D.hid) for (const q of WC.allBld.values()) if (q.hid === D.hid) { b = q; break; }
+    if (b) D._vb = b; return b;
+}
+function wcDrawOutsideView(D) {
+    const b = wcViewBuilding(D); if (!b) return false;
+    const fl = D.floor, A = D.theme.alt || 1, W = canvas.width, H = canvas.height;
+    const icx = camera.x + W * fov / 2, icy = camera.y + H * fov / 2, par = 0.35 / A;
+    const ex = b.x + b.w / 2 + (icx - (fl.x + fl.w / 2)) * par, ey = b.y + b.h / 2 + (icy - (fl.y + fl.h / 2)) * par;
+    const sv = { x: camera.x, y: camera.y, f: fov };
+    fov = sv.f * A; camera.x = ex - W * fov / 2; camera.y = ey - H * fov / 2; WC.viewMode = true;
+    try { ctx.save(); wcDrawExterior(); ctx.restore(); } catch (e) { console.warn('view', e); ctx.restore(); }
+    finally { fov = sv.f; camera.x = sv.x; camera.y = sv.y; WC.viewMode = false; }
+    ctx.fillStyle = `rgba(160,200,235,${0.08 + 0.05 * A})`; ctx.fillRect(0, 0, W, H);          // glass + altitude haze
+    return true;
+}
+function wcIsOuterWall(D, w) { const fl = D.floor; return w.x + w.w <= fl.x + 2 || w.x >= fl.x + fl.w - 2 || w.y + w.h <= fl.y + 2 || w.y >= fl.y + fl.h - 2; }
+
+// ---- the casino games ----
+const CAS = { open: null, chip: 25, bets: new Map(), order: [], last: null, spinning: false, auto: 0 };
+const CAS_CHIPS = [1, 5, 25, 100, 500, 1000, 5000];
+function casEl(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+function casClose() { const o = document.getElementById('wc-casino'); if (o) o.remove(); CAS.open = null; CAS.spinning = false; CAS.auto = 0; if (CAS.raf) cancelAnimationFrame(CAS.raf); }
+function casSend(o) { if (CAS.open) worldSend('world_casino', { g: CAS.open.g, tid: CAS.open.tid, ...o }); }
+function casBal(d) { if (d && d.cash != null) { CAS.open.cash = d.cash; CAS.open.bank = d.bank; } const e = document.getElementById('cas-bal'); if (e) e.innerHTML = `💵 ${fmtWc(CAS.open.cash)} <span>cash</span> · 🏦 ${fmtWc(CAS.open.bank)} <span>bank</span>`; }
+function casStatus(t, cls) { const e = document.getElementById('cas-status'); if (e) { e.textContent = t; e.className = 'cas-status ' + (cls || ''); } }
+function casCoinRain(n) { const o = document.getElementById('wc-casino'); if (!o) return; for (let i = 0; i < n; i++) { const c = casEl('span', 'cas-coin', '🪙'); c.style.left = Math.random() * 100 + '%'; c.style.animationDuration = (1.2 + Math.random() * 1.4) + 's'; c.style.animationDelay = Math.random() * 0.6 + 's'; c.style.fontSize = (16 + Math.random() * 20) + 'px'; o.appendChild(c); setTimeout(() => c.remove(), 3200); } }
+function casChipRow(onPick, withCustom = true) {
+    const row = casEl('div', 'cas-chips');
+    CAS_CHIPS.forEach((v, i) => { const b = casEl('button', 'cas-chip c' + i + (v === CAS.chip ? ' on' : ''), v >= 1000 ? v / 1000 + 'k' : v); b.onclick = () => { CAS.chip = v; row.querySelectorAll('.cas-chip').forEach(q => q.classList.remove('on')); b.classList.add('on'); const inp = row.querySelector('input'); if (inp) inp.value = ''; onPick && onPick(v); }; row.appendChild(b); });
+    if (withCustom) { const inp = casEl('input', 'cas-custom'); inp.type = 'number'; inp.min = 1; inp.placeholder = 'Custom'; inp.oninput = () => { const v = Math.floor(+inp.value); if (v >= 1) { CAS.chip = Math.min(v, CAS.open.max); row.querySelectorAll('.cas-chip').forEach(q => q.classList.remove('on')); onPick && onPick(CAS.chip); } }; row.appendChild(inp); }
+    return row;
+}
+function casOpen(d) {
+    casClose(); CAS.open = d; for (const k in keys) keys[k] = false;
+    const o = casEl('div', 'cas-' + d.g); o.id = 'wc-casino';
+    const panel = casEl('div', 'cas-panel');
+    const head = casEl('div', 'cas-head', `<div class="cas-title">${{ roulette: '🎡', blackjack: '🃏', slots: '🎰' }[d.g]} ${d.name}</div><div id="cas-bal" class="cas-bal"></div>`);
+    const x = casEl('button', 'cas-x', '✕'); x.onclick = casClose; head.appendChild(x); panel.appendChild(head);
+    const body = casEl('div', 'cas-body'); panel.appendChild(body);
+    panel.appendChild(casEl('div', 'cas-status', 'Bets come from your cash first, then your bank. Winnings are paid into your bank.')).id = 'cas-status';
+    o.appendChild(panel); document.body.appendChild(o);
+    casBal();
+    if (d.g === 'roulette') casRoulette(body, d); else if (d.g === 'blackjack') casBlackjack(body, d); else casSlots(body, d);
+}
+function casOnRes(d) {
+    if (!CAS.open || d.g !== CAS.open.g) return;
+    if (d.err) { casStatus(d.err, 'bad'); CAS.spinning = false; CAS.auto = 0; casBal(d); if (CAS.onErr) CAS.onErr(); return; }
+    if (d.g === 'roulette') casRoulRes(d); else if (d.g === 'blackjack') casBjRes(d); else casSlotRes(d);
+}
+
+// roulette
+function casRoulette(body, d) {
+    CAS.bets = new Map(); CAS.order = []; CAS.spinning = false;
+    const left = casEl('div', 'cas-wheelbox'), cv = casEl('canvas', 'cas-wheel'); cv.width = cv.height = 340; left.appendChild(cv);
+    const res = casEl('div', 'cas-result'); res.id = 'cas-rres'; left.appendChild(res);
+    const hist = casEl('div', 'cas-hist'); hist.id = 'cas-hist'; left.appendChild(hist);
+    body.appendChild(left);
+    const right = casEl('div', 'cas-right'); body.appendChild(right);
+    const board = casEl('div', 'cas-board'); right.appendChild(board);
+    const cell = (t, k, label, cls, gc, gr) => { const c = casEl('div', 'cas-cell ' + (cls || ''), `<span>${label}</span>`); c.dataset.key = t + ':' + k; c.style.gridColumn = gc; c.style.gridRow = gr; c.onclick = () => casPlace(t, k); c.oncontextmenu = e => { e.preventDefault(); casPlace(t, k, true); }; board.appendChild(c); return c; };
+    cell('num', 0, '0', 'green', '1', '1 / span 3');
+    for (let c = 0; c < 12; c++) for (let r = 0; r < 3; r++) { const n = 3 * c + 3 - r; cell('num', n, n, WC_ROUL_RED.has(n) ? 'red' : 'black', String(c + 2), String(r + 1)); }
+    for (let r = 0; r < 3; r++) cell('col', 3 - r, '2:1', 'out', '14', String(r + 1));
+    for (let q = 0; q < 3; q++) cell('dozen', q + 1, ['1st 12', '2nd 12', '3rd 12'][q], 'out', `${2 + q * 4} / span 4`, '4');
+    [['low', '1-18'], ['even', 'EVEN'], ['red', '◆'], ['black', '◆'], ['odd', 'ODD'], ['high', '19-36']].forEach(([t, l], i) => cell(t, 0, l, 'out ' + (t === 'red' ? 'redd' : t === 'black' ? 'blackd' : ''), `${2 + i * 2} / span 2`, '5'));
+    right.appendChild(casChipRow());
+    const ctl = casEl('div', 'cas-ctl');
+    const mk = (t, cls, fn) => { const b = casEl('button', cls, t); b.onclick = fn; ctl.appendChild(b); return b; };
+    mk('↶ Undo', 'cas-btn', () => { const k = CAS.order.pop(); if (!k) return; const [key, amt] = k; const v = (CAS.bets.get(key) || 0) - amt; if (v > 0) CAS.bets.set(key, v); else CAS.bets.delete(key); casRoulDraw(); });
+    mk('Clear', 'cas-btn', () => { CAS.bets.clear(); CAS.order = []; casRoulDraw(); });
+    mk('×2', 'cas-btn', () => { for (const [k, v] of CAS.bets) { CAS.bets.set(k, v * 2); CAS.order.push([k, v]); } casRoulDraw(); });
+    mk('↻ Rebet', 'cas-btn', () => { if (!CAS.last) return; CAS.bets = new Map(CAS.last); CAS.order = [...CAS.bets].map(([k, v]) => [k, v]); casRoulDraw(); });
+    const tot = casEl('div', 'cas-total'); tot.id = 'cas-total'; ctl.appendChild(tot);
+    const spin = mk('SPIN', 'cas-go', () => {
+        if (CAS.spinning || !CAS.bets.size) return; CAS.spinning = true; spin.disabled = true; casStatus('No more bets…');
+        CAS.last = new Map(CAS.bets); casSend({ bets: [...CAS.bets].map(([key, amt]) => { const [t, k] = key.split(':'); return { t, k: +k, amt }; }) });
+    }); spin.id = 'cas-spin';
+    right.appendChild(ctl);
+    CAS.onErr = () => { spin.disabled = false; };
+    CAS.wheel = { cv, a: 0, t: performance.now() / 1000, anim: null };
+    casRoulHist(d.hist || []); casRoulDraw();
+    const loop = () => { if (!CAS.open || CAS.open.g !== 'roulette') return; casWheelFrame(); CAS.raf = requestAnimationFrame(loop); }; loop();
+}
+function casPlace(t, k, remove) {
+    if (CAS.spinning) return; const key = t + ':' + k;
+    if (remove) { CAS.bets.delete(key); CAS.order = CAS.order.filter(o => o[0] !== key); }
+    else { const amt = CAS.chip; const tot = [...CAS.bets.values()].reduce((a, b) => a + b, 0); if (tot + amt > CAS.open.max) { casStatus(`Table limit is ${fmtWc(CAS.open.max)}.`, 'bad'); return; } CAS.bets.set(key, (CAS.bets.get(key) || 0) + amt); CAS.order.push([key, amt]); }
+    casRoulDraw();
+}
+function casChipTxt(v) { return v >= 1e6 ? (v / 1e6).toFixed(1).replace('.0', '') + 'M' : v >= 1000 ? (v / 1000).toFixed(1).replace('.0', '') + 'k' : String(v); }
+function casRoulDraw() {
+    document.querySelectorAll('#wc-casino .cas-cell').forEach(c => { const v = CAS.bets.get(c.dataset.key); let ch = c.querySelector('.cas-stack'); if (v) { if (!ch) { ch = casEl('b', 'cas-stack'); c.appendChild(ch); } ch.textContent = casChipTxt(v); } else if (ch) ch.remove(); });
+    const tot = [...CAS.bets.values()].reduce((a, b) => a + b, 0), e = document.getElementById('cas-total'); if (e) e.textContent = `Total bet ${fmtWc(tot)}`;
+}
+function casRoulHist(h) { const e = document.getElementById('cas-hist'); if (!e) return; e.innerHTML = ''; h.slice(0, 14).forEach((n, i) => e.appendChild(casEl('span', (n === 0 ? 'g' : WC_ROUL_RED.has(n) ? 'r' : 'b') + (i === 0 ? ' last' : ''), n))); }
+function casWheelFrame() {
+    const W = CAS.wheel; if (!W) return; const now = performance.now() / 1000, c = W.cv.getContext('2d');
+    c.clearRect(0, 0, 340, 340);
+    let ang, ball = null, br = 0.76;
+    if (W.anim) {
+        const A = W.anim, T = 5.2, t = Math.min(now - A.t0, T);
+        ang = A.a0 + A.w * (t - t * t / (2 * T));
+        const endW = A.a0 + A.w * T / 2, idx = WC_ROUL_ORDER.indexOf(A.n), pa = endW + idx * 2 * Math.PI / 37;
+        ball = pa + A.wb * (T - t) * (T - t) / (2 * T); br = 0.76 + 0.17 * Math.max(0, 1 - t / (0.7 * T)) + (t > 0.7 * T && t < 0.92 * T ? 0.05 * Math.abs(Math.sin((t - 0.7 * T) * 18)) * (1 - (t - 0.7 * T) / (0.22 * T)) : 0);
+        if (now - A.t0 >= T) { if (!A.done) { A.done = true; A.end && A.end(); } ang = endW + (now - A.t0 - T) * 0.35; ball = ang + idx * 2 * Math.PI / 37; br = 0.76; }
+    } else { ang = W.a + (now - W.t) * 0.35; }
+    wcDrawWheel(c, 170, 170, 160, ang, ball, br);
+}
+function casRoulRes(d) {
+    const W = CAS.wheel, now = performance.now() / 1000, cur = W.anim ? W.anim.a0 : W.a + (now - W.t) * 0.35;
+    W.anim = { t0: now, a0: cur, w: 6.5, wb: 11, n: d.n, end: () => {
+        const box = document.getElementById('cas-rres'); if (box) { box.innerHTML = `<b class="${d.n === 0 ? 'g' : WC_ROUL_RED.has(d.n) ? 'r' : 'b'}">${d.n}</b>`; box.classList.remove('pop'); void box.offsetWidth; box.classList.add('pop'); }
+        document.querySelectorAll('#wc-casino .cas-cell').forEach(c => c.classList.toggle('hit', c.dataset.key === 'num:' + d.n));
+        casRoulHist(d.hist || []); casBal(d);
+        if (d.win > 0) { casStatus(`${d.n} ${d.n === 0 ? 'green' : WC_ROUL_RED.has(d.n) ? 'red' : 'black'} · you win ${fmtWc(d.win)}! (bet ${fmtWc(d.total)})`, 'good'); casCoinRain(d.win >= d.total * 5 ? 40 : 14); }
+        else casStatus(`${d.n} ${d.n === 0 ? 'green' : WC_ROUL_RED.has(d.n) ? 'red' : 'black'} · no win this time (bet ${fmtWc(d.total)})`, 'bad');
+        CAS.bets.clear(); CAS.order = []; casRoulDraw(); CAS.spinning = false; const sp = document.getElementById('cas-spin'); if (sp) sp.disabled = false;
+        W.a = W.anim.a0 + W.anim.w * 5.2 / 2; W.t = performance.now() / 1000; setTimeout(() => { if (W.anim && W.anim.done) { W.anim = null; } }, 3000);
+    } };
+}
+
+// blackjack
+const CAS_SUIT = ['♠', '♥', '♦', '♣'], CAS_RANK = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+function casCard(c) {
+    const e = casEl('div', 'cas-card'); const inner = casEl('div', 'cas-card-in'); e.appendChild(inner);
+    const back = casEl('div', 'cas-face cas-back'); const front = casEl('div', 'cas-face cas-front');
+    inner.appendChild(back); inner.appendChild(front); casCardSet(e, c); return e;
+}
+function casCardSet(e, c) {
+    const front = e.querySelector('.cas-front'); if (c < 0) { e.classList.remove('up'); return; }
+    const r = CAS_RANK[c % 13], s = CAS_SUIT[Math.floor(c / 13) % 4], red = s === '♥' || s === '♦';
+    front.className = 'cas-face cas-front' + (red ? ' red' : ''); front.innerHTML = `<i>${r}<br>${s}</i><b>${s}</b><i class="br">${r}<br>${s}</i>`;
+    requestAnimationFrame(() => e.classList.add('up'));
+}
+function casBlackjack(body, d) {
+    CAS.bj = { bet: Math.min(CAS.chip, d.max), p: [], d: [], busy: false };
+    const felt = casEl('div', 'cas-felt');
+    felt.innerHTML = `<div class="cas-shoe"></div><div class="cas-arc">BLACKJACK PAYS 3 TO 2 · DEALER STANDS ON ALL 17s</div>
+        <div class="cas-hand dealer"><div class="cas-lbl">Dealer <b id="bj-dt"></b></div><div class="cas-cards" id="bj-d"></div></div>
+        <div class="cas-banner" id="bj-banner"></div>
+        <div class="cas-hand player"><div class="cas-cards" id="bj-p"></div><div class="cas-lbl">You <b id="bj-pt"></b> <span class="cas-betchip" id="bj-bet"></span></div></div>`;
+    body.appendChild(felt);
+    const side = casEl('div', 'cas-right'); body.appendChild(side);
+    side.appendChild(casEl('div', 'cas-sub', 'Choose your bet'));
+    side.appendChild(casChipRow(v => { CAS.bj.bet = v; casBjBet(); }));
+    const ctl = casEl('div', 'cas-ctl bj'); side.appendChild(ctl);
+    const mk = (t, cls, fn, id) => { const b = casEl('button', cls, t); b.onclick = fn; b.id = id; ctl.appendChild(b); return b; };
+    mk('DEAL', 'cas-go', () => { if (CAS.bj.busy) return; CAS.bj.busy = true; casBjClear(); casSend({ act: 'deal', bet: CAS.bj.bet }); }, 'bj-deal');
+    mk('HIT', 'cas-btn big', () => { if (!CAS.bj.busy) { CAS.bj.busy = true; casSend({ act: 'hit' }); } }, 'bj-hit');
+    mk('STAND', 'cas-btn big', () => { if (!CAS.bj.busy) { CAS.bj.busy = true; casSend({ act: 'stand' }); } }, 'bj-stand');
+    mk('DOUBLE', 'cas-btn big', () => { if (!CAS.bj.busy) { CAS.bj.busy = true; casSend({ act: 'double' }); } }, 'bj-double');
+    side.appendChild(casEl('div', 'cas-rules', 'Dealer draws to 16 and stands on all 17s. Double down on your first two cards. Blackjack pays 3:2, a win pays 1:1, a tie returns your bet.'));
+    CAS.onErr = () => { CAS.bj.busy = false; };
+    casBjBet(); casBjButtons(false, false);
+}
+function casBjBet() { const e = document.getElementById('bj-bet'); if (e) e.textContent = '🪙 ' + fmtWc(CAS.bj.bet); }
+function casBjButtons(play, dbl) { const set = (id, on) => { const b = document.getElementById(id); if (b) b.style.display = on ? '' : 'none'; }; set('bj-deal', !play); set('bj-hit', play); set('bj-stand', play); set('bj-double', play && dbl); }
+function casBjClear() { ['bj-d', 'bj-p'].forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = ''; }); CAS.bj.p = []; CAS.bj.d = []; const b = document.getElementById('bj-banner'); if (b) { b.className = 'cas-banner'; b.textContent = ''; } document.getElementById('bj-dt').textContent = ''; document.getElementById('bj-pt').textContent = ''; }
+function casBjRes(d) {
+    const B = CAS.bj; let delay = 0; const step = 330;
+    const deal = (hand, idx, c) => { const box = document.getElementById(hand === 'p' ? 'bj-p' : 'bj-d'); const cur = B[hand]; setTimeout(() => {
+        if (cur[idx] === undefined) { const e = casCard(-1); e.classList.add('deal'); box.appendChild(e); requestAnimationFrame(() => requestAnimationFrame(() => e.classList.remove('deal'))); cur[idx] = { e, c: -1 }; }
+        if (c >= 0 && cur[idx].c < 0) { cur[idx].c = c; setTimeout(() => casCardSet(cur[idx].e, c), 160); }
+    }, delay); delay += step; };
+    if (d.act === 'deal') { [['p', 0], ['d', 0], ['p', 1], ['d', 1]].forEach(([h, i]) => { deal(h, i, d[h][i]); }); }
+    else {
+        for (let i = B.p.length; i < d.p.length; i++) deal('p', i, d.p[i]);
+        if (d.done) { if (B.d[1] && B.d[1].c < 0) { const c = d.d[1]; setTimeout(() => { B.d[1].c = c; casCardSet(B.d[1].e, c); }, delay); delay += step; } for (let i = 2; i < d.d.length; i++) deal('d', i, d.d[i]); }
+    }
+    if (d.act === 'deal' && d.done) setTimeout(() => { if (B.d[1] && B.d[1].c < 0) { B.d[1].c = d.d[1]; casCardSet(B.d[1].e, d.d[1]); } }, delay + 200);
+    setTimeout(() => {
+        document.getElementById('bj-pt').textContent = d.pt + (d.psoft && d.pt < 21 ? ' (soft)' : ''); document.getElementById('bj-dt').textContent = d.dt;
+        B.bet = d.done ? B.bet : d.bet; const be = document.getElementById('bj-bet'); if (be) be.textContent = '🪙 ' + fmtWc(d.bet);
+        casBal(d);
+        if (d.done) {
+            const T = { bj: ['BLACKJACK!', 'good'], win: ['YOU WIN', 'good'], dbust: ['DEALER BUSTS', 'good'], push: ['PUSH', ''], lose: ['DEALER WINS', 'bad'], bust: ['BUST', 'bad'], dbj: ['DEALER BLACKJACK', 'bad'] }[d.res] || ['', ''];
+            const bn = document.getElementById('bj-banner'); bn.textContent = T[0] + (d.win > 0 ? ` +${fmtWc(d.win)}` : ''); bn.className = 'cas-banner show ' + T[1];
+            casStatus(d.win > d.bet ? `You win ${fmtWc(d.win)} (paid to your bank).` : d.res === 'push' ? 'Push – your bet is returned.' : `You lose ${fmtWc(d.bet)}.`, T[1]);
+            if (d.win > d.bet) casCoinRain(d.res === 'bj' ? 36 : 16);
+            CAS.bj.busy = false; casBjButtons(false, false);
+        } else { CAS.bj.busy = false; casBjButtons(true, d.canDouble); casStatus('Hit or stand?'); }
+    }, delay + 120);
+}
+
+// slots
+function casSlots(body, d) {
+    CAS.slot = { bet: Math.min(CAS.chip, d.max), reels: [], sym: [0, 1, 2] };
+    const mach = casEl('div', 'cas-machine');
+    mach.innerHTML = `<div class="cas-marquee">${d.name.toUpperCase()}</div><div class="cas-bulbs top"></div><div class="cas-reels" id="sl-reels"></div><div class="cas-bulbs bot"></div><div class="cas-winline" id="sl-win"></div>`;
+    const bulbs = mach.querySelectorAll('.cas-bulbs'); bulbs.forEach(b => { for (let i = 0; i < 18; i++) b.appendChild(casEl('i')); });
+    const lever = casEl('div', 'cas-lever', '<b></b>'); lever.onclick = () => casSpin(lever); mach.appendChild(lever);
+    body.appendChild(mach);
+    const reels = mach.querySelector('#sl-reels');
+    for (let i = 0; i < 3; i++) { const win = casEl('div', 'cas-reel'), strip = casEl('div', 'cas-strip'); win.appendChild(strip); reels.appendChild(win); CAS.slot.reels.push(strip); casStripSet(strip, [6 - i, i, (i + 3) % 7]); }
+    reels.appendChild(casEl('div', 'cas-payline'));
+    const side = casEl('div', 'cas-right'); body.appendChild(side);
+    side.appendChild(casEl('div', 'cas-sub', 'Bet per spin'));
+    side.appendChild(casChipRow(v => { CAS.slot.bet = v; casSlotBet(); }));
+    const ctl = casEl('div', 'cas-ctl'); side.appendChild(ctl);
+    const be = casEl('div', 'cas-total'); be.id = 'sl-bet'; ctl.appendChild(be);
+    const sp = casEl('button', 'cas-go', 'SPIN'); sp.id = 'sl-spin'; sp.onclick = () => casSpin(lever); ctl.appendChild(sp);
+    const au = casEl('button', 'cas-btn', 'AUTO ×10'); au.onclick = () => { CAS.auto = CAS.auto ? 0 : 10; au.classList.toggle('on', !!CAS.auto); if (CAS.auto && !CAS.spinning) casSpin(lever); }; ctl.appendChild(au); CAS.autoBtn = au;
+    const pt = casEl('div', 'cas-pay');
+    pt.innerHTML = '<div class="cas-sub">Pays (× bet)</div>' + [[6, 400], [5, 100], [4, 40], [3, 20], [2, 15], [1, 8], [0, 6]].map(([i, m]) => `<div><span>${casSymHtml(i)}${casSymHtml(i)}${casSymHtml(i)}</span><b>${m}×</b></div>`).join('') +
+        `<div><span>${casSymHtml(6)}${casSymHtml(6)} any</span><b>25×</b></div><div><span>${casSymHtml(5)}${casSymHtml(5)} any</span><b>10×</b></div><div><span>${casSymHtml(0)}${casSymHtml(0)} any</span><b>2×</b></div><div><span>${casSymHtml(2)}${casSymHtml(2)} any</span><b>1×</b></div>`;
+    side.appendChild(pt);
+    CAS.onErr = () => { const s = document.getElementById('sl-spin'); if (s) s.disabled = false; };
+    casSlotBet();
+}
+function casSymHtml(i) { return i === 5 ? '<em class="seven">7</em>' : `<em>${WC_SLOT_SYM[i]}</em>`; }
+function casStripSet(strip, syms) { strip.style.transition = 'none'; strip.style.transform = 'translateY(0)'; strip.innerHTML = syms.map(i => `<div class="cas-sym">${casSymHtml(i)}</div>`).join(''); }
+function casSlotBet() { const e = document.getElementById('sl-bet'); if (e) e.textContent = `Bet ${fmtWc(CAS.slot.bet)}`; }
+function casSpin(lever) {
+    if (CAS.spinning || !CAS.open) return; CAS.spinning = true;
+    const sp = document.getElementById('sl-spin'); if (sp) sp.disabled = true;
+    lever.classList.remove('pull'); void lever.offsetWidth; lever.classList.add('pull');
+    document.getElementById('sl-win').className = 'cas-winline'; document.getElementById('sl-win').textContent = '';
+    document.querySelector('#wc-casino .cas-machine').classList.remove('won', 'jackpot');
+    CAS.slot.reels.forEach(st => st.parentElement.classList.add('blur'));
+    casSend({ bet: CAS.slot.bet });
+}
+function casSlotRes(d) {
+    const S = CAS.slot, H = 92;
+    S.reels.forEach((strip, i) => {
+        const prev = S.sym, list = [(prev[i] + 1) % 7, prev[i], (prev[i] + 6) % 7];
+        for (let q = 0; q < 22 + i * 7; q++) list.push(Math.floor(Math.random() * 7));
+        list.push((d.l[i] + 1) % 7, d.l[i], (d.l[i] + 6) % 7);
+        strip.style.transition = 'none'; strip.style.transform = 'translateY(0)'; strip.innerHTML = list.map(k => `<div class="cas-sym">${casSymHtml(k)}</div>`).join('');
+        void strip.offsetHeight;
+        strip.style.transition = `transform ${1.0 + i * 0.45}s cubic-bezier(.12,.62,.24,1.04)`; strip.style.transform = `translateY(${-(list.length - 3) * H}px)`;
+        setTimeout(() => strip.parentElement.classList.remove('blur'), (0.75 + i * 0.45) * 1000);
+    });
+    S.sym = d.l.slice();
+    setTimeout(() => {
+        S.reels.forEach((strip, i) => casStripSet(strip, [(d.l[i] + 1) % 7, d.l[i], (d.l[i] + 6) % 7]));
+        casBal(d); const wl = document.getElementById('sl-win'), m = document.querySelector('#wc-casino .cas-machine');
+        if (d.win > 0) {
+            wl.className = 'cas-winline show'; wl.textContent = (d.mul >= 100 ? 'JACKPOT! ' : 'WIN ') + fmtWc(d.win); m.classList.add(d.mul >= 100 ? 'jackpot' : 'won');
+            casStatus(`${d.mul}× · you win ${fmtWc(d.win)}!`, 'good'); if (d.mul >= 10) casCoinRain(d.mul >= 100 ? 60 : 24);
+        } else casStatus('No win – spin again?');
+        CAS.spinning = false; const sp = document.getElementById('sl-spin'); if (sp) sp.disabled = false;
+        if (CAS.auto > 0) { CAS.auto--; if (CAS.autoBtn) CAS.autoBtn.textContent = CAS.auto ? `AUTO (${CAS.auto})` : 'AUTO ×10'; if (CAS.auto) setTimeout(() => { if (CAS.open && CAS.open.g === 'slots') casSpin(document.querySelector('#wc-casino .cas-lever')); }, d.win > 0 ? 1100 : 450); else CAS.autoBtn.classList.remove('on'); }
+    }, (1.0 + 2 * 0.45) * 1000 + 120);
 }
 
 function drawWorldEnvironment() {
@@ -5864,6 +6364,7 @@ function isTypingInField(e) {
 window.onkeydown = e => { 
 
     if (isTypingInField(e)) return;
+    if (typeof CAS !== 'undefined' && CAS.open) { if (e.key === 'Escape') casClose(); return; }
 
     let key = e.key.toLowerCase();
 
