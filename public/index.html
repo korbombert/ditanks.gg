@@ -547,6 +547,112 @@
 #wc-ife .ife-info{grid-template-columns:170px 1fr;gap:6px 14px;padding:6px 10px 10px;font-size:13px}
 #wc-ife .ife-k{color:#9fb3c4}
 #wc-ife-pill{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:150;display:none;cursor:pointer;border:1px solid #2fa8f0;background:rgba(6,14,28,.92);color:#fff;border-radius:20px;padding:8px 16px;font:600 13px 'Ubuntu',sans-serif}
+
+/* ===== casino ===== */
+#wc-casino{position:fixed;inset:0;z-index:158;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at center,rgba(40,6,14,.72),rgba(4,4,8,.86));font-family:Ubuntu,Arial,sans-serif;overflow:hidden;animation:casFade .25s ease}
+@keyframes casFade{from{opacity:0}to{opacity:1}}
+#wc-casino .cas-panel{width:min(1060px,96vw);max-height:94vh;display:flex;flex-direction:column;background:linear-gradient(160deg,#25101a,#140a12 60%,#1d0f08);border:2px solid #d4a017;border-radius:18px;box-shadow:0 0 0 4px rgba(212,160,23,.18),0 24px 80px rgba(0,0,0,.7),inset 0 0 60px rgba(212,160,23,.07);color:#f6ead0;animation:casPop .3s cubic-bezier(.2,1.4,.4,1)}
+@keyframes casPop{from{transform:scale(.92)}to{transform:none}}
+#wc-casino .cas-head{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid rgba(212,160,23,.35);background:linear-gradient(90deg,rgba(212,160,23,.16),transparent)}
+#wc-casino .cas-title{font:700 22px Georgia,serif;letter-spacing:.5px;color:#ffd76a;text-shadow:0 0 12px rgba(255,200,80,.45);flex:1}
+#wc-casino .cas-bal{font-weight:700;font-size:15px;background:rgba(0,0,0,.35);padding:6px 12px;border-radius:20px;border:1px solid rgba(212,160,23,.4)}
+#wc-casino .cas-bal span{opacity:.6;font-weight:400;font-size:12px}
+#wc-casino .cas-x{background:none;border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:50%;width:34px;height:34px;font-size:16px;cursor:pointer}
+#wc-casino .cas-x:hover{background:rgba(255,255,255,.12)}
+#wc-casino .cas-body{display:flex;gap:18px;padding:16px 18px;align-items:flex-start;overflow:auto;flex-wrap:wrap;justify-content:center}
+#wc-casino .cas-status{padding:10px 18px 14px;font-size:14px;color:#d9cba8;min-height:20px;text-align:center}
+#wc-casino .cas-status.good{color:#7dff9a;font-weight:700;text-shadow:0 0 10px rgba(80,255,140,.4)}
+#wc-casino .cas-status.bad{color:#ff9d8a}
+#wc-casino .cas-right{flex:1;min-width:300px;display:flex;flex-direction:column;gap:12px}
+#wc-casino .cas-sub{font-size:12px;text-transform:uppercase;letter-spacing:1.5px;color:#c9a75a}
+#wc-casino .cas-chips{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+#wc-casino .cas-chip{width:46px;height:46px;border-radius:50%;border:4px dashed rgba(255,255,255,.85);font:700 13px Ubuntu,sans-serif;color:#fff;cursor:pointer;box-shadow:0 3px 0 rgba(0,0,0,.4),inset 0 0 0 3px rgba(0,0,0,.2);transition:transform .12s}
+#wc-casino .cas-chip:hover{transform:translateY(-3px)}
+#wc-casino .cas-chip.on{transform:translateY(-5px) scale(1.08);box-shadow:0 0 0 3px #ffd76a,0 6px 12px rgba(0,0,0,.5)}
+#wc-casino .cas-chip.c0{background:#ecf0f1;color:#222;border-color:#9aa}#wc-casino .cas-chip.c1{background:#c0392b}#wc-casino .cas-chip.c2{background:#27ae60}#wc-casino .cas-chip.c3{background:#2c3e50}#wc-casino .cas-chip.c4{background:#8e44ad}#wc-casino .cas-chip.c5{background:#d4a017;color:#221}#wc-casino .cas-chip.c6{background:#e84393}
+#wc-casino .cas-custom{width:90px;padding:10px;border-radius:10px;border:1px solid #d4a017;background:#120a0e;color:#fff;font:700 14px Ubuntu}
+#wc-casino .cas-ctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+#wc-casino .cas-btn{padding:10px 14px;border-radius:10px;border:1px solid rgba(212,160,23,.6);background:rgba(255,255,255,.06);color:#f6ead0;font:700 14px Ubuntu;cursor:pointer}
+#wc-casino .cas-btn:hover{background:rgba(212,160,23,.2)}#wc-casino .cas-btn.on{background:#d4a017;color:#221}
+#wc-casino .cas-btn.big{padding:14px 22px;font-size:16px}
+#wc-casino .cas-go{padding:14px 30px;border-radius:12px;border:0;background:linear-gradient(180deg,#ffd76a,#d4a017 55%,#a87a08);color:#2a1600;font:900 18px Ubuntu;letter-spacing:1px;cursor:pointer;box-shadow:0 4px 0 #6d4f05,0 0 18px rgba(255,200,80,.35)}
+#wc-casino .cas-go:active{transform:translateY(3px);box-shadow:0 1px 0 #6d4f05}
+#wc-casino .cas-go:disabled{filter:grayscale(.7) brightness(.7);cursor:default}
+#wc-casino .cas-total{font-weight:700;color:#ffd76a;padding:0 6px}
+#wc-casino .cas-rules{font-size:13px;color:#bba98a;line-height:1.45}
+#wc-casino .cas-coin{position:absolute;top:-40px;animation:casFall linear forwards;pointer-events:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.5))}
+@keyframes casFall{to{transform:translateY(110vh) rotate(720deg)}}
+/* roulette */
+#wc-casino .cas-wheelbox{display:flex;flex-direction:column;align-items:center;gap:10px;position:relative}
+#wc-casino .cas-wheel{width:340px;height:340px;border-radius:50%;box-shadow:0 0 0 6px #3a1f0c,0 0 0 9px #d4a017,0 14px 40px rgba(0,0,0,.6)}
+#wc-casino .cas-result{position:absolute;top:128px;left:50%;transform:translateX(-50%);pointer-events:none}
+#wc-casino .cas-result b{display:inline-block;min-width:70px;padding:10px 14px;border-radius:14px;font:900 40px Georgia;color:#fff;border:3px solid #ffd76a;box-shadow:0 0 24px rgba(255,210,90,.6)}
+#wc-casino .cas-result.pop b{animation:casPopN .6s cubic-bezier(.2,1.6,.4,1)}
+@keyframes casPopN{from{transform:scale(0)}to{transform:none}}
+#wc-casino b.r,#wc-casino .cas-hist .r{background:#c0202c}#wc-casino b.b,#wc-casino .cas-hist .b{background:#151515}#wc-casino b.g,#wc-casino .cas-hist .g{background:#11823b}
+#wc-casino .cas-hist{display:flex;gap:4px;flex-wrap:wrap;max-width:340px;justify-content:center}
+#wc-casino .cas-hist span{width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;font:700 12px Ubuntu;border:1px solid rgba(255,255,255,.25)}
+#wc-casino .cas-hist span.last{outline:2px solid #ffd76a;transform:scale(1.15)}
+#wc-casino .cas-board{display:grid;grid-template-columns:42px repeat(12,1fr) 42px;grid-template-rows:repeat(3,44px) 38px 38px;gap:3px;background:#0b5a34;padding:8px;border-radius:12px;border:3px solid #5a3418;box-shadow:inset 0 0 30px rgba(0,0,0,.4)}
+#wc-casino .cas-cell{position:relative;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.55);border-radius:4px;font:700 14px Ubuntu;cursor:pointer;user-select:none;transition:filter .1s,transform .1s}
+#wc-casino .cas-cell:hover{filter:brightness(1.35);transform:translateY(-1px)}
+#wc-casino .cas-cell.red{background:#b3202c}#wc-casino .cas-cell.black{background:#141414}#wc-casino .cas-cell.green{background:#11823b;font-size:20px}
+#wc-casino .cas-cell.out{background:rgba(0,0,0,.12);font-size:12px}
+#wc-casino .cas-cell.redd span{color:#e0303c;font-size:20px}#wc-casino .cas-cell.blackd span{color:#000;font-size:20px;text-shadow:0 0 2px #fff}
+#wc-casino .cas-cell.hit{box-shadow:0 0 0 3px #ffd76a,0 0 18px #ffd76a;animation:casHit .5s 4 alternate}
+@keyframes casHit{to{filter:brightness(1.8)}}
+#wc-casino .cas-stack{position:absolute;right:-4px;top:-6px;min-width:22px;height:22px;padding:0 4px;border-radius:11px;background:#d4a017;color:#221;font:900 11px Ubuntu;display:flex;align-items:center;justify-content:center;border:2px dashed #fff;box-shadow:0 2px 4px rgba(0,0,0,.5);animation:casChipIn .2s ease}
+@keyframes casChipIn{from{transform:translateY(-12px) scale(1.4);opacity:0}}
+/* blackjack */
+#wc-casino .cas-felt{position:relative;width:560px;height:400px;border-radius:0 0 280px 280px/0 0 170px 170px;background:radial-gradient(ellipse at 50% 30%,#18895a,#0b5a34 70%,#07402a);border:10px solid #5a3418;box-shadow:inset 0 0 50px rgba(0,0,0,.5),0 16px 40px rgba(0,0,0,.6);display:flex;flex-direction:column;justify-content:space-between;padding:16px 20px 34px}
+#wc-casino .cas-shoe{position:absolute;right:18px;top:12px;width:62px;height:80px;border-radius:8px;background:linear-gradient(160deg,#2b2b33,#111);border:2px solid #d4a017}
+#wc-casino .cas-arc{position:absolute;left:0;right:0;top:186px;text-align:center;font:700 12px Georgia;letter-spacing:2px;color:rgba(255,230,150,.7)}
+#wc-casino .cas-hand{display:flex;flex-direction:column;align-items:center;gap:6px}
+#wc-casino .cas-lbl{font-weight:700;color:#e9f6e9;font-size:14px}#wc-casino .cas-lbl b{background:rgba(0,0,0,.4);padding:2px 9px;border-radius:10px;margin-left:4px;color:#ffd76a}
+#wc-casino .cas-betchip{background:#d4a017;color:#221;border-radius:12px;padding:3px 9px;margin-left:6px;font-weight:900}
+#wc-casino .cas-cards{display:flex;height:112px;align-items:center;justify-content:center}
+#wc-casino .cas-card{width:76px;height:108px;margin:0 -12px;perspective:600px;transition:transform .38s cubic-bezier(.2,.9,.3,1),opacity .3s}
+#wc-casino .cas-card.deal{transform:translate(220px,-200px) rotate(-35deg) scale(.6);opacity:.3}
+#wc-casino .cas-card-in{position:relative;width:100%;height:100%;transform-style:preserve-3d;transition:transform .45s;transform:rotateY(180deg)}
+#wc-casino .cas-card.up .cas-card-in{transform:none}
+#wc-casino .cas-face{position:absolute;inset:0;border-radius:8px;backface-visibility:hidden;box-shadow:0 3px 8px rgba(0,0,0,.45)}
+#wc-casino .cas-back{transform:rotateY(180deg);background:repeating-linear-gradient(45deg,#8a1424 0 6px,#a51c2e 6px 12px);border:4px solid #fff}
+#wc-casino .cas-front{background:#fdfbf6;color:#111;border:1px solid #ccc;display:flex;align-items:center;justify-content:center}
+#wc-casino .cas-front.red{color:#c0202c}
+#wc-casino .cas-front i{position:absolute;left:6px;top:4px;font:700 15px/1.05 Georgia;font-style:normal;text-align:center}
+#wc-casino .cas-front i.br{left:auto;top:auto;right:6px;bottom:4px;transform:rotate(180deg)}
+#wc-casino .cas-front b{font-size:38px}
+#wc-casino .cas-banner{align-self:center;font:900 30px Georgia;letter-spacing:2px;color:#fff;opacity:0;transform:scale(.6);transition:all .35s cubic-bezier(.2,1.5,.4,1);text-shadow:0 0 18px rgba(0,0,0,.8);min-height:36px}
+#wc-casino .cas-banner.show{opacity:1;transform:none}
+#wc-casino .cas-felt:has(.cas-banner.show) .cas-arc{opacity:0}
+#wc-casino .cas-arc{transition:opacity .3s}#wc-casino .cas-banner.good{color:#ffd76a;text-shadow:0 0 22px rgba(255,210,90,.8)}#wc-casino .cas-banner.bad{color:#ffb0a0}
+/* slots */
+#wc-casino .cas-machine{position:relative;width:470px;padding:18px 70px 22px 22px;border-radius:26px 26px 14px 14px;background:linear-gradient(180deg,#b3202c,#6b0f18 70%,#3d070d);border:4px solid #ffd76a;box-shadow:0 0 30px rgba(255,80,80,.35),inset 0 0 30px rgba(0,0,0,.5)}
+#wc-casino .cas-marquee{text-align:center;font:900 26px Georgia;color:#ffd76a;letter-spacing:3px;text-shadow:0 0 10px #ff8a3d,0 0 22px #ff2bd6;padding:4px 0 8px;animation:casGlow 1.6s infinite alternate}
+@keyframes casGlow{to{text-shadow:0 0 18px #ffd76a,0 0 34px #ff2bd6}}
+#wc-casino .cas-bulbs{display:flex;justify-content:space-between;padding:4px 6px}
+#wc-casino .cas-bulbs i{width:10px;height:10px;border-radius:50%;background:#ffe9a0;box-shadow:0 0 8px #ffd76a;animation:casBulb .9s infinite}
+#wc-casino .cas-bulbs i:nth-child(odd){animation-delay:.45s}
+#wc-casino .cas-machine.won .cas-bulbs i{animation-duration:.18s}#wc-casino .cas-machine.jackpot .cas-bulbs i{animation-duration:.1s;background:#9dff00;box-shadow:0 0 12px #9dff00}
+@keyframes casBulb{50%{background:#5a3a10;box-shadow:none}}
+#wc-casino .cas-reels{position:relative;display:flex;gap:8px;background:#0b0b12;padding:10px;border-radius:12px;box-shadow:inset 0 0 20px rgba(0,0,0,.9)}
+#wc-casino .cas-reel{width:116px;height:276px;overflow:hidden;border-radius:8px;background:linear-gradient(180deg,#bdb6a6,#fffdf6 30%,#fffdf6 70%,#bdb6a6)}
+#wc-casino .cas-reel.blur .cas-strip{filter:blur(2.5px)}
+#wc-casino .cas-sym{height:92px;display:flex;align-items:center;justify-content:center;font-size:56px}
+#wc-casino .cas-sym em,#wc-casino .cas-pay em{font-style:normal}
+#wc-casino em.seven{font:900 64px Georgia;color:#e52b2b;text-shadow:2px 2px 0 #7a0a0a}
+#wc-casino .cas-pay em.seven{font-size:20px}
+#wc-casino .cas-payline{position:absolute;left:4px;right:4px;top:50%;height:3px;background:rgba(255,40,40,.75);box-shadow:0 0 8px red;pointer-events:none}
+#wc-casino .cas-winline{position:absolute;left:22px;right:70px;top:46%;text-align:center;font:900 36px Georgia;color:#fff;opacity:0;transform:scale(.4);transition:all .4s cubic-bezier(.2,1.6,.4,1);text-shadow:0 0 14px #ff2bd6,0 0 26px #ffd76a;pointer-events:none}
+#wc-casino .cas-winline.show{opacity:1;transform:none}
+#wc-casino .cas-lever{position:absolute;right:14px;top:120px;width:30px;height:170px;cursor:pointer}
+#wc-casino .cas-lever:before{content:'';position:absolute;left:11px;top:20px;width:8px;height:150px;background:linear-gradient(90deg,#9aa,#eee,#9aa);border-radius:4px;transform-origin:50% 100%}
+#wc-casino .cas-lever b{position:absolute;left:0;top:0;width:30px;height:30px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#ff8a8a,#c0202c 60%,#6b0f18);box-shadow:0 3px 6px rgba(0,0,0,.5)}
+#wc-casino .cas-lever.pull b{animation:casPull .6s ease}#wc-casino .cas-lever.pull:before{animation:casPullS .6s ease}
+@keyframes casPull{40%{transform:translateY(120px)}}@keyframes casPullS{40%{transform:scaleY(.25)}}
+#wc-casino .cas-pay{display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;font-size:14px;background:rgba(0,0,0,.3);padding:10px;border-radius:10px;border:1px solid rgba(212,160,23,.3)}
+#wc-casino .cas-pay .cas-sub{grid-column:1/-1}
+#wc-casino .cas-pay div{display:flex;justify-content:space-between;gap:8px}#wc-casino .cas-pay b{color:#ffd76a}
 </style>
 </head>
 <body>
