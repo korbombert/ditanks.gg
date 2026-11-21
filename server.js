@@ -3007,21 +3007,21 @@ const ROAD_CLASSES = { avenue: { hw: 105, lanes: 4 }, street: { hw: 60, lanes: 2
 // strict = minutes of play you may go without working before you are fired, perk = what makes the job nicer (see WORLD_PERKS).
 // styles = the kinds of city that have its offices; companies also grow and open branches (see company expansion).
 const W_COMPANIES = [
-    { id: 'meridian',  name: 'Meridian Finance',   pay: 38, color: '#2f6fb0', role: 'Analyst',      kind: 'desk',    task: 8,  strict: 15, perk: 'bonus',  styles: ['cyber', 'generic'] },
-    { id: 'atlas',     name: 'Atlas Digital',      pay: 44, color: '#7a4fd0', role: 'Developer',    kind: 'desk',    task: 10, strict: 20, perk: 'flex',   styles: ['cyber', 'generic'] },
-    { id: 'northgate', name: 'Northgate Legal',    pay: 52, color: '#9a3544', role: 'Paralegal',    kind: 'desk',    task: 12, strict: 12, perk: null,     styles: ['generic', 'oldtown'] },
-    { id: 'helix',     name: 'Helix Media',        pay: 34, color: '#d0782f', role: 'Producer',     kind: 'desk',    task: 6,  strict: 18, perk: 'tips',   styles: ['generic', 'cyber'] },
-    { id: 'pinnacle',  name: 'Pinnacle Insurance', pay: 48, color: '#b8962b', role: 'Underwriter',  kind: 'desk',    task: 9,  strict: 15, perk: 'meal',   styles: ['generic'] },
-    { id: 'neoncore',  name: 'NeonCore Systems',   pay: 62, color: '#ff2bd6', role: 'Netrunner',    kind: 'desk',    task: 10, strict: 10, perk: 'bonus',  styles: ['cyber'] },
-    { id: 'quantum',   name: 'Quantum Exchange',   pay: 80, color: '#00b8d4', role: 'Quant Trader', kind: 'desk',    task: 14, strict: 8,  perk: 'bonus',  styles: ['cyber'] },
-    { id: 'gallery',   name: 'Old Quarter Gallery', pay: 36, color: '#8e5b3a', role: 'Curator',     kind: 'desk',    task: 7,  strict: 25, perk: 'tips',   styles: ['oldtown'] },
-    { id: 'museum',    name: 'Heritage Museum',    pay: 40, color: '#6b4f8a', role: 'Archivist',    kind: 'desk',    task: 9,  strict: 25, perk: 'meal',   styles: ['oldtown'] },
-    { id: 'sawmill',   name: 'Timberline Sawmill', pay: 30, color: '#7a5a2a', role: 'Mill Hand',    kind: 'desk',    task: 6,  strict: 30, perk: 'hazard', styles: ['rural'] },
-    { id: 'orion',     name: 'Orion Logistics',    pay: 40, color: '#2f9c78', role: 'Courier',      kind: 'courier', task: 0,  strict: 20, perk: 'fuel',   styles: ['generic', 'cyber', 'rural'] },
-    { id: 'swift',     name: 'SwiftParcel',        pay: 34, color: '#e05a2a', role: 'Bike Courier', kind: 'courier', task: 0,  strict: 25, perk: 'tips',   styles: ['generic', 'oldtown'] },
-    { id: 'citycab',   name: 'CityCab',            pay: 30, color: '#d9a800', role: 'Taxi Driver',  kind: 'taxi',    task: 0,  strict: 25, perk: 'fuel',   styles: ['cyber', 'generic', 'oldtown'] },
-    { id: 'tours',     name: 'Old Town Tours',     pay: 30, color: '#c0392b', role: 'Tour Guide',   kind: 'guide',   task: 0,  strict: 30, perk: 'tips',   styles: ['oldtown'] },
-    { id: 'coop',      name: 'Green Valley Co-op', pay: 3,  color: '#4f9a3a', role: 'Farm Hand',    kind: 'farm',    task: 0,  strict: 30, perk: 'meal',   styles: ['rural'] }
+    { id: 'meridian',  name: 'Meridian Finance',   pay: 76, color: '#2f6fb0', role: 'Analyst',      kind: 'desk',    task: 8,  strict: 15, perk: 'bonus',  styles: ['cyber', 'generic'] },
+    { id: 'atlas',     name: 'Atlas Digital',      pay: 88, color: '#7a4fd0', role: 'Developer',    kind: 'desk',    task: 10, strict: 20, perk: 'flex',   styles: ['cyber', 'generic'] },
+    { id: 'northgate', name: 'Northgate Legal',    pay: 104, color: '#9a3544', role: 'Paralegal',    kind: 'desk',    task: 12, strict: 12, perk: null,     styles: ['generic', 'oldtown'] },
+    { id: 'helix',     name: 'Helix Media',        pay: 68, color: '#d0782f', role: 'Producer',     kind: 'desk',    task: 6,  strict: 18, perk: 'tips',   styles: ['generic', 'cyber'] },
+    { id: 'pinnacle',  name: 'Pinnacle Insurance', pay: 96, color: '#b8962b', role: 'Underwriter',  kind: 'desk',    task: 9,  strict: 15, perk: 'meal',   styles: ['generic'] },
+    { id: 'neoncore',  name: 'NeonCore Systems',   pay: 124, color: '#ff2bd6', role: 'Netrunner',    kind: 'desk',    task: 10, strict: 10, perk: 'bonus',  styles: ['cyber'] },
+    { id: 'quantum',   name: 'Quantum Exchange',   pay: 160, color: '#00b8d4', role: 'Quant Trader', kind: 'desk',    task: 14, strict: 8,  perk: 'bonus',  styles: ['cyber'] },
+    { id: 'gallery',   name: 'Old Quarter Gallery', pay: 72, color: '#8e5b3a', role: 'Curator',     kind: 'desk',    task: 7,  strict: 25, perk: 'tips',   styles: ['oldtown'] },
+    { id: 'museum',    name: 'Heritage Museum',    pay: 80, color: '#6b4f8a', role: 'Archivist',    kind: 'desk',    task: 9,  strict: 25, perk: 'meal',   styles: ['oldtown'] },
+    { id: 'sawmill',   name: 'Timberline Sawmill', pay: 60, color: '#7a5a2a', role: 'Mill Hand',    kind: 'desk',    task: 6,  strict: 30, perk: 'hazard', styles: ['rural'] },
+    { id: 'orion',     name: 'Orion Logistics',    pay: 80, color: '#2f9c78', role: 'Courier',      kind: 'courier', task: 0,  strict: 20, perk: 'fuel',   styles: ['generic', 'cyber', 'rural'] },
+    { id: 'swift',     name: 'SwiftParcel',        pay: 68, color: '#e05a2a', role: 'Bike Courier', kind: 'courier', task: 0,  strict: 25, perk: 'tips',   styles: ['generic', 'oldtown'] },
+    { id: 'citycab',   name: 'CityCab',            pay: 60, color: '#d9a800', role: 'Taxi Driver',  kind: 'taxi',    task: 0,  strict: 25, perk: 'fuel',   styles: ['cyber', 'generic', 'oldtown'] },
+    { id: 'tours',     name: 'Old Town Tours',     pay: 60, color: '#c0392b', role: 'Tour Guide',   kind: 'guide',   task: 0,  strict: 30, perk: 'tips',   styles: ['oldtown'] },
+    { id: 'coop',      name: 'Green Valley Co-op', pay: 6,  color: '#4f9a3a', role: 'Farm Hand',    kind: 'farm',    task: 0,  strict: 30, perk: 'meal',   styles: ['rural'] }
 ];
 const MALL_NAMES = ['Skyline Galleria', 'Arcadia Plaza', 'Neon Bazaar', 'Meridian Mall', 'Aurora Centre', 'Grand Arcade', 'Vertex Mall', 'Crystal Court'];
 const HOTEL_NAMES = ['Grand Meridian', 'The Aurora', 'Skyline Suites', 'Hotel Lumen', 'The Regent', 'Hotel Vantage', 'Starlight Hotel'];
@@ -3042,7 +3042,59 @@ const WORLD_ITEMS = {
     pastry:   { name: 'Pastry', price: 5, heal: 20 },
     skewer:   { name: 'Street skewer', price: 4, heal: 20 },
     lemonade: { name: 'Lemonade', price: 3, heal: 10, speed: 20 },
-    craft:    { name: 'Handmade trinket', price: 18, xp: 250 }
+    craft:    { name: 'Handmade trinket', price: 18, xp: 250 },
+    // ---- round 4: a lot more to buy. pu = [powerup, seconds] (fov = wider view, forceField = shield, reload, damage, healthRegen, bulletSpeed)
+    sushi:     { name: 'Sushi platter', price: 26, heal: 80, ic: '🍣' },
+    pizza:     { name: 'Pizza slice', price: 7, heal: 30, ic: '🍕' },
+    burger:    { name: 'Burger & fries', price: 11, heal: 45, ic: '🍔' },
+    soda:      { name: 'Fizzy soda', price: 3, speed: 15, ic: '🥤' },
+    bubbletea: { name: 'Bubble tea', price: 7, heal: 10, speed: 45, ic: '🧋' },
+    icecream:  { name: 'Ice-cream cone', price: 5, heal: 15, speed: 15, ic: '🍦' },
+    sundae:    { name: 'Triple sundae', price: 12, heal: 35, speed: 30, ic: '🍨' },
+    donut:     { name: 'Glazed doughnut', price: 3, heal: 12, ic: '🍩' },
+    taco:      { name: 'Street tacos', price: 9, heal: 40, ic: '🌮' },
+    bandage:   { name: 'Bandages', price: 12, heal: 40, ic: '🩹' },
+    vitamins:  { name: 'Vitamins', price: 20, pu: ['healthRegen', 120], ic: '💊' },
+    medkit:    { name: 'First-aid kit', price: 45, heal: 100, pu: ['healthRegen', 60], ic: '⛑' },
+    binoculars:{ name: 'Binoculars', price: 90, pu: ['fov', 180], ic: '🔭' },
+    headphones:{ name: 'Noise-cancelling headphones', price: 140, xp: 900, ic: '🎧' },
+    phone:     { name: 'New smartphone', price: 420, xp: 3200, ic: '📱' },
+    drone:     { name: 'Camera drone', price: 650, pu: ['fov', 600], xp: 1500, ic: '🛸' },
+    console:   { name: 'Games console', price: 380, xp: 2900, ic: '🎮' },
+    sunglasses:{ name: 'Designer sunglasses', price: 60, xp: 380, ic: '🕶' },
+    jacket:    { name: 'Armoured leather jacket', price: 160, pu: ['forceField', 60], ic: '🧥' },
+    sneakers:  { name: 'Running shoes', price: 120, speed: 300, ic: '👟' },
+    handbag:   { name: 'Luxury handbag', price: 520, xp: 4000, ic: '👜' },
+    ring:      { name: 'Silver ring', price: 250, xp: 1800, ic: '💍' },
+    watch:     { name: 'Gold watch', price: 900, xp: 7000, ic: '⌚' },
+    diamond:   { name: 'Diamond necklace', price: 3000, xp: 26000, ic: '💎' },
+    perfume:   { name: 'Perfume', price: 85, xp: 650, ic: '🧴' },
+    novel:     { name: 'Paperback novel', price: 9, xp: 90, ic: '📕' },
+    guidebook: { name: 'City guidebook', price: 15, xp: 150, ic: '🗺' },
+    manual:    { name: 'Tank tactics manual', price: 120, pu: ['reload', 120], ic: '📘' },
+    comic:     { name: 'Comic book', price: 6, xp: 60, ic: '📗' },
+    bouquet:   { name: 'Bouquet of roses', price: 25, xp: 220, ic: '💐' },
+    potplant:  { name: 'Potted cactus', price: 18, xp: 160, ic: '🌵' },
+    toytank:   { name: 'Toy tank', price: 30, xp: 260, ic: '🧸' },
+    puzzle:    { name: 'Jigsaw puzzle', price: 14, xp: 120, ic: '🧩' },
+    kite:      { name: 'Kite', price: 22, speed: 60, xp: 80, ic: '🪁' },
+    sportsdrink:{ name: 'Sports drink', price: 6, speed: 60, heal: 10, ic: '🧃' },
+    gloves:    { name: 'Training gloves', price: 110, pu: ['damage', 90], ic: '🥊' },
+    scope:     { name: 'Target scope', price: 140, pu: ['bulletSpeed', 120], ic: '🎯' },
+    vinyl:     { name: 'Vinyl record', price: 28, xp: 260, ic: '💿' },
+    guitar:    { name: 'Electric guitar', price: 480, xp: 3700, ic: '🎸' },
+    pettreats: { name: 'Pet treats', price: 6, xp: 50, ic: '🦴' },
+    goldfish:  { name: 'Goldfish', price: 35, xp: 330, ic: '🐠' },
+    puppy:     { name: 'Plush puppy', price: 55, xp: 480, ic: '🐶' },
+    jerrycan:  { name: 'Jerry can (40 L)', price: 46, fuel: 40, ic: '⛽' },
+    toolkit:   { name: 'Repair kit', price: 60, heal: 100, pu: ['forceField', 15], ic: '🧰' },
+    cocktail:  { name: 'Signature cocktail', price: 18, xp: 140, speed: 20, ic: '🍸' },
+    mocktail:  { name: 'Virgin mojito', price: 8, heal: 15, speed: 20, ic: '🍹' },
+    champagne: { name: 'Champagne', price: 60, xp: 500, ic: '🍾' },
+    popcorn:   { name: 'Popcorn', price: 6, heal: 15, ic: '🍿' },
+    candy:     { name: 'Pick & mix', price: 4, heal: 8, speed: 20, ic: '🍬' },
+    cheese:    { name: 'Artisan cheese', price: 16, heal: 50, ic: '🧀' },
+    wine:      { name: 'Bottle of wine', price: 30, xp: 240, ic: '🍷' }
 };
 const SHOP_KINDS = {
     grocery:  { name: 'Grocery', items: ['sandwich', 'fruit', 'drink', 'fuelcan'] },
@@ -3050,8 +3102,33 @@ const SHOP_KINDS = {
     cafe:     { name: 'Café', items: ['coffee', 'meal', 'pastry'] },
     noodle:   { name: 'Noodle Bar', items: ['noodles', 'drink'] },
     bakery:   { name: 'Bakery', items: ['pastry', 'coffee', 'sandwich'] },
-    general:  { name: 'General Store', items: ['sandwich', 'fruit', 'fuelcan', 'lemonade'] }
+    general:  { name: 'General Store', items: ['sandwich', 'fruit', 'fuelcan', 'lemonade'] },
+    pharmacy:    { name: 'Pharmacy', items: ['bandage', 'vitamins', 'medkit', 'drink'], ic: '💊' },
+    electronics: { name: 'Electronics', items: ['binoculars', 'headphones', 'phone', 'drone', 'console'], ic: '📱' },
+    fashion:     { name: 'Fashion Boutique', items: ['sunglasses', 'jacket', 'sneakers', 'handbag'], ic: '👗' },
+    jewelry:     { name: 'Jeweller', items: ['ring', 'watch', 'diamond'], ic: '💎' },
+    perfume:     { name: 'Perfumery', items: ['perfume', 'bouquet'], ic: '🧴' },
+    books:       { name: 'Bookshop', items: ['novel', 'guidebook', 'comic', 'manual', 'coffee'], ic: '📚' },
+    florist:     { name: 'Florist', items: ['bouquet', 'potplant'], ic: '💐' },
+    toys:        { name: 'Toy Store', items: ['toytank', 'puzzle', 'kite', 'puppy'], ic: '🧸' },
+    sports:      { name: 'Sports Store', items: ['sportsdrink', 'sneakers', 'gloves', 'scope'], ic: '⚽' },
+    music:       { name: 'Music Store', items: ['vinyl', 'headphones', 'guitar'], ic: '🎵' },
+    games:       { name: 'Game Store', items: ['console', 'comic', 'candy'], ic: '🎮' },
+    pets:        { name: 'Pet Shop', items: ['pettreats', 'goldfish', 'puppy'], ic: '🐾' },
+    sushi:       { name: 'Sushi Bar', items: ['sushi', 'soda'], ic: '🍣' },
+    pizza:       { name: 'Pizzeria', items: ['pizza', 'soda', 'icecream'], ic: '🍕' },
+    burger:      { name: 'Burger Joint', items: ['burger', 'soda', 'sundae'], ic: '🍔' },
+    tacos:       { name: 'Taqueria', items: ['taco', 'soda'], ic: '🌮' },
+    bubbletea:   { name: 'Bubble Tea', items: ['bubbletea', 'donut'], ic: '🧋' },
+    icecream:    { name: 'Gelato', items: ['icecream', 'sundae'], ic: '🍦' },
+    donut:       { name: 'Doughnut Shop', items: ['donut', 'coffee'], ic: '🍩' },
+    candy:       { name: 'Sweet Shop', items: ['candy', 'popcorn', 'lemonade'], ic: '🍬' },
+    deli:        { name: 'Deli & Wine', items: ['cheese', 'wine', 'sandwich'], ic: '🧀' },
+    hardware:    { name: 'Hardware & Auto', items: ['jerrycan', 'toolkit', 'fuelcan'], ic: '🧰' },
+    bar:         { name: 'Cocktail Bar', items: ['cocktail', 'mocktail', 'champagne'], ic: '🍸' },
+    cinema:      { name: 'Cinema Kiosk', items: ['popcorn', 'soda', 'candy'], ic: '🍿' }
 };
+for (const [k, v] of Object.entries(SHOP_KINDS)) if (!v.ic) v.ic = { grocery: '🛒', souvenir: '🎁', cafe: '☕', noodle: '🍜', bakery: '🥐', general: '🏪' }[k] || '🛍';
 const STALL_KINDS = {
     food:   { name: 'Food stall', items: ['skewer', 'lemonade'] },
     noodle: { name: 'Night-market noodles', items: ['noodles', 'skewer', 'drink'] },
@@ -3444,21 +3521,30 @@ function buildCityLayout(seed, city, idx) {
 
     // ---- city-style blocks ------------------------------------------------------------------------------------
     // shops: every shop sells something; what kind depends on the city's character
-    const SHOP_MIX = { cyber: ['grocery', 'noodle', 'souvenir', 'cafe', 'noodle', 'grocery'], oldtown: ['souvenir', 'bakery', 'cafe', 'souvenir', 'grocery', 'bakery'], rural: ['general'], generic: ['grocery', 'cafe', 'souvenir', 'grocery', 'cafe', 'bakery'] };
+    const SHOP_MIX = {
+        cyber: ['grocery', 'noodle', 'souvenir', 'cafe', 'electronics', 'sushi', 'bubbletea', 'games', 'pharmacy', 'fashion', 'bar', 'tacos', 'noodle', 'grocery'],
+        oldtown: ['souvenir', 'bakery', 'cafe', 'souvenir', 'grocery', 'books', 'florist', 'deli', 'icecream', 'jewelry', 'music', 'perfume'],
+        rural: ['general', 'general', 'hardware', 'bakery', 'pharmacy'],
+        generic: ['grocery', 'cafe', 'souvenir', 'grocery', 'pizza', 'burger', 'pharmacy', 'hardware', 'books', 'pets', 'toys', 'sports', 'donut', 'florist', 'bakery'] };
     const pickShop = rng => { const m = SHOP_MIX[style] || SHOP_MIX.generic; return m[Math.floor(rng() * m.length)]; };
     const addStall = (x, y, sk, col) => { const s = { k: 'stall', x: Math.round(x), y: Math.round(y), w: 64, h: 40, sk, col: col | 0, id: nid() }; L.props.push(s); rectCol(s.x, s.y, s.w, s.h); return s; };
     const addHolo = (x, y, txt, col) => { L.props.push({ k: 'holo', x: Math.round(x), y: Math.round(y), w: 12, h: 12, txt, col }); circCol(x + 6, y + 6, 7); };
     const HOLO_TXT = ['NEON CORE', 'QUANTUM EX', 'SYNTH-MART', 'ZERO DAY', 'HYPERLOOP', 'NOODLE 24/7', 'CHROME', 'DATA HAVEN'];
     const HOLO_COL = ['#ff2bd6', '#00e5ff', '#9dff00', '#ffb000', '#7a5cff'];
+    // the financial core gets supertalls: setback tiers, a spire and 250-400 floors (decided by a hash, so the rng stream is untouched)
+    function supertall(b) {
+        const d = Math.hypot(b.x + b.w / 2 - CX, b.y + b.h / 2 - CY) / R0, hsh = wHash(seed ^ 0x51a7, b.x | 0, b.y | 0);
+        if (d < 0.14 ? hsh < 0.7 : d < 0.3 ? hsh < 0.22 : hsh < 0.03) { b.f = 250 + Math.floor(wHash(seed ^ 0x2f, b.y | 0, b.x | 0) * 150); b.st = 1; }
+    }
     function cyberTowerBlock(B, rng) {
         const Lr = inset(B, W_SW + 12);
         if (rng() < 0.38 && Lr.w > 300) {
             const gap = 40, w = (Lr.w - gap) / 2;
-            for (let i = 0; i < 2; i++) { const bw = w * (0.8 + rng() * 0.15), bh = Lr.h * (0.75 + rng() * 0.2); const b = addBuilding('tower', Lr.x + i * (w + gap) + (w - bw) / 2, Lr.y + (Lr.h - bh) / 2, bw, bh, { s: Math.floor(rng() * 9999), f: 40 + Math.floor(rng() * 60), t: Math.floor(rng() * 6), r: Math.floor(rng() * 4) }); if (rng() < 0.45) makeWork(b); }
+            for (let i = 0; i < 2; i++) { const bw = w * (0.8 + rng() * 0.15), bh = Lr.h * (0.75 + rng() * 0.2); const b = addBuilding('tower', Lr.x + i * (w + gap) + (w - bw) / 2, Lr.y + (Lr.h - bh) / 2, bw, bh, { s: Math.floor(rng() * 9999), f: 70 + Math.floor(rng() * 90), t: Math.floor(rng() * 6), r: Math.floor(rng() * 4) }); supertall(b); if (rng() < 0.45) makeWork(b); }
         } else {
             const w = Lr.w * (0.72 + rng() * 0.2), h = Lr.h * (0.72 + rng() * 0.2);
-            const b = addBuilding('tower', Lr.x + (Lr.w - w) * (0.3 + rng() * 0.4), Lr.y + (Lr.h - h) * (0.3 + rng() * 0.4), w, h, { s: Math.floor(rng() * 9999), f: 55 + Math.floor(rng() * 70), t: Math.floor(rng() * 6), r: Math.floor(rng() * 4) });
-            if (rng() < 0.6) makeWork(b);
+            const b = addBuilding('tower', Lr.x + (Lr.w - w) * (0.3 + rng() * 0.4), Lr.y + (Lr.h - h) * (0.3 + rng() * 0.4), w, h, { s: Math.floor(rng() * 9999), f: 100 + Math.floor(rng() * 120), t: Math.floor(rng() * 6), r: Math.floor(rng() * 4) });
+            supertall(b); if (rng() < 0.6) makeWork(b);
         }
         addHolo(B.x + 6, B.y + B.h - 18, HOLO_TXT[Math.floor(rng() * HOLO_TXT.length)], HOLO_COL[Math.floor(rng() * HOLO_COL.length)]);
         cornerLamps(B);
@@ -3467,7 +3553,7 @@ function buildCityLayout(seed, city, idx) {
     function megaMallBlock(B, rng) {
         const Lr = inset(B, W_SW + 10), big = Lr.w > 700;
         const bw = Lr.w - 24, bh = Lr.h * (big ? 0.7 : 0.78);
-        addBuilding('megamall', Lr.x + 12, Lr.y + 6, bw, bh, { s: Math.floor(rng() * 9999), lv: 3 + Math.floor(rng() * (big ? 4 : 2)), nm: MALL_NAMES[Math.floor(rng() * MALL_NAMES.length)] });
+        const sd = Math.floor(rng() * 9999), lr = rng(); addBuilding('megamall', Lr.x + 12, Lr.y + 6, bw, bh, { s: sd, lv: style === 'cyber' ? (big && lr > 0.3 ? 6 : 4 + Math.floor(lr * 2)) : 3 + Math.floor(lr * (big ? 4 : 2)), nm: MALL_NAMES[Math.floor(rng() * MALL_NAMES.length)] });
         const py = Lr.y + bh + 30;
         if (big) { const lot = addLot(Lr.x, py + 30, Lr.w, Lr.y + Lr.h - py - 30, false); fillLotWithCars(lot, rng, 0.6); }
         else for (let i = 0; i < 3; i++) addTree(Lr.x + Lr.w * (0.2 + i * 0.3), py + 20, i, 8);
@@ -3655,8 +3741,9 @@ function buildCityLayout(seed, city, idx) {
         b.city = city.id;
         if (b.price) b.price = Math.max(500, Math.round(b.price * city.priceMul / 500) * 500);
         if (style === 'cyber' && ['tower', 'mid', 'megamall', 'hotel', 'shop', 'apt', 'mall'].includes(b.k)) b.neon = 1;
-        if (b.shop) b.sn = (SHOP_KINDS[b.shop] || SHOP_KINDS.grocery).name;
+        if (b.shop) { const sk = SHOP_KINDS[b.shop] || SHOP_KINDS.grocery; b.sn = sk.ic + ' ' + sk.name; }
     }
+    if (style === 'cyber') L.buildings.filter(b => b.k === 'megamall').sort((p, q) => Math.hypot(p.x - CX, p.y - CY) - Math.hypot(q.x - CX, q.y - CY)).slice(0, 4).forEach(b => { b.lv = 6; });   // downtown always has casinos
     for (const p of L.props) if (p.k === 'stall') p.city = city.id;
     // used for the city-limit outline: developed cells and the airport count as "inside"
     L.devAt = (x, y) => { const I = Math.floor((x - CX) / 3600), J = Math.floor((y - CY) / 3600); if (I < -M || J < -M || I >= M || J >= M) return false; return !!dev[mIdx(I, J)] || (air && I === air.I && J === air.J); };
@@ -3933,7 +4020,7 @@ function buildWorldLayout(seed) {
         }
     }
     addCountryside(L, seed);
-    for (const b of L.buildings) if (b.shop && !b.sn) b.sn = SHOP_KINDS[b.shop].name;
+    for (const b of L.buildings) if (b.shop && !b.sn) b.sn = SHOP_KINDS[b.shop].ic + ' ' + SHOP_KINDS[b.shop].name;
     L.allRoads = L.roads.concat(L.xroads);
     indexLayout(L);
     return L;
@@ -4192,15 +4279,41 @@ function furnishHouse(D, tier) {
     if (desk) { intAdd(D, { k: 'laptop', x: desk.x + desk.w / 2 - 18, y: desk.y + 8, w: 36, h: 24 }); intUse(D, desk, 'pc', desk.x + desk.w / 2, desk.y + desk.h + 60, 75); }
     intUse(D, intAdd(D, { k: 'switch', x: D.door.px + 76, y: fl.y + fl.h - 10, w: 16, h: 10 }), 'lights', D.door.px + 84, fl.y + fl.h - 60, 55);
 }
+// Bottom strip of each mall level: elevator, directory, ATM and vending everywhere, then things that fit the floor's theme.
 function furnishMall(D, b) {
-    const fl = D.floor, X0 = fl.x, Y0 = fl.y, W = fl.w, H = fl.h, doorX = D.door.px;
+    const fl = D.floor, X0 = fl.x, Y0 = fl.y, W = fl.w, H = fl.h, doorX = D.door.px, ft = D.theme.ft;
+    if (ft === 'casino') return;
     intUse(D, intAdd(D, { k: 'elevator', x: X0 + 20, y: Y0 + 880, w: 140, h: 140, solid: 1 }), 'elevator', X0 + 210, Y0 + 950, 80);
-    for (let i = 0; i < 3; i++) intUse(D, intAdd(D, { k: 'arcade', x: X0 + 250 + i * 80, y: Y0 + H - 70, w: 60, h: 56, solid: 1, col: i }), 'arcade', X0 + 280 + i * 80, Y0 + H - 120, 45);
     intUse(D, intAdd(D, { k: 'directory', x: doorX - 190, y: Y0 + H - 290, w: 56, h: 64, solid: 1 }), 'directory', doorX - 162, Y0 + H - 190, 70);
-    intUse(D, intAdd(D, { k: 'fountain', x: doorX + 300, y: Y0 + H - 250, r: 62, solid: 1 }), 'fountain', doorX + 300, Y0 + H - 150, 70);
-    intUse(D, intAdd(D, { k: 'photobooth', x: X0 + W - 170, y: Y0 + H - 170, w: 140, h: 130, solid: 1 }), 'photo', X0 + W - 230, Y0 + H - 105, 70);
     intUse(D, intAdd(D, { k: 'vending', x: X0 + W - 330, y: Y0 + H - 70, w: 64, h: 56, solid: 1 }), 'vending', X0 + W - 298, Y0 + H - 120, 50);
     intUse(D, intAdd(D, { k: 'atmi', x: X0 + W - 410, y: Y0 + H - 64, w: 50, h: 50, solid: 1 }), 'atm', X0 + W - 385, Y0 + H - 115, 50);
+    const fountain = () => intUse(D, intAdd(D, { k: 'fountain', x: doorX + 300, y: Y0 + H - 250, r: 62, solid: 1 }), 'fountain', doorX + 300, Y0 + H - 150, 70);
+    const photo = () => intUse(D, intAdd(D, { k: 'photobooth', x: X0 + W - 170, y: Y0 + H - 170, w: 140, h: 130, solid: 1 }), 'photo', X0 + W - 230, Y0 + H - 105, 70);
+    const cart = (i, shop) => { const x = X0 + 250 + i * 130, c = intAdd(D, { k: 'cart', x, y: Y0 + H - 190, w: 100, h: 48, solid: 1, shop, label: SHOP_KINDS[shop].name, ic: SHOP_KINDS[shop].ic, col: i + 2 }); D.stations.push({ id: 'cart' + i, shop, x: x + 50, y: Y0 + H - 90, r: 70 }); return c; };
+    switch (ft) {
+        case 'market': fountain(); cart(0, 'florist'); cart(1, 'candy'); intAdd(D, { k: 'floorart', x: doorX - 150, y: Y0 + 225, w: 300, h: 110, v: 0 }); break;
+        case 'fashion':
+            photo(); for (let i = 0; i < 3; i++) intAdd(D, { k: 'mannequin', x: X0 + 280 + i * 80, y: Y0 + H - 150, r: 18, solid: 1, col: i + (D.lv || 0) });
+            intAdd(D, { k: 'runway', x: doorX - 300, y: Y0 + 240, w: 600, h: 90 }); break;
+        case 'tech':
+            for (let i = 0; i < 6; i++) intUse(D, intAdd(D, { k: 'arcade', x: X0 + 240 + i * 76, y: Y0 + H - 70, w: 60, h: 56, solid: 1, col: i }), 'arcade', X0 + 270 + i * 76, Y0 + H - 120, 45);
+            intAdd(D, { k: 'ledwall', x: doorX + 30, y: Y0 + H - 34, w: 220, h: 28, solid: 1 });
+            intUse(D, intAdd(D, { k: 'vrbooth', x: X0 + W - 160, y: Y0 + H - 220, w: 120, h: 110, solid: 1 }), 'vr', X0 + W - 210, Y0 + H - 140, 60);
+            intAdd(D, { k: 'neonfloor', x: doorX - 300, y: Y0 + 240, w: 600, h: 90 }); break;
+        case 'life':
+            fountain(); intUse(D, intAdd(D, { k: 'petpen', x: X0 + 260, y: Y0 + H - 200, w: 200, h: 110, solid: 1 }), 'petpen', X0 + 360, Y0 + H - 245, 70);
+            intAdd(D, { k: 'shelf', x: X0 + W - 290, y: Y0 + H - 220, w: 200, h: 30, solid: 1 });
+            intAdd(D, { k: 'rugbig', x: doorX - 250, y: Y0 + 240, w: 500, h: 90 }); break;
+        case 'gifts':
+            photo(); fountain(); intAdd(D, { k: 'statue', x: X0 + 360, y: Y0 + H - 140, r: 34, solid: 1 });
+            intAdd(D, { k: 'floorart', x: doorX - 150, y: Y0 + 225, w: 300, h: 110, v: 1 }); break;
+        case 'food':
+            for (const tx of [280, 400, 660, 780, 900]) for (const ty of [H - 180, H - 75]) {
+                const x = X0 + tx, y = Y0 + ty; intAdd(D, { k: 'foodtable', x, y, r: 26, solid: 1, col: (tx + ty) % 5 });
+                for (let q = 0; q < 4; q++) intAdd(D, { k: 'stool', x: x + Math.cos(q * Math.PI / 2 + 0.6) * 40, y: y + Math.sin(q * Math.PI / 2 + 0.6) * 40, r: 9 });
+            }
+            break;
+    }
 }
 // Airport terminal: check-in hall (buy a boarding pass), security, departure lounge with shops, and the gate.
 function buildTerminalInterior(ap) {
@@ -4251,9 +4364,14 @@ function worldUsePrompt(client, def, s) {
         case 'vending': { const b = WL.buildingById.get(def.bid), city = b && W_CITIES.find(c => c.id === b.city); return [d, { ...base, title: 'Vending machine', lines: [def.theme.name], actions: worldShopActions(client, ['drink', 'lemonade'], city), mini: true }]; }
         case 'directory': {
             const b = WL.buildingById.get(def.bid), lines = [];
-            for (let lv = 1; lv <= def.levels; lv++) { const L2 = worldInteriorDef('mall:' + def.bid + ':' + lv); lines.push(`Level ${lv}: ` + [...new Set(L2.stations.filter(q => q.shop).map(q => SHOP_KINDS[q.shop].name))].join(', ')); }
+            for (let lv = 1; lv <= def.levels; lv++) { const L2 = worldInteriorDef('mall:' + def.bid + ':' + lv); lines.push(L2.casino ? `Level ${lv} · 🎰 Casino: roulette, blackjack, slots, cocktail bar` : `Level ${lv} · ${MALL_FLOORS[L2.theme.ft].name}: ` + [...new Set(L2.stations.filter(q => q.shop).map(q => SHOP_KINDS[q.shop].ic + ' ' + SHOP_KINDS[q.shop].name))].join(', ')); }
             return [d, { ...base, title: (b && b.nm || 'Mall') + ' directory', lines, actions: [] }];
         }
+        case 'roulette': return [d, { ...base, title: `🎡 Roulette · table ${f.n}`, lines: ['Bet on a number, red or black, odd/even, highs, lows, dozens or columns', 'A single number pays 35 to 1', `Cash ${fmtMoney(cash)} · bank ${fmtMoney(bank)}`], actions: [{ a: 'play', label: '🎡 Take a seat', on: cash + bank > 0 }] }];
+        case 'blackjack': return [d, { ...base, title: `🃏 Blackjack · table ${f.n}`, lines: ['Beat the dealer without going over 21', 'Blackjack pays 3 to 2 · dealer stands on all 17s', `Cash ${fmtMoney(cash)} · bank ${fmtMoney(bank)}`], actions: [{ a: 'play', label: '🃏 Take a seat', on: cash + bank > 0 }] }];
+        case 'slots': return [d, { ...base, title: `🎰 ${f.nm}`, lines: ['Three reels, one payline · 💎💎💎 pays 400×', `Cash ${fmtMoney(cash)} · bank ${fmtMoney(bank)}`], actions: [{ a: 'play', label: '🎰 Play', on: cash + bank > 0 }], mini: true }];
+        case 'vr': return [d, { ...base, title: 'VR Arena', lines: ['Five minutes in a virtual dogfight: +400 score, +25% speed for 60 s'], actions: [{ a: 'go', label: 'Put on the headset (15)', on: cash + bank >= 15 }], mini: true }];
+        case 'petpen': return [d, { ...base, title: 'Puppy pen', lines: ['Cuddle the puppies: +20% health'], actions: [{ a: 'go', label: 'Pet the puppies', on: true }], mini: true }];
         case 'elevator': return [d, { ...base, title: 'Glass elevator', lines: [`You are on level ${def.lv}`], actions: Array.from({ length: def.levels }, (_, i) => ({ a: 'lv' + (i + 1), label: i + 1 === def.lv ? `Level ${i + 1} (here)` : `Level ${i + 1}`, on: i + 1 !== def.lv })) }];
         case 'board': {
             const A = WL.airportByCity.get(def.ap), lines = worldFlightOptions(A).slice(0, 7).map(o => `${o.to.code}  ${o.toCity.name.padEnd(18)} ${worldTzLabel(o.toCity.tz).padEnd(6)} ~${o.mins} min · ${fmtMoney(o.fare)}`);
@@ -4275,6 +4393,109 @@ function worldUsePrompt(client, def, s) {
         return [d, { ...base, kind: 'shop', ctx: { city, items: SHOP_KINDS[kind].items }, title: (kind === 'souvenir' ? 'Duty Free' : SHOP_KINDS[kind].name) + (A ? ' · ' + A.code : ''), lines: ['Airport prices'], actions: worldShopActions(client, SHOP_KINDS[kind].items, city), pick: true }];
     }
     return null;
+}
+// ---- casino: server-authoritative roulette, blackjack and slots ------------------------------------------------------
+// Bets come out of cash first, then the bank (like any purchase). Winnings are paid into the bank, so they can't be lost on death.
+const CASINO_MAX_BET = 100000;
+const ROUL_RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
+const SLOT_W = [28, 24, 18, 14, 9, 5, 2], SLOT_3 = [6, 8, 15, 20, 40, 100, 400];     // cherry lemon bell melon star seven diamond; RTP about 95%
+function casinoSlotSym() { let r = crypto.randomInt(100); for (let i = 0; i < SLOT_W.length; i++) { if (r < SLOT_W[i]) return i; r -= SLOT_W[i]; } return 0; }
+function casinoSlotPay(l) {
+    if (l[0] === l[1] && l[1] === l[2]) return SLOT_3[l[0]];
+    const two = i => l.filter(x => x === i).length === 2;
+    return two(6) ? 25 : two(5) ? 10 : two(0) ? 2 : two(2) ? 1 : 0;
+}
+function casinoRoulMul(t, k, n) {
+    switch (t) {
+        case 'num': return k === n ? 36 : 0;
+        case 'red': return n && ROUL_RED.has(n) ? 2 : 0;
+        case 'black': return n && !ROUL_RED.has(n) ? 2 : 0;
+        case 'odd': return n && n % 2 ? 2 : 0;
+        case 'even': return n && n % 2 === 0 ? 2 : 0;
+        case 'low': return n >= 1 && n <= 18 ? 2 : 0;
+        case 'high': return n >= 19 ? 2 : 0;
+        case 'dozen': return n && Math.ceil(n / 12) === k ? 3 : 0;
+        case 'col': return n && ((n - 1) % 3) + 1 === k ? 3 : 0;
+    }
+    return 0;
+}
+function bjVal(cards) { let t = 0, a = 0; for (const c of cards) { const r = c % 13; t += r === 0 ? 11 : r >= 9 ? 10 : r + 1; if (!r) a++; } while (t > 21 && a) { t -= 10; a--; } return { t, soft: a > 0 }; }
+function bjDraw(w) {
+    if (!w.bjShoe || w.bjShoe.length < 60) { const s = []; for (let d = 0; d < 6; d++) for (let c = 0; c < 52; c++) s.push(c); for (let i = s.length - 1; i > 0; i--) { const j = crypto.randomInt(i + 1); [s[i], s[j]] = [s[j], s[i]]; } w.bjShoe = s; }
+    return w.bjShoe.pop();
+}
+function casinoStation(client, g, tid) {
+    const def = client.room && client.room.def, p = client.player; if (!def || !def.casino || !p) return null;
+    const s = def.stations.find(q => q.id === tid && q.use === g); if (!s) return null;
+    return Math.hypot(s.x - p.x, s.y - p.y) < s.r + 90 ? s : null;
+}
+function casinoBalance(client) { const w = client.world; w.bankCoins = worldBankCoins(client); return { cash: Math.floor(w.sessionCoins || 0), bank: w.bankCoins }; }
+function casinoPayout(client, amt) {
+    if (amt <= 0) return; db.prepare('UPDATE users SET coins=coins+? WHERE id=?').run(Math.round(amt), client.dbId);
+    client.world.bankCoins = worldBankCoins(client); worldPushProfile(client); worldPushState(client);
+}
+function casinoFx(client, s, g, extra) {
+    const room = client.room; if (!room) return;
+    for (const c of room.clients) sendWorld(c, 'world_casino_fx', { key: room.scene, fi: s.fi, g, name: client.player ? client.player.name : '', ...extra });
+}
+function casinoOpen(client, s) {
+    const room = client.room, f = room.def.furn[s.fi]; room.casinoHist = room.casinoHist || {};
+    if (s.use === 'blackjack' && client.world.bj && !client.world.bj.done) { client.world.bj = null; }   // walking away forfeits a hand in play
+    sendWorld(client, 'casino_open', { g: s.use, tid: s.id, name: s.use === 'slots' ? f.nm : (s.use === 'roulette' ? 'Roulette' : 'Blackjack') + ' · table ' + f.n, max: CASINO_MAX_BET, hist: room.casinoHist[s.id] || [], ...casinoBalance(client) });
+}
+function worldCasino(client, d) {
+    const w = client.world, g = String(d.g || ''), s = casinoStation(client, g, String(d.tid || '')), now = Date.now();
+    if (!s) { sendWorld(client, 'casino_res', { g, err: 'Walk back to the table to keep playing.' }); return; }
+    w.casinoT = w.casinoT || {};
+    const gap = { roulette: 2500, slots: 700, blackjack: 200 }[g] || 500;
+    if (now - (w.casinoT[g] || 0) < gap) return; w.casinoT[g] = now;
+    const room = client.room; room.casinoHist = room.casinoHist || {};
+    const takeBet = amt => { if (!(amt >= 1) || amt > CASINO_MAX_BET) { sendWorld(client, 'casino_res', { g, err: `Bets are 1 to ${fmtMoney(CASINO_MAX_BET)} coins.` }); return false; } if (!worldPayToll(client, amt)) { sendWorld(client, 'casino_res', { g, err: "You don't have that much.", ...casinoBalance(client) }); return false; } return true; };
+    if (g === 'roulette') {
+        const OK = { num: [0, 36], red: 0, black: 0, odd: 0, even: 0, low: 0, high: 0, dozen: [1, 3], col: [1, 3] };
+        const bets = (Array.isArray(d.bets) ? d.bets : []).slice(0, 60).map(b => ({ t: String(b.t), k: b.k | 0, amt: Math.floor(+b.amt || 0) })).filter(b => b.t in OK && b.amt >= 1 && (!Array.isArray(OK[b.t]) || (b.k >= OK[b.t][0] && b.k <= OK[b.t][1])));
+        const total = bets.reduce((a, b) => a + b.amt, 0); if (!bets.length) return;
+        if (!takeBet(total)) return;
+        const n = crypto.randomInt(37); let win = 0; const res = bets.map(b => { const m = casinoRoulMul(b.t, b.k, n); win += b.amt * m; return m; });
+        casinoPayout(client, win);
+        const h = room.casinoHist[s.id] = [n, ...(room.casinoHist[s.id] || [])].slice(0, 14);
+        sendWorld(client, 'casino_res', { g, n, res, win, total, hist: h, ...casinoBalance(client) });
+        casinoFx(client, s, g, { n, win, big: win >= Math.max(500, total * 8) ? 1 : 0 });
+        w.prog && client.player && client.player.addXP(Math.min(500, 5 + Math.floor(total / 20)));
+    } else if (g === 'slots') {
+        const bet = Math.floor(+d.bet || 0); if (!takeBet(bet)) return;
+        const l = [casinoSlotSym(), casinoSlotSym(), casinoSlotSym()], mul = casinoSlotPay(l), win = bet * mul;
+        casinoPayout(client, win);
+        sendWorld(client, 'casino_res', { g, l, mul, win, bet, ...casinoBalance(client) });
+        casinoFx(client, s, g, { l, win, big: mul >= 40 ? 1 : 0 });
+        client.player && client.player.addXP(Math.min(300, 2 + Math.floor(bet / 25)));
+    } else if (g === 'blackjack') {
+        const act = String(d.act || ''); let bj = w.bj;
+        const view = () => { const pv = bjVal(bj.p), dv = bjVal(bj.d); return { g, act, p: bj.p, d: bj.done ? bj.d : [bj.d[0], -1], pt: pv.t, psoft: pv.soft, dt: bj.done ? dv.t : bjVal([bj.d[0]]).t, done: bj.done ? 1 : 0, res: bj.res || '', bet: bj.bet, win: bj.win || 0, canDouble: !bj.done && bj.p.length === 2 ? 1 : 0, ...casinoBalance(client) }; };
+        const finish = () => {
+            const pv = bjVal(bj.p).t; let dv = bjVal(bj.d).t;
+            if (pv > 21) bj.res = 'bust';
+            else { while (dv < 17) { bj.d.push(bjDraw(w)); dv = bjVal(bj.d).t; } bj.res = dv > 21 ? 'dbust' : pv > dv ? 'win' : pv < dv ? 'lose' : 'push'; }
+            bj.win = bj.res === 'win' || bj.res === 'dbust' ? bj.bet * 2 : bj.res === 'push' ? bj.bet : 0; bj.done = true;
+            casinoPayout(client, bj.win);
+            casinoFx(client, s, g, { win: bj.win, res: bj.res, big: bj.win >= Math.max(1000, bj.bet * 2) && bj.bet >= 500 ? 1 : 0 });
+        };
+        if (act === 'deal') {
+            if (bj && !bj.done) return;
+            const bet = Math.floor(+d.bet || 0); if (!takeBet(bet)) return;
+            bj = w.bj = { bet, p: [bjDraw(w)], d: [bjDraw(w)], done: false, tid: s.id }; bj.p.push(bjDraw(w)); bj.d.push(bjDraw(w));
+            const pb = bjVal(bj.p).t === 21, db = bjVal(bj.d).t === 21;
+            if (pb || db) { bj.done = true; bj.res = pb && db ? 'push' : pb ? 'bj' : 'dbj'; bj.win = bj.res === 'push' ? bet : bj.res === 'bj' ? Math.floor(bet * 2.5) : 0; casinoPayout(client, bj.win); casinoFx(client, s, g, { win: bj.win, res: bj.res, big: bj.res === 'bj' && bet >= 200 ? 1 : 0 }); }
+            client.player && client.player.addXP(Math.min(300, 3 + Math.floor(bet / 25)));
+        } else {
+            if (!bj || bj.done || bj.tid !== s.id) return;
+            if (act === 'hit') { bj.p.push(bjDraw(w)); const t = bjVal(bj.p).t; if (t >= 21) finish(); }
+            else if (act === 'stand') finish();
+            else if (act === 'double') { if (bj.p.length !== 2) return; if (!takeBet(bj.bet)) return; bj.bet *= 2; bj.p.push(bjDraw(w)); finish(); }
+            else return;
+        }
+        sendWorld(client, 'casino_res', view());
+    }
 }
 function worldTicketValid(w, A) { return w.ticket && w.ticket.until > Date.now() && (!A || w.ticket.from === A.city); }
 function worldUse(client, s, a) {
@@ -4302,6 +4523,9 @@ function worldUse(client, s, a) {
         case 'vending': if (a.startsWith('buy:')) { const b = WL.buildingById.get(def.bid); worldBuyItem(client, a.slice(4), b && W_CITIES.find(c => c.id === b.city)); } break;
         case 'elevator': { const lv = Number(a.slice(2)); if (lv >= 1 && lv <= def.levels && lv !== def.lv) { const key = 'mall:' + def.bid + ':' + lv, nd = worldInteriorDef(key), st = nd.stations.find(q => q.use === 'elevator'); worldGoto(client, key, st.x, st.y); } break; }
         case 'tickets': if (a.startsWith('tix:')) worldBuyTicket(client, WL.airportByCity.get(def.ap), a.slice(4)); break;
+        case 'roulette': case 'blackjack': case 'slots': casinoOpen(client, s); break;
+        case 'vr': if (cd('vr', 20000) && worldPayToll(client, 15)) { p.addXP(400); p.worldSpeedUntil = Math.max(now, p.worldSpeedUntil || 0) + 60000; worldNotice(client, '🥽 You shot down five drones in VR: +400 score, +25% speed for 60 s.', { level: 'good' }); } break;
+        case 'petpen': if (cd('petpen', 45000)) { p.hp = Math.min(max, p.hp + max * 0.2); worldNotice(client, '🐶 The puppies love you: +20% health.', { level: 'good' }); } break;
         case 'gate': if (a === 'board') worldBoardWithTicket(client, WL.airportByCity.get(def.ap)); break;
         default: if (s.use.startsWith('shop:') && a.startsWith('buy:')) worldBuyItem(client, a.slice(4), W_CITIES.find(c => c.id === def.ap) || null);
     }
@@ -4619,6 +4843,7 @@ function worldApplyProgress(ent, prog) {
 function worldSnapshot(client) {
     const w = client.world, p = client.player; if (!w || !p || w.dead) return;   // a dead tank must not overwrite the reset progress
     w.prog = { score: p.score, level: p.level, statPoints: p.statPoints, stats: [...p.stats], tankType: p.tankType };
+    const { maxHealth, ...pu } = p.powerups || {}; w.buff = { su: p.worldSpeedUntil || 0, pu };
 }
 function worldSave(client) {
     const w = client.world; if (!client.dbId || !w) return;
@@ -4660,9 +4885,12 @@ function worldPushState(client) {
 function worldInteriorDef(scene) {
     let d = interiorDefs.get(scene); if (d) return d;
     const [kind, key, lvs] = scene.split(':');
-    if (kind === 'work') { const b = WL.buildingById.get(Number(key)); const co = W_COMPANIES.find(c => c.id === (b && worldWorkOf(b))) || W_COMPANIES[0]; d = buildOfficeInterior(co); d.coId = co.id; d.bid = b ? b.id : 0; }
+    if (kind === 'work') {
+        const b = WL.buildingById.get(Number(key)); const co = W_COMPANIES.find(c => c.id === (b && worldWorkOf(b))) || W_COMPANIES[0]; d = buildOfficeInterior(co); d.coId = co.id; d.bid = b ? b.id : 0;
+        if (b && (b.f || 0) > 3) { const fl = 2 + (b.id * 7) % Math.max(1, b.f - 2); d.theme.name += ' · Floor ' + fl; d.theme.alt = +Math.min(3.6, 1 + fl * 0.03).toFixed(2); }
+    }
     else if (kind === 'mall') { const b = WL.buildingById.get(Number(key)); d = buildMallInterior(b || { id: 0, lv: 3 }, Math.max(1, Math.min(b?.lv || 3, Number(lvs) || 1))); furnishMall(d, b); }
-    else if (kind === 'stay') { const b = WL.buildingById.get(Number(key)); const tier = b?.k === 'hotel' ? 2 : b?.k === 'inn' ? 1 : 0; d = buildHouseInterior(tier); furnishHouse(d, tier); d.bid = b ? b.id : 0; d.stay = 1; d.theme.name = b?.nm || 'Room'; }
+    else if (kind === 'stay') { const b = WL.buildingById.get(Number(key)); const tier = b?.k === 'hotel' ? 2 : b?.k === 'inn' ? 1 : 0; d = buildHouseInterior(tier); furnishHouse(d, tier); d.bid = b ? b.id : 0; d.stay = 1; d.theme.name = b?.nm || 'Room'; if (b && b.k === 'hotel') { const fl = 3 + (b.id * 5) % Math.max(1, (b.f || 10) - 3); d.theme.name += ' · Room ' + fl + String(b.id % 40 + 1).padStart(2, '0'); d.theme.alt = +Math.min(3, 1 + fl * 0.05).toFixed(2); } }
     else if (kind === 'term') { const ap = WL.airportByCity.get(key) || WL.airports[0]; d = buildTerminalInterior(ap); d.bid = ap.term.id; }
     else { const h = WL.houseById.get(key); const tier = h ? h.tier : 0; d = buildHouseInterior(tier); furnishHouse(d, tier); d.hid = key; }
     d.colliders = interiorColliders(d);
@@ -4695,6 +4923,7 @@ function worldGoto(client, scene, x, y) {
     const ent = new Entity(room, x, y, 'tank', user?.username || 'Player', 0, true, client.ws);
     ent.nameColor = user?.selected_color || '#ffffff';
     worldApplyProgress(ent, w.prog);
+    if (w.buff && !w.dead) { ent.worldSpeedUntil = w.buff.su; Object.assign(ent.powerups, w.buff.pu); }
     if (scene === 'ext' && WL) { const pos = { x, y }; layoutPushOut(WL, pos, ent.radius); ent.x = pos.x; ent.y = pos.y; }
     room.entities.push(ent); room.clients.push(client);
     client.room = room; client.player = ent; client.spectatingId = null;
@@ -4704,7 +4933,18 @@ function worldGoto(client, scene, x, y) {
     wsSendObj(client.ws, ({ type: 'init', id: ent.id, team: 0, nc: ent.nameColor, name1: ent.name }));
     w.bankCoins = worldBankCoins(client);
     worldPushState(client);
-    if (scene === 'ext') worldStreamChunks(client, true);
+    if (scene === 'ext') worldStreamChunks(client, true); else worldStreamView(client, room.def);
+}
+// Interiors look out over the real city, so the chunks round the building are sent while you're inside.
+function worldStreamView(client, def) {
+    const w = client.world; if (!w || !def || !WL) return;
+    const b = def.hid ? WL.houseById.get(def.hid) : def.bid ? WL.buildingById.get(def.bid) : null; if (!b) return;
+    const cx = clamp(Math.floor((b.x + b.w / 2) / W_CHUNK), 0, W_NCH - 1), cy = clamp(Math.floor((b.y + b.h / 2) / W_CHUNK), 0, W_NCH - 1), R = (def.theme && def.theme.alt > 1.6) ? 2 : 1;
+    for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) {
+        const x = cx + dx, y = cy + dy; if (x < 0 || y < 0 || x >= W_NCH || y >= W_NCH) continue;
+        const key = x + y * W_NCH; if (w.sentChunks.has(key)) continue; w.sentChunks.add(key);
+        if (client.ws.readyState === WebSocket.OPEN) client.ws.send(layoutChunkBin(WL, x, y));
+    }
 }
 function worldGotoExterior(client, x, y) { worldGoto(client, 'ext', x, y); }
 // Standing point just outside a building door.
@@ -4717,8 +4957,8 @@ function worldHomeSpawn(uid) {
 }
 function worldSpawnNewlyOrAfterDeath(client) {
     const home = worldHomeSpawn(client.dbId), w = client.world;
-    if (home) worldGoto(client, home.scene, home.def.spawn.x, home.def.spawn.y);
-    else if (w && worldStayValid(w)) { const def = worldInteriorDef('stay:' + w.stay.bid); worldGoto(client, 'stay:' + w.stay.bid, def.spawn.x, def.spawn.y); }
+    if (w && worldStayValid(w)) { const def = worldInteriorDef('stay:' + w.stay.bid); worldGoto(client, 'stay:' + w.stay.bid, def.spawn.x, def.spawn.y); }   // a booked room beats home
+    else if (home) worldGoto(client, home.scene, home.def.spawn.x, home.def.spawn.y);
     else worldGoto(client, 'ext', WL.spawn.x + (Math.random() - 0.5) * 60, WL.spawn.y);
 }
 
@@ -5235,12 +5475,13 @@ function worldFarmHarvest(owner, e) {
 
 // ---- shops, stalls, attractions ---------------------------------------------------------------------------------
 function worldItemPrice(it, city) { return Math.max(1, Math.round(it.price * (city ? city.priceMul : 1))); }
+const WORLD_PU_NAMES = { fov: '🔭 wider view', forceField: '🛡 shield', reload: '⚡ faster reload', damage: '💥 +50% damage', healthRegen: '❤ health regen', bulletSpeed: '🎯 faster shots', movementSpeed: '+50% speed' };
 function worldShopActions(client, items, city) {
     const w = client.world, money = Math.floor(w.sessionCoins || 0) + (w.bankCoins || 0);
     return items.map(id => {
         const it = WORLD_ITEMS[id], price = worldItemPrice(it, city);
         if (it.souvenir) { const have = city && w.souv.has(city.id); return { a: 'buy:' + id, label: have ? `${city ? city.name : ''} souvenir (collected)` : `🎁 ${city ? city.name : ''} souvenir · ${price}`, on: !!city && !have && money >= price }; }
-        return { a: 'buy:' + id, label: `${it.name} · ${price}`, on: money >= price };
+        return { a: 'buy:' + id, label: `${it.ic ? it.ic + ' ' : ''}${it.name} · ${price}`, on: money >= price };
     });
 }
 function worldBuyItem(client, id, city) {
@@ -5254,6 +5495,7 @@ function worldBuyItem(client, id, city) {
     if (it.speed) { p.worldSpeedUntil = Math.max(Date.now(), p.worldSpeedUntil || 0) + it.speed * 1000; msg.push(`+25% speed for ${it.speed}s`); }
     if (it.fuel) { w.fuel = Math.min(100, (w.fuel ?? 100) + it.fuel); msg.push(`+${it.fuel} L in your car (${Math.round(w.fuel)}%)`); }
     if (it.xp) { p.addXP(it.xp); msg.push(`+${it.xp} score`); }
+    if (it.pu) { const [t, secs] = it.pu; p.powerups[t] = Math.max(Date.now(), p.powerups[t] || 0) + secs * 1000; msg.push(`${WORLD_PU_NAMES[t] || t} for ${secs >= 120 ? Math.round(secs / 60) + ' min' : secs + 's'}`); }
     if (it.souvenir) {
         w.souv.add(city.id); msg.push(`souvenir ${w.souv.size}/${W_CITIES.length}`);
         if (w.souv.size === W_CITIES.length && !w.souvDone) { w.souvDone = true; db.prepare('UPDATE users SET coins=coins+? WHERE id=?').run(2500, client.dbId); worldPushProfile(client); worldNotice(client, '🏆 World traveller! You collected a souvenir from every city: +2,500 coins in the bank.', { level: 'good' }); }
@@ -5279,7 +5521,7 @@ function worldBookStay(client, b) {
     const w = client.world, price = worldStayPrice(b);
     if (!worldPayToll(client, price)) { worldNotice(client, `A room costs ${price} coins.`, { level: 'bad' }); return; }
     w.stay = { bid: b.id, until: Date.now() + STAY_MS };
-    worldNotice(client, `Room booked at ${b.nm || 'the ' + b.k} for 30 minutes. If you die you'll wake up here (unless you own a house).`, { level: 'good' });
+    worldNotice(client, `Room booked at ${b.nm || 'the ' + b.k} for 30 minutes. Until it runs out you'll wake up here when you log in or respawn, even if you own a house.`, { level: 'good' });
     worldSave(client); worldPushState(client);
     const def = worldInteriorDef('stay:' + b.id); worldGoto(client, 'stay:' + b.id, def.spawn.x, def.spawn.y);
 }
@@ -5381,23 +5623,45 @@ function worldPushTaxi(client) {
 function worldTaxiRemaining(r) { let d = 0, q = [r.x, r.y]; for (let i = r.i + 1; i < r.pts.length; i++) { d += Math.hypot(r.pts[i][0] - q[0], r.pts[i][1] - q[1]); q = r.pts[i]; } return d; }
 
 // ---- interiors: multi-level malls ------------------------------------------------------------------------------
-const MALL_SHOPS = ['grocery', 'cafe', 'souvenir', 'noodle', 'bakery', 'cafe'];
+// Every level of a mall has a theme: market hall at the entrance, a food court near the top, and in between fashion,
+// tech & play, home & lifestyle or gifts. Six-level malls put a casino on the top floor.
+const MALL_FLOORS = {
+    market:  { name: 'Market Hall',       floor: 'market', shops: ['grocery', 'bakery', 'pharmacy', 'deli', 'icecream', 'donut', 'souvenir', 'hardware'] },
+    fashion: { name: 'Fashion Avenue',    floor: 'marble', shops: ['fashion', 'jewelry', 'perfume', 'sports', 'fashion', 'jewelry', 'cafe'] },
+    tech:    { name: 'Tech & Play',       floor: 'tech',   shops: ['electronics', 'games', 'toys', 'music', 'electronics', 'cinema', 'bubbletea'] },
+    life:    { name: 'Home & Lifestyle',  floor: 'wood',   shops: ['books', 'pets', 'florist', 'music', 'cafe', 'perfume', 'toys'] },
+    gifts:   { name: 'Gifts & Souvenirs', floor: 'marble', shops: ['souvenir', 'souvenir', 'candy', 'florist', 'books', 'jewelry', 'cafe'] },
+    food:    { name: 'Food Court',        floor: 'food',   shops: ['noodle', 'sushi', 'pizza', 'burger', 'bubbletea', 'tacos', 'icecream', 'cafe'] },
+    casino:  { name: 'Casino',            floor: 'casino', shops: [] }
+};
+const CASINO_NAMES = ['The Golden Ace', 'Lucky Neon', 'Velvet Jackpot', 'Diamond Dunes', 'Royal Flush Club', 'High Roller Lounge'];
+function mallFloorTheme(b, lv) {
+    const n = b.lv || 3;
+    if (lv === 1) return 'market';
+    if (n >= 6 && lv === n) return 'casino';
+    if (lv === (n >= 6 ? n - 1 : n)) return 'food';
+    const mids = ['fashion', 'tech', 'life', 'gifts'];
+    return mids[(lv - 2 + (b.id || 0)) % mids.length];
+}
 function buildMallInterior(b, lv) {
-    const X0 = 200, Y0 = 200, W = 1400, H = 1100, fl = { x: X0, y: Y0, w: W, h: H }, doorX = X0 + W / 2, levels = b.lv || 3;
+    const X0 = 200, Y0 = 200, W = 1400, H = 1100, fl = { x: X0, y: Y0, w: W, h: H }, doorX = X0 + W / 2, levels = b.lv || 3, ft = mallFloorTheme(b, lv), FT = MALL_FLOORS[ft];
     const D = {
-        kind: 'mall', ext: INT_EXT, floor: fl, theme: { accent: b.neon ? '#ff2bd6' : '#c9a227', name: (b.nm || 'Mall') + ' · Level ' + lv, neon: b.neon ? 1 : 0 },
+        kind: 'mall', ext: INT_EXT, floor: fl,
+        theme: { accent: ft === 'casino' ? '#d4a017' : b.neon ? '#ff2bd6' : '#c9a227', name: (b.nm || 'Mall') + ' · Level ' + lv + ' · ' + (ft === 'casino' ? '🎰 ' + CASINO_NAMES[(b.id || 0) % CASINO_NAMES.length] : FT.name), neon: b.neon ? 1 : 0, ft, floor: FT.floor, alt: +(1 + 0.45 * (lv - 1)).toFixed(2) },
         walls: intWallsAround(fl, doorX, lv === 1 ? 160 : 0), furn: [], stations: [], rooms: [{ x: X0, y: Y0, w: W, h: H, c: 'mall' }],
         door: { x: doorX - 80, y: Y0 + H, w: lv === 1 ? 160 : 0, h: INT_WALL, px: doorX, py: Y0 + H - 36, r: lv === 1 ? 120 : 0 },
         spawn: { x: doorX, y: Y0 + H - 110 }, lv, levels, bid: b.id
     };
+    if (ft === 'casino') { buildCasinoFloor(D, b); return D; }
     const f = D.furn, cx = X0 + W / 2, cy = Y0 + H / 2 - 40;
     f.push({ k: 'atrium', x: cx - 220, y: cy - 150, w: 440, h: 300, solid: 1 });
-    const rng = wRng((b.id * 31 + lv * 7) >>> 0);
+    const rng = wRng((b.id * 31 + lv * 7) >>> 0), pool = FT.shops.slice();
+    for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
     // shop units round the walls: 3 along the top, 2 on each side
     const units = [[X0 + 60, Y0 + 20], [X0 + W / 2 - 150, Y0 + 20], [X0 + W - 360, Y0 + 20], [X0 + 20, Y0 + 300], [X0 + W - 320, Y0 + 300], [X0 + 20, Y0 + 640], [X0 + W - 320, Y0 + 640]];
     units.forEach(([x, y], i) => {
-        const kind = i === 0 && lv === levels ? 'cafe' : MALL_SHOPS[Math.floor(rng() * MALL_SHOPS.length)], top = y === Y0 + 20, w = top ? 300 : 300, h = top ? 130 : 200;
-        f.push({ k: 'kiosk', x, y, w, h, solid: 1, shop: kind, label: SHOP_KINDS[kind].name, col: Math.floor(rng() * 6) });
+        const kind = pool[i % pool.length], top = y === Y0 + 20, w = 300, h = top ? 130 : 200, sk = SHOP_KINDS[kind];
+        f.push({ k: 'kiosk', x, y, w, h, solid: 1, shop: kind, label: sk.name, ic: sk.ic, col: Math.floor(rng() * 6) });
         D.stations.push({ id: 'shop' + i, shop: kind, x: top ? x + w / 2 : (x < cx ? x + w + 40 : x - 40), y: top ? y + h + 40 : y + h / 2, r: 95 });
     });
     if (lv < levels) { f.push({ k: 'escalator', x: cx - 330, y: cy - 60, w: 90, h: 200, dir: 1 }); D.stations.push({ id: 'up', x: cx - 285, y: cy + 160, r: 90 }); }
@@ -5405,6 +5669,38 @@ function buildMallInterior(b, lv) {
     for (const x of [cx - 130, cx + 10]) f.push({ k: 'sofa', x, y: cy + 152, w: 120, h: 40, solid: 1 });   // against the atrium railing, out of the walkways
     for (const [x, y] of [[cx - 250, cy - 200], [cx + 250, cy - 200], [cx - 250, cy + 200], [cx + 250, cy + 200]]) f.push({ k: 'plant', x, y, r: 20, solid: 1 });
     return D;
+}
+// The casino: slot banks on the north wall and by the lifts, blackjack to the west, roulette to the east,
+// a round cocktail bar where the atrium would be and a lounge stage. Regulars sit at a few machines and tables.
+function buildCasinoFloor(D, b) {
+    const fl = D.floor, X0 = fl.x, Y0 = fl.y, W = fl.w, H = fl.h, cx = X0 + W / 2, cy = Y0 + H / 2 - 40, f = D.furn;
+    D.casino = 1; D.spawn = { x: X0 + 210, y: Y0 + 950 };
+    f.push({ k: 'escalator', x: cx + 240, y: cy - 60, w: 90, h: 200, dir: -1 }); D.stations.push({ id: 'down', x: cx + 285, y: cy + 160, r: 90 });
+    intUse(D, intAdd(D, { k: 'elevator', x: X0 + 20, y: Y0 + 880, w: 140, h: 140, solid: 1 }), 'elevator', X0 + 210, Y0 + 950, 80);
+    intUse(D, intAdd(D, { k: 'atmi', x: X0 + W - 410, y: Y0 + H - 64, w: 50, h: 50, solid: 1 }), 'atm', X0 + W - 385, Y0 + H - 115, 50);
+    const SN = ['Lucky 7s', 'Diamond Rush', 'Neon Nights', 'Fruit Fiesta', 'Golden Bell', 'Star Burst'];
+    for (let i = 0; i < 12; i++) {
+        const x = X0 + 40 + i * 108, m = intAdd(D, { k: 'slot', x, y: Y0 + 12, w: 64, h: 66, solid: 1, col: i % 6, nm: SN[i % 6] });
+        if (i === 2 || i === 5 || i === 9) f.push({ k: 'patron', x: x + 32, y: Y0 + 112, r: 15, solid: 1, col: i, sit: 'slot' });
+        else intUse(D, m, 'slots', x + 32, Y0 + 128, 50);
+    }
+    for (let i = 0; i < 3; i++) { const x = X0 + 250 + i * 80, m = intAdd(D, { k: 'slot', x, y: Y0 + H - 78, w: 64, h: 66, solid: 1, col: (i + 3) % 6, nm: SN[(i + 3) % 6], flip: 1 }); intUse(D, m, 'slots', x + 32, Y0 + H - 128, 46); }
+    [Y0 + 220, Y0 + 560].forEach((y, i) => {
+        const t = intAdd(D, { k: 'bjtable', x: X0 + 40, y, w: 250, h: 160, solid: 1, n: i + 1 });
+        intUse(D, t, 'blackjack', X0 + 340, y + 80, 80);
+        f.push({ k: 'patron', x: X0 + 312, y: y + 18, r: 14, solid: 1, col: 7 + i, sit: 'bj' });
+    });
+    [Y0 + 200, Y0 + 680].forEach((y, i) => {
+        const t = intAdd(D, { k: 'roulette', x: X0 + W - 330, y, w: 300, h: 170, solid: 1, n: i + 1 });
+        intUse(D, t, 'roulette', X0 + W - 380, y + 85, 80);
+        f.push({ k: 'patron', x: X0 + W - 180, y: y + 192, r: 14, solid: 1, col: 9 + i, sit: 'roulette' });
+    });
+    intAdd(D, { k: 'casinobar', x: cx, y: cy - 20, r: 120, solid: 1 });
+    D.stations.push({ id: 'bar', shop: 'bar', x: cx, y: cy + 165, r: 80 });
+    for (const a of [-2.4, -0.75]) f.push({ k: 'patron', x: cx + Math.cos(a) * 150, y: cy - 20 + Math.sin(a) * 150, r: 14, solid: 1, col: Math.round(a * 10) & 15, sit: 'bar' });
+    intAdd(D, { k: 'stage', x: cx - 180, y: Y0 + H - 130, w: 360, h: 118, solid: 1 });
+    for (const [x, y] of [[X0 + 40, Y0 + 830], [X0 + W - 40, Y0 + 830]]) f.push({ k: 'plant', x, y, r: 20, solid: 1 });
+    D.theme.chand = [[cx - 330, Y0 + 420], [cx + 330, Y0 + 420], [cx - 330, Y0 + 840], [cx + 330, Y0 + 840], [cx, Y0 + 160]];
 }
 
 // ---- join / leave / message router ---------------------------------------------------------
@@ -5434,8 +5730,9 @@ function worldJoin(client) {
     if (client.world.job) client.world.jobLast = Math.max(client.world.jobLast, client.world.playMs - (worldFireMs(worldEmployer(client.world)) - 2 * 60 * 1000));
     worldClients.add(client);
     worldSendStatic(client);
-    const home = worldHomeSpawn(client.dbId);
-    if (home) worldGoto(client, home.scene, home.def.spawn.x, home.def.spawn.y);
+    const home = worldHomeSpawn(client.dbId), w0 = client.world;
+    if (worldStayValid(w0)) { const def = worldInteriorDef('stay:' + w0.stay.bid); worldGoto(client, 'stay:' + w0.stay.bid, def.spawn.x, def.spawn.y); }   // a booked room beats home
+    else if (home) worldGoto(client, home.scene, home.def.spawn.x, home.def.spawn.y);
     else if (saved) worldGoto(client, 'ext', client.world.ext.x, client.world.ext.y);
     else worldGoto(client, 'ext', WL.spawn.x + (Math.random() - 0.5) * 60, WL.spawn.y);
     worldRoom.worldKind = 'exterior';
@@ -5454,6 +5751,7 @@ function worldHandle(client, d) {
     else if (d.type === 'world_leave') { worldOnDisconnect(client); }
     else if (d.type === 'world_nav') worldNav(client, String(d.t), d);
     else if (d.type === 'world_inflight') worldInflightOrder(client, String(d.item || ''));
+    else if (d.type === 'world_casino') worldCasino(client, d);
     else if (d.type === 'world_gig') { if (d.act === 'cancel') { if (w.mission) { w.mission = null; worldNotice(client, 'Job cancelled.'); worldPushMission(client); } } else worldStartGig(client); }
     else if (d.type === 'world_taxi') { if (d.act === 'cancel') { if (client.player?.taxiRide) worldEndTaxi(client, false); else { taxiRides.delete(client); worldPushTaxi(client); } } else worldHailTaxi(client, worldResolveTarget(client, String(d.t || 'pin'), d)); }
     else if (d.type === 'world_map' && WL) sendWorld(client, 'world_map', { p: worldMapPlaces() });
@@ -5580,7 +5878,7 @@ function worldNav(client, t, d = {}) {
 }
 function worldOnPlayerDeath(owner, e) {
     const w = owner.world; if (!w || w.dead) return;
-    w.dead = true; w.task = null; w.sessionCoins = 0;
+    w.dead = true; w.task = null; w.sessionCoins = 0; w.buff = null;
     if (e.vehicle) { e.vehicle = null; e.ghost = false; const pc = parkedCars.get(owner.dbId); if (pc) pc.driven = false; }
     // Progress resets on death (permanent stat upgrades are kept, as before); unbanked cash is lost.
     w.prog = { score: 0, level: 1, statPoints: 0, stats: [...e.stats], tankType: 'Basic' };
