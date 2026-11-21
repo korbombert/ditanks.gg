@@ -62,9 +62,9 @@ const DTB = (() => {
 })();
 function wsSendObj(obj) { if (ws && ws.readyState === 1) ws.send(DTB.encode(obj)); }
 
-const canvas = document.getElementById('gameCanvas');
+let canvas = document.getElementById('gameCanvas');            // let: the window view renders the city into an offscreen canvas
 
-const ctx = canvas.getContext('2d');
+let ctx = canvas.getContext('2d');
 
 const mCanvas = document.getElementById('minimapCanvas');
 
@@ -2114,6 +2114,7 @@ function wcExtent() { return WC.scene === 'ext' ? WC.extent : (WC.interior?.ext 
 // Shift the interpolated position (and the camera, for our own plane) by the same amount so nothing sweeps across the map.
 function wcWrapFix(rPos, en) {
     if (!isWorldMode || !WC.circ || en.x == null || rPos.renderX == null) return;
+    if (wcPoleFix(rPos, en)) return;
     const d = en.x - rPos.renderX;
     if (Math.abs(d) > WC.circ / 2) { const sh = Math.sign(d) * WC.circ; rPos.renderX += sh; if (en.id === myId) { camera.x += sh; } }
 }
@@ -2133,7 +2134,7 @@ function handleWorldMessage(d) {
     switch (d.type) {
         case 'world_static':
             WC.inflight = d.inflight || {};
-            Object.assign(WC, { center: d.center, centerY: d.centerY, extent: d.extent, extentY: d.extentY, circ: d.circ, gap: d.gap, land: d.land, airports: d.airports || [], chunk: d.chunk, nch: d.nch, roads: d.roads, cities: d.cities, cars: d.cars, carColors: d.carColors, companies: d.companies, spawn: d.spawn, bank: d.bank, dealer: d.dealer, fireMs: d.fireMs, taskMs: d.taskMs });
+            Object.assign(WC, { poleN: d.poleN, poleS: d.poleS, cultures: d.cultures, air: d.air, dayMs: d.dayMs, center: d.center, centerY: d.centerY, extent: d.extent, extentY: d.extentY, circ: d.circ, gap: d.gap, land: d.land, airports: d.airports || [], chunk: d.chunk, nch: d.nch, roads: d.roads, cities: d.cities, cars: d.cars, carColors: d.carColors, companies: d.companies, spawn: d.spawn, bank: d.bank, dealer: d.dealer, fireMs: d.fireMs, taskMs: d.taskMs }); WC.cityById = new Map((d.cities || []).map(c => [c.id, c])); WC._aiPaths = new Map(); WC._dep = null; phEl();
             wcBuildGates();
             beginWorldMode(); if (!wcMapEl) wcMapBuild(); return true;
         case 'world_houses': WC.houses = new Map(d.list.map(([h, o, m]) => [h, { o, m }])); return true;
@@ -2148,13 +2149,15 @@ function handleWorldMessage(d) {
         case 'world_state': worldState = { ...worldState, ...d }; updateWorldHud(); return true;
         case 'world_notice':
             if (d.sessionCoins !== undefined) worldState.sessionCoins = d.sessionCoins;
-            if (d.message) wcToast(d.message, d.level); updateWorldHud(); return true;
+            if (d.message) { wcToast(d.message, d.level); PH.inbox.push({ text: d.message, level: d.level, t: Date.now() }); if (PH.inbox.length > 80) PH.inbox.shift(); }
+            updateWorldHud(); return true;
         case 'world_map': WC.mapPlaces = d.p; wcMapDraw(); return true;
         case 'world_nav': WC.nav = d.tgt ? { t: d.t, ...d.tgt, route: d.route } : null; if (!d.tgt) wcToast({ work: 'No workplace found.', home: 'You do not own a house yet.', car: 'Your car is not parked anywhere.', pin: 'Cannot route there.' }[d.t] || 'No destination.', 'bad'); return true;
         case 'world_death': wcToast(d.reason || 'You died.', 'bad'); return true;
         case 'world_flight': wcFlight = d.f; wcRenderFlight(); wcIfeRender(); return true;
         case 'world_furn': if (d.key === WC.intKey) WC.fstate = d.s || {}; return true;
         case 'casino_open': casOpen(d); return true;
+        case 'phone': phOnMsg(d); return true;
         case 'casino_res': casOnRes(d); return true;
         case 'world_casino_fx': wcCasinoFxMsg(d); return true;
         case 'world_branches': WC.branch = new Map(d.list); for (const b of WC.allBld.values()) wcApplyBranch(b); return true;
@@ -2177,7 +2180,8 @@ function wcIngestChunk(c) {
     WC.chunks.set(c.cx + c.cy * WC.nch, c);
     if (WC.scene === 'ext' && WC.chunks.size > 260) {                         // drop chunks far behind (the server forgets them first and re-sends on return)
         const kx = Math.floor((camera.x + canvas.width * fov / 2) / WC.chunk), ky = Math.floor((camera.y + canvas.height * fov / 2) / WC.chunk);
-        for (const [k, ch] of WC.chunks) if (Math.max(Math.abs(ch.cx - kx), Math.abs(ch.cy - ky)) > 10) { WC.chunks.delete(k); for (const b of ch.buildings) WC.allBld.delete(b.id); }
+        const NX = Math.round(WC.circ / WC.chunk);
+        for (const [k, ch] of WC.chunks) { const ddx = ((ch.cx - kx) % NX + NX) % NX; if (Math.max(Math.min(ddx, NX - ddx), Math.abs(ch.cy - ky)) > 10) { WC.chunks.delete(k); for (const b of ch.buildings) WC.allBld.delete(b.id); } }
     }
     for (const b of c.buildings) { if (!WC.allBld.has(b.id)) WC.allBld.set(b.id, b); if (WC.branch.size) wcApplyBranch(b); }
 }
@@ -2292,6 +2296,7 @@ function wcTexPattern(name) { const t = wcTex[name]; if (!t.pat) t.pat = ctx.cre
 // fill a world rect with a pattern that stays pinned to the world (does not slide while the camera moves)
 function wcFillTex(name, x, y, w, h, worldTile = 96) {
     const t = wcTexPattern(name), s = 1 / fov, k = s * worldTile / t.size;
+    if (s < 0.42) { ctx.fillStyle = t.avg || (t.avg = wcTexAvg(t)); ctx.fillRect(worldToScreenX(x), worldToScreenY(y), w * s, h * s); return; }
     const per = worldTile;                                // pattern period in world units: keep the offset small for float precision far from the origin
     if (t.pat.setTransform) t.pat.setTransform(new DOMMatrix([k, 0, 0, k, -(((camera.x % per) + per) % per) * s, -(((camera.y % per) + per) % per) * s]));
     ctx.fillStyle = t.pat; ctx.fillRect(worldToScreenX(x), worldToScreenY(y), w * s, h * s);
@@ -2376,8 +2381,15 @@ function wcBanner(g, text, cx, cy, maxW, h, color, txt = '#fff') {
     g.fillStyle = color; wcRR(g, cx - tw / 2, cy - h / 2, tw, h, 5); g.fill();
     g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 1.4; wcRR(g, cx - tw / 2 + 2, cy - h / 2 + 2, tw - 4, h - 4, 4); g.stroke();
     g.fillStyle = txt; g.textAlign = 'center'; g.textBaseline = 'middle';
-    let fs = h * 0.62; while (fs > 6 && g.measureText(text).width > tw - 8) { fs -= 1; g.font = `bold ${fs}px Ubuntu, Arial`; }
-    g.fillText(text, cx, cy + 1); g.restore();
+    const cu = WC._bcult, face = cu === 'west' ? 'Georgia, serif' : cu === 'sun' ? 'Palatino, Georgia, serif' : 'Ubuntu, Arial';
+    if (cu === 'west') { g.strokeStyle = 'rgba(60,35,15,.45)'; g.lineWidth = 1; for (let q = 1; q < 3; q++) { g.beginPath(); g.moveTo(cx - tw / 2 + 3, cy - h / 2 + q * h / 3); g.lineTo(cx + tw / 2 - 3, cy - h / 2 + q * h / 3); g.stroke(); } g.fillStyle = '#d9c9a0'; for (const sx of [-1, 1]) { g.beginPath(); g.arc(cx + sx * (tw / 2 - 5), cy, 1.6, 0, 7); g.fill(); } g.fillStyle = txt; }
+    if (cu === 'sun') { g.fillStyle = '#2b5fae'; for (let q = 0; q < tw - 6; q += 8) { g.fillRect(cx - tw / 2 + 3 + q, cy - h / 2 + 1, 4, 2); g.fillRect(cx - tw / 2 + 3 + q, cy + h / 2 - 3, 4, 2); } g.fillStyle = txt; }
+    g.font = `bold ${h * 0.62}px ${face}`;
+    let fs = h * 0.62; while (fs > 6 && g.measureText(text).width > tw - 8) { fs -= 1; g.font = `bold ${fs}px ${face}`; }
+    g.fillText(text, cx, cy + 1);
+    if (cu === 'isles') { g.fillStyle = 'rgba(0,0,0,.35)'; wcRR(g, cx - tw / 2, cy - h * 1.55, tw, h * 0.75, 4); g.fill(); wcGlyphs(g, text, cx, cy - h * 1.17, h * 0.42, '#fff6d8'); }          // the same sign in Kaimanan above
+    if (cu === 'sun') { g.font = `italic bold ${Math.max(6, h * 0.36)}px Palatino, Georgia, serif`; g.fillStyle = 'rgba(0,0,0,.5)'; g.fillText(wcSolanese(text), cx + 1, cy + h * 0.95 + 1); g.fillStyle = '#fff3d6'; g.fillText(wcSolanese(text), cx, cy + h * 0.95); }   // and in Solanese below
+    g.restore();
 }
 function wcRoofClutter(g, b, rnd, inset) {
     const w = b.w, h = b.h;
@@ -2530,44 +2542,8 @@ function wcPlanePath(g) {
     g.lineTo(30, 14); g.lineTo(-40, 104); g.lineTo(-62, 104); g.lineTo(-34, 12); g.lineTo(-80, 10); g.lineTo(-90, 40); g.lineTo(-104, 40); g.lineTo(-100, 9); g.lineTo(-112, 6); g.lineTo(-112, -6); g.lineTo(-100, -9);
     g.closePath();
 }
-function wcPlaneSprite(liv, shadow) {
-    const key = (shadow ? 'plS' : 'pl') + liv;
-    let c = wcSpriteCache.get(key); if (c) return c;
-    c = document.createElement('canvas'); c.width = Math.ceil(260 * wcSPR); c.height = Math.ceil(230 * wcSPR);
-    const g = c.getContext('2d'); g.scale(wcSPR, wcSPR); g.translate(125, 115);
-    if (shadow) { g.fillStyle = 'rgba(6,10,16,.32)'; wcPlanePath(g); g.fill(); }
-    else {
-        const L = WC_LIVERY[liv % WC_LIVERY.length];
-        // engines under the wings
-        g.fillStyle = '#59636b'; for (const y of [-46, 46]) { wcRR(g, 2, y - 8, 34, 16, 7); g.fill(); }
-        g.fillStyle = '#eef1f3'; wcPlanePath(g); g.fill(); g.strokeStyle = 'rgba(40,50,60,.45)'; g.lineWidth = 1.5; g.stroke();
-        g.fillStyle = 'rgba(0,0,0,.08)'; g.beginPath(); g.moveTo(30, 14); g.lineTo(-40, 104); g.lineTo(-62, 104); g.lineTo(-34, 12); g.closePath(); g.fill();
-        g.fillStyle = L[0]; g.fillRect(-100, -3.5, 196, 7);                       // livery stripe
-        g.fillStyle = L[0]; g.beginPath(); g.moveTo(-112, -3); g.lineTo(-86, -3); g.lineTo(-78, 0); g.lineTo(-86, 3); g.lineTo(-112, 3); g.closePath(); g.fill();   // fin
-        g.fillStyle = L[1]; for (const y of [-92, 92]) { g.beginPath(); g.arc(-52, y, 5, 0, 7); g.fill(); }
-        g.fillStyle = '#1e2a33'; g.beginPath(); g.moveTo(104, -7); g.quadraticCurveTo(116, -5, 116, 0); g.quadraticCurveTo(116, 5, 104, 7); g.closePath(); g.fill();   // cockpit
-        g.fillStyle = '#2d3e4a'; for (let x = -76; x < 94; x += 9) { g.fillRect(x, -11, 4, 2.4); g.fillRect(x, 8.6, 4, 2.4); }
-        g.fillStyle = 'rgba(255,255,255,.35)'; g.fillRect(-90, -9, 180, 2);
-    }
-    c._w = 260; c._h = 230; wcSpriteCache.set(key, c); return c;
-}
 // Draws an airliner at world (x, y) or, with `screen`, at the current context origin (entity renderer).
-function wcDrawPlane(context, sx, sy, a, alt, liv) {
-    const s = 1 / fov, k = 1 + 0.8 * alt, body = wcPlaneSprite(liv, false), sh = wcPlaneSprite(liv, true);
-    context.save(); context.translate(sx + alt * 260 * s, sy + alt * 320 * s); context.rotate(a); context.scale(0.95, 0.95);
-    context.globalAlpha = 1 - alt * 0.45; context.drawImage(sh, -125 * s, -115 * s, 260 * s, 230 * s); context.restore();
-    context.save(); context.translate(sx, sy); context.rotate(a); context.scale(k, k);
-    context.drawImage(body, -125 * s, -115 * s, 260 * s, 230 * s); context.restore();
-}
 // A player's flight: the plane, with the tank riding on top of the fuselage.
-function wcDrawFlightEntity(context, rPos, en) {
-    const f = en.fl;
-    rPos.flA = lerpAngle(rPos.flA !== undefined ? rPos.flA : f.a, f.a, 0.3);
-    rPos.flAlt = rPos.flAlt !== undefined ? rPos.flAlt + (f.alt - rPos.flAlt) * 0.2 : f.alt;
-    wcDrawPlane(context, 0, 0, rPos.flA, rPos.flAlt, f.liv || 0);
-    const k = (1 + 0.8 * rPos.flAlt) * 1.0;
-    context.save(); context.scale(k, k); drawEntityBody(context, rPos); context.restore();
-}
 function wcDrawAirProp(p, s) {
     const X = v => worldToScreenX(v), Y = v => worldToScreenY(v), night = wcNightLevel();
     if (p.k === 'runway') {
@@ -2852,7 +2828,8 @@ const WC_THEME = {
 function wcCityTheme(id) { const c = WC.cities && WC.cities.find(q => q.id === id); return c && WC_THEME[c.theme]; }
 function wcBuildingSprite(b) {
     return wcSprite('b' + b.id, b.w, b.h, g => {
-        (WC_PAINTERS[b.k] || wcPaintTower)(g, b);
+        WC._bcult = b.city && wcCultureOf(b.city);
+        try { (WC_PAINTERS[b.k] || wcPaintTower)(g, b); } finally { WC._bcult = null; }
         if (b.neon) wcNeonOverlay(g, b);
         const th = b.city && !b.neon && wcCityTheme(b.city);
         if (th) { g.save(); g.globalCompositeOperation = 'source-atop'; g.fillStyle = th.bld; g.fillRect(-5000, -5000, 10000, 10000); g.restore(); }
@@ -3075,13 +3052,14 @@ function wcDrawExterior() {
     }
     const cam = wcCam(), nightL = wcNightLevel(), blds = [];
     for (const c of list) for (const b of c.buildings) {
-        if (!vis(b.x - WC_PAD - 260, b.y - WC_PAD - 260, b.w + 2 * WC_PAD + 520, b.h + 2 * WC_PAD + 520) || !once('B' + b.id)) continue;
-        if (lod) { wcDrawBuildingLod(b, s); continue; }
+        if (!vis(b.x - WC_PAD - 260, b.y - WC_PAD - 260, b.w + 2 * WC_PAD + 520, b.h + 2 * WC_PAD + 520) || !once('B' + b.id) || b.id === WC.viewSkip) continue;
+        if (lod) { if (wcBHeight(b) > 170) { b._lod = 1; blds.push(b); } else wcDrawBuildingLod(b, s); continue; }
+        b._lod = 0;
         if (b.k === 'house') wcHouseLot(b, s);
         blds.push(b);
     }
     blds.sort((p, q) => wcBHeight(p) - wcBHeight(q));                    // taller buildings overlap lower ones
-    for (const b of blds) wcDrawBuilding25(b, s, cam, nightL);
+    for (const b of blds) wcDrawBuilding25(b, s, cam, nightL, b._lod);
     if (!lod) for (const c of list) for (const p of c.props) if ((p.k === 'rock' || p.k === 'hay' || p.k === 'well' || p.k === 'turbine') && vis(p.x - 200, p.y - 200, p.w + 400, p.h + 400) && once('cp' + p.k + p.x + ',' + p.y)) wcDrawCountryProp(p, s, cam);
     for (const c of list) for (const p of c.props) if (p.k === 'plane' && vis(p.x - 60, p.y - 60, p.w + 120, p.h + 120) && once('pl' + p.cx + ',' + p.cy)) wcDrawStaticPlane(p, s);
     for (const c of list) for (const p of c.props) if (p.k === 'silo' && vis(p.x, p.y, p.w, p.h) && once('s' + p.x + ',' + p.y)) wcDrawProp(p, s, 0);
@@ -3093,8 +3071,9 @@ function wcDrawExterior() {
     for (const c of list) for (const p of c.props) if (p.k === 'tree' && p.x > vx0 - 60 && p.x < vx1 + 60 && p.y > vy0 - 60 && p.y < vy1 + 60) { if (s < 0.22) { ctx.fillStyle = (p.v >> 2) & 1 ? '#3a7e46' : '#5a9c46'; const tr = 24 + (p.v % 4) * 6; ctx.fillRect(worldToScreenX(p.x) - tr * s, worldToScreenY(p.y) - tr * s, 2 * tr * s, 2 * tr * s); } else wcDrawTree25(p, s, cam); }
     wcDrawBorder(s, W, H); wcDrawWater(s, W, H);
     const meF = myId != null ? gameState.entities.find(e => e.id === myId) : null;
+    wcDrawAiTraffic(s, vx0, vy0, vx1, vy1);
     if (meF && meF.fl && !WC.viewMode) wcDrawClouds(W, H, renderEntities.get(meF.id)?.flAlt ?? meF.fl.alt);
-    wcDrawDayNight(W, H); if (!WC.viewMode) wcDrawNav(s, W, H);
+    wcDrawDayNight(W, H); wcDrawFestival(s, W, H); if (!WC.viewMode) wcDrawNav(s, W, H);
 }
 // Water beyond the shoreline (server keeps everything inside WC_SHORE) and a shared-clock day/night cycle.
 const WC_SHORE = 1800, WC_DAY_MS = 12 * 60 * 1000;
@@ -3109,6 +3088,7 @@ function wcDrawWater(s, W, H) {
     for (const [x0, y0, x1, y1] of [[B, B, E, t], [B, u, E, E], [B, t, a, u], [z, t, E, u]]) rect(x0, y0, x1, y1, '#2b6a94');
     for (const [x0, y0, x1, y1] of [[B, t - 90 + wob, E, t], [B, u, E, u + 90 - wob], [a - 90 + wob, t, a, u], [z, t, z + 90 - wob, u]]) rect(x0, y0, x1, y1, 'rgba(120,200,225,.45)');
     for (const [x0, y0, x1, y1] of [[a, t, z, t + sand], [a, u - sand, z, u], [a, t, a + sand, u], [z - sand, t, z, u]]) rect(x0, y0, x1, y1, 'rgba(222,205,150,.55)');
+    wcDrawPolar(s, W, H);
     // open ocean: a few slow swells so the long Pacific crossing isn't a flat blue screen
     if (camera.x + W * fov < a || camera.x > z || camera.y + H * fov < t || camera.y > u) {
         const now = Date.now() / 1000, CELL = 900; ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = Math.max(1, 3 * s); ctx.beginPath();
@@ -3250,6 +3230,11 @@ function wcMapDraw() {
     for (const o of offs) {
         const MX = x => (x + o - v.x + v.half) * k;
         g.fillStyle = '#7fae66'; g.fillRect(MX(Ld.x0), MY(Ld.y0), S(Ld.x1 - Ld.x0), S(Ld.y1 - Ld.y0));
+        if (WC.poleN != null && o === offs[0]) {                                  // polar caps, and nothing beyond the poles on the chart
+            const R = (24 / 180) * (CIRC / 2); g.fillStyle = '#e3edf2'; g.fillRect(0, MY(WC.poleN), N, S(R)); g.fillRect(0, MY(WC.poleS - R), N, S(R));
+            g.fillStyle = '#0b1622'; g.fillRect(0, 0, N, Math.max(0, MY(WC.poleN))); g.fillRect(0, MY(WC.poleS), N, N);
+            g.fillStyle = '#c0392b'; g.font = 'bold 12px sans-serif'; g.textAlign = 'center'; g.fillText('NORTH POLE · 90°N', N / 2, MY(WC.poleN) + 15); g.fillText('SOUTH POLE · 90°S', N / 2, MY(WC.poleS) - 7);
+        }
         // time-zone bands (each column is 6 hours)
         if (WC.gap) for (let c = 0; c < Math.round(CIRC / WC.gap); c++) {
             const x0 = c * WC.gap, tz = Math.round(wcWrapD(x0 + WC.gap / 2 - C) / WC.gap) * 6;
@@ -3297,6 +3282,12 @@ function wcMapDraw() {
         const pin = wcMapSel || (n && { x: n.x, y: n.y, label: n.label });
         if (pin) { g.font = '22px sans-serif'; g.fillText('📍', MX(pin.x), MY(pin.y)); g.font = 'bold 13px sans-serif'; g.fillStyle = '#000'; g.fillText(pin.label || '', MX(pin.x) + 1, MY(pin.y) - 22); g.fillStyle = '#fff'; g.fillText(pin.label || '', MX(pin.x), MY(pin.y) - 23); }
         const px = camera.x + canvas.width * fov / 2, py = camera.y + canvas.height * fov / 2;
+        // scheduled air traffic, and your own flight's great circle (over the pole it leaves the top and comes back on the far side)
+        if (WC.air) { const now = Date.now(); for (const [l, q] of wcAiFlights(now)) { const P = wcAiPos(l, q); if (!P) continue; const x = MX(P.x), y = MY(P.y); if (x < -5 || y < -5 || x > N + 5 || y > N + 5) continue; g.save(); g.translate(x, y); g.rotate(P.a); g.fillStyle = wcAirline(l.al).c1; g.beginPath(); g.moveTo(6, 0); g.lineTo(-4, -4); g.lineTo(-2, 0); g.lineTo(-4, 4); g.closePath(); g.fill(); g.restore(); } }
+        if (wcFlight) {
+            const A = WC.airports.find(a => a.city === wcFlight.from), B = WC.airports.find(a => a.city === wcFlight.to);
+            if (A && B) { g.save(); g.strokeStyle = '#ffd23d'; g.lineWidth = 2.5; g.setLineDash([8, 5]); g.beginPath(); let lx = null; for (const [x0, y0] of wcGCPath(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 120)) { const q = wcUnfold(x0, y0), X1 = MX(q[0] - Math.round((q[0] - x0) / CIRC) * CIRC * 0 + 0), Y1 = MY(q[1]); if (lx === null || Math.abs(X1 - lx) > N / 3) g.moveTo(X1, Y1); else g.lineTo(X1, Y1); lx = X1; } g.stroke(); g.restore(); }
+        }
         g.fillStyle = '#fff'; g.strokeStyle = '#e22'; g.lineWidth = 3; g.beginPath(); g.arc(MX(px), MY(py), 6, 0, 7); g.fill(); g.stroke();
     }
 }
@@ -3321,12 +3312,14 @@ function wcWeather(px, py) {                                             // 0..1
 function wcDrawDayNight(W, H) {
     const px = camera.x + W * fov / 2, py = camera.y + H * fov / 2, t = wcDayPhase(px), sun = Math.sin(t * Math.PI * 2);
     const night = Math.max(0, Math.min(1, (0.2 - sun) / 0.7)) * 0.58, dusk = Math.max(0, 0.3 - Math.abs(sun)) / 0.3 * 0.16, wx = wcWeather(px, py);
-    if (dusk > 0.005) { ctx.fillStyle = `rgba(255,140,60,${dusk})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
-    if (wx.heat > 0.02) { ctx.fillStyle = `rgba(255,190,90,${0.12 * wx.heat * Math.max(0, sun + 0.3)})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
-    if (wx.fog > 0.02) { ctx.fillStyle = `rgba(210,220,230,${0.34 * wx.fog})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
-    if (night > 0.005) { ctx.fillStyle = `rgba(8,14,52,${night})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    const layers = [];                                                     // composite the tints into ONE full-screen fill (each fill is a full pass over every pixel)
+    if (dusk > 0.005) layers.push([255, 140, 60, dusk]);
+    if (wx.heat > 0.02) layers.push([255, 190, 90, 0.12 * wx.heat * Math.max(0, sun + 0.3)]);
+    if (wx.fog > 0.02) layers.push([210, 220, 230, 0.34 * wx.fog]);
+    if (night > 0.005) layers.push([8, 14, 52, night]);
+    if (wx.rain > 0.02) layers.push([40, 55, 80, 0.2 * wx.rain]);
+    if (layers.length) { let r = 0, g = 0, b = 0, a = 0; for (const [lr, lg, lb, la] of layers) { r = lr * la + r * (1 - la); g = lg * la + g * (1 - la); b = lb * la + b * (1 - la); a = la + a * (1 - la); } ctx.fillStyle = `rgba(${Math.round(r / a)},${Math.round(g / a)},${Math.round(b / a)},${a.toFixed(3)})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
     if (wx.rain > 0.02) {
-        ctx.fillStyle = `rgba(40,55,80,${0.2 * wx.rain})`; ctx.fillRect(0, 0, canvas.width, canvas.height);
         const now = performance.now(), n = Math.floor(220 * wx.rain); ctx.strokeStyle = 'rgba(190,210,240,.55)'; ctx.lineWidth = 1.5; ctx.beginPath();
         for (let i = 0; i < n; i++) { const sx = (i * 7919) % canvas.width, sy = (i * 104729 + now * (0.7 + (i % 5) * 0.12)) % canvas.height; ctx.moveTo(sx, sy); ctx.lineTo(sx - 4, sy + 15); }
         ctx.stroke();
@@ -3380,7 +3373,7 @@ const WC_BH = { tower: b => 70 + (b.f || 30) * 2.6, mid: b => 46 + (b.f || 8) * 
 const WC_WALL = { tower: '#55687c', mid: '#66788a', apt: '#9d8f7e', mall: '#8a8f96', megamall: '#7d8590', hotel: '#7d7a8c', shop: '#b9ae9c', old: '#d8c4a0', house: '#e2d6bd', farmhouse: '#e2d6bd', barn: '#8a2f28', shed: '#7b6a55', school: '#b7a27f', bank: '#c8bfa8', dealer: '#9fb3c4', hall: '#c9c0aa', terminal: '#9fb3c4', ctower: '#d5d9dc', hangar: '#8d99a1', gallery: '#e3d9c0', cathedral: '#a89f8b', inn: '#d8c4a0', motel: '#c9bfa6', mill: '#6e5638' };
 // heights are exaggerated (×2.2) against a low virtual camera so towers lean visibly away from the screen centre
 function wcBHeight(b) { const h = WC_BH[b.k]; let H = 2.2 * (typeof h === 'function' ? h(b) : (h || 30)); if (H > 520) H = 520 + 560 * (1 - Math.exp(-(H - 520) / 650)); return H; }   // supertalls are eased so the roof never runs off to infinity
-function wcCam() { const W = canvas.width, H = canvas.height; return { x: camera.x + W * fov / 2, y: camera.y + H * fov / 2, hc: 1900 * fov }; }
+function wcCam() { const W = canvas.width, H = canvas.height; return { x: camera.x + W * fov / 2, y: camera.y + H * fov / 2, hc: WC.viewHc || 1900 * fov }; }
 function wcProj(cam, x, y, h) { const k = cam.hc / (cam.hc - h); return [worldToScreenX(cam.x + (x - cam.x) * k), worldToScreenY(cam.y + (y - cam.y) * k), k]; }
 function wcQuad(a, b, c, d, fill) { ctx.fillStyle = fill; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); ctx.closePath(); ctx.fill(); }
 function wcDrawTree25(p, s, cam) {
@@ -3557,13 +3550,6 @@ function wcDrawInterior() {
         ctx.restore();
     } else if (glows.length) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; for (const [gx, gy, r, col] of glows) { const gr = ctx.createRadialGradient(gx, gy, 0, gx, gy, r * s * 0.7); gr.addColorStop(0, col.replace(/,\.\d+\)$/, ',.18)')); gr.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = gr; ctx.fillRect(gx - r * s, gy - r * s, 2 * r * s, 2 * r * s); } ctx.restore(); }
 }
-function wcDepartures(D) {
-    const A = (WC.airports || []).find(a => a.city === (D.theme && D.theme.city)); if (!A) return [];
-    if (WC._dep && WC._dep.k === A.code) return WC._dep.l;
-    const rows = (WC.airports || []).filter(b => b !== A).map(b => { const c = WC.cities.find(q => q.id === b.city), dx = wcWrapD(b.sb.x - A.sb.x), d = Math.hypot(dx, b.sb.y - A.sb.y); return [d, `${b.code}  ${c.name.toUpperCase().slice(0, 14).padEnd(14)} ${wcTzLabel(c.tz).padEnd(6)} ${dx >= 0 ? 'EAST' : 'WEST'}  ON TIME`]; }).sort((p, q) => p[0] - q[0]).map(r => r[1]);
-    WC._dep = { k: A.code, l: rows }; return rows;
-}
-
 // ===================== boarding-pass picker: a scrollable gallery of destination cards ======================================
 const wcSnapCache = new Map();
 // An aerial "photo" of a city drawn from its real street plan: outline, roads (in the city's style), building texture, airport.
@@ -3595,32 +3581,6 @@ function wcCitySnapshot(id) {
     const url = cv.toDataURL('image/jpeg', 0.82); wcSnapCache.set(id, url); return url;
 }
 let wcCardsEl = null;
-function wcRenderCards(p) {
-    if (!wcCardsEl) {
-        wcCardsEl = document.createElement('div'); wcCardsEl.id = 'wc-cards';
-        wcCardsEl.innerHTML = '<div class="wcc-head"><div><div class="wcc-title"></div><div class="wcc-sub"></div></div><button class="wcc-x" title="Close">✕</button></div><div class="wcc-grid"></div>';
-        document.body.appendChild(wcCardsEl);
-        wcCardsEl.querySelector('.wcc-x').addEventListener('click', () => { wcCardsEl.style.display = 'none'; wcCardsEl.dataset.closed = wcCardsEl.dataset.id; });
-        wcCardsEl.addEventListener('wheel', e => e.stopPropagation(), { passive: true });
-    }
-    if (!p) { wcCardsEl.style.display = 'none'; wcCardsEl.dataset.id = ''; return; }
-    if (wcCardsEl.dataset.closed === p.id) return;
-    const key = JSON.stringify([p.id, p.lines, p.actions.map(a => [a.a, a.on])]);
-    wcCardsEl.style.display = 'flex';
-    if (wcCardsEl.dataset.key === key) return;
-    wcCardsEl.dataset.key = key; wcCardsEl.dataset.id = p.id;
-    wcCardsEl.querySelector('.wcc-title').textContent = p.title || '';
-    wcCardsEl.querySelector('.wcc-sub').textContent = (p.lines || []).join(' · ');
-    const head = { east: 'Eastbound →', west: '← Westbound', north: '↑ Northbound', south: '↓ Southbound' };
-    wcCardsEl.querySelector('.wcc-grid').innerHTML = p.actions.map(a => `
-        <div class="wcc-card${a.on === false ? ' off' : ''}">
-          <div class="wcc-img" style="background-image:url(${wcCitySnapshot(a.city)})"><span class="wcc-code">${escapeHTML(a.code)}</span><span class="wcc-tz">${escapeHTML(wcTzLabel(a.tz))}</span></div>
-          <div class="wcc-cap"><div class="wcc-name">${escapeHTML(a.name)}</div><div class="wcc-meta">${head[a.head] || ''} · ~${a.mins} min · ${a.km.toLocaleString()} km</div>
-          <button class="wcc-buy" data-a="${escapeHTML(a.a)}" ${a.on === false ? 'disabled' : ''}>✈ ${escapeHTML(WC.airports.find(x => x.city === (WC.interior && WC.interior.theme.city))?.code || '')} → ${escapeHTML(a.code)} · Buy ${a.fare.toLocaleString()}</button></div>
-        </div>`).join('');
-    wcCardsEl.querySelectorAll('.wcc-buy').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); worldSend('world_interact', { id: p.id, a: b.dataset.a }); }));
-}
-
 // ===================== long-haul in-flight screen: the globe as a cylinder ===========================================
 let wcIfe = null;
 function wcIfeEnsure() {
@@ -3661,7 +3621,8 @@ function wcIfeRender(force) {
         const me = gameState.entities.find(e => e.id === myId), dz = ((f.tz - f.fromTz) % 24 + 36) % 24 - 12;
         const clock = tz => { const h = ((6 + (Date.now() % WC_DAY_MS) / WC_DAY_MS * 24 + tz) % 24 + 24) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); };
         const anti = me ? wcAntipodeCity(me.x, me.y) : null, crossIDL = wcRouteCrossesIDL(f);
-        const rows = [['From', `${f.fromName} (${f.fromCode}) · ${clock(f.fromTz)} ${wcTzLabel(f.fromTz)}`], ['To', `${f.toName} (${f.toCode}) · ${clock(f.tz)} ${wcTzLabel(f.tz)}`],
+        const rows = [['Flight', `${f.alName || ''} ${f.fn || ''} · ${f.acName || ''} · ${f.cls === 'J' ? 'Business' : 'Economy'}`], ...(f.next ? [['Connection', f.next]] : []), ...(f.pole ? [['Route', `Polar – straight over the ${f.pole === 'N' ? 'North' : 'South'} Pole`]] : []),
+            ['From', `${f.fromName} (${f.fromCode}) · ${clock(f.fromTz)} ${wcTzLabel(f.fromTz)}`], ['To', `${f.toName} (${f.toCode}) · ${clock(f.tz)} ${wcTzLabel(f.tz)}`],
             ['Time difference', `${dz >= 0 ? '+' : ''}${dz} h`], ['Direction', ({ east: 'Eastbound', west: 'Westbound', north: 'Northbound', south: 'Southbound' })[f.dir] + (crossIDL ? ' · crosses the date line' : '')],
             ['Distance', `${Math.round((f.total - f.rem) / 1000).toLocaleString()} / ${Math.round(f.total / 1000).toLocaleString()} km`], ['Time to arrival', `${Math.floor(f.eta / 60)}:${String(f.eta % 60).padStart(2, '0')}`],
             ['Altitude', `${Math.round(f.alt * 11000).toLocaleString()} m`], ['Ground speed', `${f.kmh.toLocaleString()} km/h`], ['Antipode below you', anti ? `${anti.name} (${wcTzLabel(anti.tz)}) is on the opposite side of the world` : '—']];
@@ -3672,75 +3633,19 @@ function wcIfeRender(force) {
 function wcAntipodeCity(x, y) { const ax = x + (WC.circ || 0) / 2; let best = null, bd = Infinity; for (const c of WC.cities || []) { const d = Math.abs(wcWrapD(c.cx - ax)) + Math.abs(c.cy - y) * 0.3; if (d < bd) { bd = d; best = c; } } return best; }
 function wcRouteCrossesIDL(f) { const A = WC.airports.find(a => a.city === f.from), B = WC.airports.find(a => a.city === f.to); if (!A || !B) return false; const dx = wcWrapD(B.sb.x - A.sb.x), x2 = A.sb.x + dx; return x2 < 0 || x2 >= WC.circ; }
 // 3D cylinder: longitude = x / circumference, height = y. Looks slightly from above; the near side is lit, night side shaded.
-function wcIfeDraw() {
-    const I = wcIfe; if (!I || !I.open || I.tab !== 'route' || !wcFlight || !WC.circ) return;
-    const f = wcFlight, cv = I.cv, g = cv.getContext('2d'), Wc = cv.width, Hc = cv.height, C = WC.circ, EY = WC.extentY || 1;
-    const me = gameState.entities.find(e => e.id === myId), rp = me && renderEntities.get(me.id), px = rp ? rp.renderX : (me ? me.x : 0), py = rp ? rp.renderY : (me ? me.y : 0);
-    if (!I.drag && performance.now() - (I.idle || 0) > 4000) I.rot *= 0.94;
-    const phi = px / C * Math.PI * 2 + I.rot, R = Math.min(Wc * 0.36, 270), cx = Wc / 2, cy = Hc / 2 + 6, ky = (Hc * 0.52) / EY, tau = 0.42;
-    const P = (x, y) => { const a = x / C * Math.PI * 2 - phi, X3 = R * Math.sin(a), Z3 = R * Math.cos(a), Y3 = (y - EY / 2) * ky; return [cx + X3, cy + Y3 * Math.cos(tau) + Z3 * Math.sin(tau) * 0.28, Z3 / R]; };
-    const bg = g.createLinearGradient(0, 0, 0, Hc); bg.addColorStop(0, '#06101f'); bg.addColorStop(1, '#0d2238'); g.fillStyle = bg; g.fillRect(0, 0, Wc, Hc);
-    for (let i = 0; i < 60; i++) { g.fillStyle = 'rgba(255,255,255,.5)'; g.fillRect((i * 97) % Wc, (i * 53) % Hc, 1.2, 1.2); }
-    const L = WC.land, steps = 180, sunAt = x => Math.sin(((((Date.now() % WC_DAY_MS) / WC_DAY_MS + wcWrapD(x - WC.center) / C) % 1 + 1) % 1) * Math.PI * 2);
-    // strips, back to front
-    const strips = [];
-    for (let i = 0; i < steps; i++) { const x0 = i / steps * C, x1 = (i + 1) / steps * C, a = ((x0 + x1) / 2) / C * Math.PI * 2 - phi; strips.push({ x0, x1, z: Math.cos(a) }); }
-    strips.sort((p, q) => p.z - q.z);
-    for (const sp of strips) {
-        const front = sp.z > 0, lit = 0.35 + 0.65 * Math.max(0, sp.z), sun = sunAt((sp.x0 + sp.x1) / 2), night = sun < 0 ? Math.min(0.6, -sun * 0.8) : 0;
-        const a0 = P(sp.x0, 0), a1 = P(sp.x1, 0), b1 = P(sp.x1, EY), b0 = P(sp.x0, EY);
-        const quad = (p, q, r, s2, col) => { g.fillStyle = col; g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.lineTo(r[0], r[1]); g.lineTo(s2[0], s2[1]); g.closePath(); g.fill(); };
-        g.globalAlpha = front ? 1 : 0.28;
-        quad(a0, a1, b1, b0, `rgb(${Math.round(30 * lit * (1 - night))},${Math.round(90 * lit * (1 - night))},${Math.round(150 * lit * (1 - night * 0.6))})`);
-        const lx0 = Math.max(sp.x0, L.x0), lx1 = Math.min(sp.x1, L.x1);
-        if (lx1 > lx0) quad(P(lx0, L.y0), P(lx1, L.y0), P(lx1, L.y1), P(lx0, L.y1), `rgb(${Math.round(95 * lit * (1 - night))},${Math.round(150 * lit * (1 - night))},${Math.round(80 * lit * (1 - night))})`);
-        g.globalAlpha = 1;
-    }
-    // rims
-    g.strokeStyle = 'rgba(160,210,255,.5)'; g.lineWidth = 1.2;
-    for (const yy of [0, EY]) { g.beginPath(); for (let i = 0; i <= 120; i++) { const p = P(i / 120 * C, yy); i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); } g.stroke(); }
-    // time-zone meridians and the date line
-    if (WC.gap) for (let x = 0; x < C; x += WC.gap / 2) {
-        const top = P(x, 0), bot = P(x, EY); if (top[2] < 0) continue; const idl = Math.abs(wcWrapD(x)) < 1;
-        g.strokeStyle = idl ? 'rgba(255,110,110,.95)' : 'rgba(255,255,255,.18)'; g.lineWidth = idl ? 2 : 1; g.setLineDash(idl ? [6, 4] : [3, 5]); g.beginPath(); g.moveTo(top[0], top[1]); g.lineTo(bot[0], bot[1]); g.stroke(); g.setLineDash([]);
-        g.fillStyle = idl ? '#ff9a9a' : 'rgba(255,255,255,.6)'; g.font = '10px Ubuntu, sans-serif'; g.textAlign = 'center';
-        const tz = Math.round(wcWrapD(x - WC.center) / WC.gap * 6); g.fillText(idl ? 'DATE LINE' : wcTzLabel(tz <= -12 ? tz + 24 : tz), top[0], top[1] - 5);
-    }
-    // the route (front solid, back dashed), cities, plane, antipode
-    const A = WC.airports.find(a => a.city === f.from), B = WC.airports.find(a => a.city === f.to);
-    if (A && B) {
-        const dx = wcWrapD(B.sb.x - A.sb.x), n = 90;
-        for (let i = 0; i < n; i++) {
-            const p = P(A.sb.x + dx * i / n, A.sb.y + (B.sb.y - A.sb.y) * i / n), q = P(A.sb.x + dx * (i + 1) / n, A.sb.y + (B.sb.y - A.sb.y) * (i + 1) / n), fr = p[2] > 0 && q[2] > 0;
-            g.strokeStyle = fr ? '#ffd23d' : 'rgba(255,210,61,.3)'; g.lineWidth = fr ? 2.4 : 1.2; g.setLineDash(fr ? [] : [4, 4]); g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.stroke();
-        }
-        g.setLineDash([]);
-    }
-    for (const c of WC.cities) {
-        const p = P(c.cx, c.cy); if (p[2] < -0.05) continue; const key = c.id === f.from || c.id === f.to;
-        g.fillStyle = key ? '#ffd23d' : 'rgba(255,255,255,.85)'; g.beginPath(); g.arc(p[0], p[1], key ? 4 : 2.5, 0, 7); g.fill();
-        if (p[2] > 0.25 || key) { g.fillStyle = key ? '#fff' : 'rgba(255,255,255,.7)'; g.font = `${key ? 'bold 12px' : '10px'} Ubuntu, sans-serif`; g.textAlign = 'left'; g.fillText(c.code, p[0] + 5, p[1] - 4); }
-    }
-    const ap = P(px + C / 2, py); g.strokeStyle = 'rgba(255,120,200,.7)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(ap[0] - 5, ap[1] - 5); g.lineTo(ap[0] + 5, ap[1] + 5); g.moveTo(ap[0] + 5, ap[1] - 5); g.lineTo(ap[0] - 5, ap[1] + 5); g.stroke();
-    const pp = P(px, py), ahead = P(px + Math.cos(rp?.flA ?? 0) * 3000, py + Math.sin(rp?.flA ?? 0) * 3000), ang = Math.atan2(ahead[1] - pp[1], ahead[0] - pp[0]);
-    g.save(); g.translate(pp[0], pp[1]); g.rotate(ang); g.fillStyle = '#fff'; g.beginPath(); g.moveTo(9, 0); g.lineTo(-6, -6); g.lineTo(-3, 0); g.lineTo(-6, 6); g.closePath(); g.fill(); g.restore();
-    g.fillStyle = 'rgba(255,255,255,.75)'; g.font = '11px Ubuntu, sans-serif'; g.textAlign = 'left';
-    g.fillText(`${f.fromCode} → ${f.toCode} · ${Math.round(f.rem / 1000).toLocaleString()} km to go · drag to spin the globe`, 10, Hc - 10);
-    g.fillStyle = '#ff9ad2'; g.textAlign = 'right'; g.fillText('✕ = your antipode', Wc - 10, Hc - 10);
-}
-
 // ===================== round 4: supertalls, themed malls, views out of the window, the casino =====================
 // ---- skyscrapers: setback tiers and spires; very tall towers are eased so the projection never blows up ----
 function wcTierList(b) {
     if (b.k !== 'tower' || (b.f || 0) < 90) return [[0, 1, 0]];
     return b.st ? [[0, 0.46, 0], [0.46, 0.74, 0.11], [0.74, 1, 0.22]] : [[0, 0.7, 0], [0.7, 1, 0.12]];
 }
-function wcDrawBuilding25(b, s, cam, night) {
+function wcDrawBuilding25(b, s, cam, night, flat) {
     const h = wcBHeight(b), X = worldToScreenX, Y = worldToScreenY;
     const sl = h * 0.22, dx = sl * 0.75 * s, dy = sl * s, gx0 = b.x, gy0 = b.y, gx1 = b.x + b.w, gy1 = b.y + b.h;
     ctx.fillStyle = 'rgba(8,12,16,.26)'; ctx.beginPath();
     ctx.moveTo(X(gx0), Y(gy0)); ctx.lineTo(X(gx1), Y(gy0)); ctx.lineTo(X(gx1) + dx, Y(gy0) + dy); ctx.lineTo(X(gx1) + dx, Y(gy1) + dy); ctx.lineTo(X(gx0) + dx, Y(gy1) + dy); ctx.lineTo(X(gx0), Y(gy1)); ctx.closePath(); ctx.fill();
-    const base = b.neon ? '#1e1b33' : (WC_WALL[b.k] || '#8a8f96'), base7 = base.length === 7 ? base : '#8a8f96', tiers = wcTierList(b);
+    const cu = !b.neon && b.city && wcCultureOf(b.city), pal = cu && WC_CULT_WALL[cu];
+    const base = b.neon ? '#1e1b33' : pal ? (b.k === 'tower' ? pal.tower : pal.low[b.id % pal.low.length]) : (WC_WALL[b.k] || '#8a8f96'), base7 = base.length === 7 ? base : '#8a8f96', tiers = wcTierList(b);
     let topT = null, topBox = null;
     for (let ti = 0; ti < tiers.length; ti++) {
         const [a0, a1, ins] = tiers[ti], ix = b.w * ins, iy = b.h * ins, x0 = b.x + ix, y0 = b.y + iy, x1 = b.x + b.w - ix, y1 = b.y + b.h - iy, hb = h * a0, ht = h * a1;
@@ -3766,6 +3671,7 @@ function wcDrawBuilding25(b, s, cam, night) {
         }
         topT = T; topBox = [x0, y0, x1, y1];
     }
+    if (flat) { wcQuad(topT[0], topT[1], topT[2], topT[3], b.neon ? '#2a2540' : wcShade(base7, 26)); return; }
     const spr = wcBuildingSprite(b), k = topT[0][2], fx = (topBox[2] - topBox[0]) / b.w, fy = (topBox[3] - topBox[1]) / b.h;
     ctx.drawImage(spr, topT[0][0] - WC_PAD * s * k * fx, topT[0][1] - WC_PAD * s * k * fy, spr.width / wcSPR * s * k * fx, spr.height / wcSPR * s * k * fy);
     if (b.st) {                                                            // spire with an aircraft-warning light
@@ -3985,25 +3891,6 @@ function wcCasinoFxMsg(d) {
 function fmtWc(n) { return Math.round(n).toLocaleString('en-GB'); }
 
 // ---- the view out of the window: the real city round the building, seen from this floor ----
-function wcViewBuilding(D) {
-    if (D._vb) return D._vb;
-    let b = null;
-    if (D.bid) b = WC.allBld.get(D.bid) || null;
-    else if (D.hid) for (const q of WC.allBld.values()) if (q.hid === D.hid) { b = q; break; }
-    if (b) D._vb = b; return b;
-}
-function wcDrawOutsideView(D) {
-    const b = wcViewBuilding(D); if (!b) return false;
-    const fl = D.floor, A = D.theme.alt || 1, W = canvas.width, H = canvas.height;
-    const icx = camera.x + W * fov / 2, icy = camera.y + H * fov / 2, par = 0.35 / A;
-    const ex = b.x + b.w / 2 + (icx - (fl.x + fl.w / 2)) * par, ey = b.y + b.h / 2 + (icy - (fl.y + fl.h / 2)) * par;
-    const sv = { x: camera.x, y: camera.y, f: fov };
-    fov = sv.f * A; camera.x = ex - W * fov / 2; camera.y = ey - H * fov / 2; WC.viewMode = true;
-    try { ctx.save(); wcDrawExterior(); ctx.restore(); } catch (e) { console.warn('view', e); ctx.restore(); }
-    finally { fov = sv.f; camera.x = sv.x; camera.y = sv.y; WC.viewMode = false; }
-    ctx.fillStyle = `rgba(160,200,235,${0.08 + 0.05 * A})`; ctx.fillRect(0, 0, W, H);          // glass + altitude haze
-    return true;
-}
 function wcIsOuterWall(D, w) { const fl = D.floor; return w.x + w.w <= fl.x + 2 || w.x >= fl.x + fl.w - 2 || w.y + w.h <= fl.y + 2 || w.y >= fl.y + fl.h - 2; }
 
 // ---- the casino games ----
@@ -4234,11 +4121,506 @@ function casSlotRes(d) {
     }, (1.0 + 2 * 0.45) * 1000 + 120);
 }
 
+// ===================== round 5: a round world, airlines, cultures, the phone, and a faster renderer =====================
+// ---- rendering quality: blur glows are the most expensive thing to rasterise, so they're dropped when the frame rate sags ----
+let WC_HQ = true;
+WC.gfx = (() => { try { return localStorage.getItem('wcGfx') || 'auto'; } catch (e) { return 'auto'; } })();
+function wcBlurGuard(g) {                                   // on this context, shadowBlur obeys WC_HQ in the world
+    const d = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'shadowBlur');
+    try { Object.defineProperty(g, 'shadowBlur', { configurable: true, get() { return d.get.call(this); }, set(v) { d.set.call(this, isWorldMode && !WC_HQ ? 0 : v); } }); } catch (e) {}
+}
+wcBlurGuard(ctx);
+(() => { let low = 0, high = 0;
+    setInterval(() => {
+        if (WC.gfx !== 'auto') { WC_HQ = WC.gfx === 'high'; return; }
+        if (!isWorldMode) return;
+        if (currentFps < 45) { low++; high = 0; } else if (currentFps >= 58) { high++; low = 0; } else { low = 0; high = 0; }
+        if (WC_HQ && low >= 3) { WC_HQ = false; WC._hqDrop = Date.now(); low = 0; }
+        if (!WC_HQ && high >= 20 && Date.now() - (WC._hqDrop || 0) > 120000) { WC_HQ = true; high = 0; }
+    }, 1000);
+})();
+function wcTexAvg(t) { try { const c = document.createElement('canvas'); c.width = c.height = 1; const g = c.getContext('2d'); g.drawImage(t.canvas, 0, 0, 1, 1); const d = g.getImageData(0, 0, 1, 1).data; return `rgb(${d[0]},${d[1]},${d[2]})`; } catch (e) { return '#6f8f55'; } }
+
+// ---- the globe (client copies of the server's chart maths) ----
+function wcLat(y) { return Math.PI / 2 - (y - WC.poleN) / (WC.circ / 2) * Math.PI; }
+function wcYofLat(lat) { return WC.poleN + (Math.PI / 2 - lat) / Math.PI * (WC.circ / 2); }
+function wcGCPath(x1, y1, x2, y2, n = 64) {
+    const C = WC.circ, PN = WC.poleN, PS = WC.poleS;
+    const vec = (x, y) => { const la = wcLat(y), lo = x / C * Math.PI * 2; return [Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)]; };
+    let a = vec(x1, y1), b = vec(x2, y2), dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    if (dot < -0.999999) { b = vec(x2 + 1, y2 + (y2 < (PN + PS) / 2 ? 1 : -1)); dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+    const c = Math.acos(Math.max(-1, Math.min(1, dot))), sc = Math.sin(c) || 1, out = [];
+    let px = null, flip = 0, mirror = 0;
+    for (let i = 0; i <= n; i++) {
+        const t = i / n, k1 = c ? Math.sin((1 - t) * c) / sc : 1 - t, k2 = c ? Math.sin(t * c) / sc : t;
+        const v = [a[0] * k1 + b[0] * k2, a[1] * k1 + b[1] * k2, a[2] * k1 + b[2] * k2];
+        const lat = Math.atan2(v[2], Math.hypot(v[0], v[1])), atPole = Math.hypot(v[0], v[1]) < 1e-7; let x = atPole && px !== null ? px - flip : Math.atan2(v[1], v[0]) / (Math.PI * 2) * C, y = wcYofLat(lat);
+        if (px !== null) { let dx = x + flip - px; dx -= Math.round(dx / C) * C; if (Math.abs(dx) > C * 0.3) { mirror = mirror ? 0 : (lat > 0 ? 1 : -1); flip += C / 2; dx = x + flip - px; dx -= Math.round(dx / C) * C; } x = px + dx; }
+        else x = x1 + wcWrapD(x - x1);
+        px = x; if (mirror > 0) y = 2 * PN - y; else if (mirror < 0) y = 2 * PS - y;
+        out.push([x, y]);
+    }
+    return out;
+}
+// A chart point past a pole is really on the antipodal meridian: fold it back (and say so, for headings).
+function wcUnfold(x, y) { const C = WC.circ; if (y < WC.poleN) return [x + C / 2, 2 * WC.poleN - y, 1]; if (y > WC.poleS) return [x + C / 2, 2 * WC.poleS - y, 1]; return [x, y, 0]; }
+function wcNearX(x) { if (!isWorldMode || !WC.circ) return x; const ref = camera.x + canvas.width * fov / 2; return x + WC.circ * Math.round((ref - x) / WC.circ); }
+
+// ---- the date line and the poles, seamlessly ----
+// The chart is drawn twice where the view straddles the seam, so crossing the date line shows no edge and no jump.
+function wcDrawExteriorWrapped() {
+    const C = WC.circ; if (!C) { wcDrawExterior(); return; }
+    const W = canvas.width, cx0 = camera.x, k = Math.floor(camera.x / C);
+    camera.x -= k * C;
+    try {
+        wcDrawExterior();
+        if (camera.x + W * fov > C) { const sx = (C - camera.x) / fov; ctx.save(); ctx.beginPath(); ctx.rect(sx, 0, W - sx, canvas.height); ctx.clip(); camera.x -= C; try { wcDrawExterior(); } finally { camera.x += C; ctx.restore(); } }
+    } finally { camera.x = cx0; }
+}
+// Over a pole the server moves you to the antipodal meridian with your heading reversed. The client does the same to
+// its smoothed position and camera and rolls the view 180°, which looks exactly like before; the roll then unwinds,
+// so the camera swings round and you see yourself heading south down the far side of the world.
+function wcPoleFix(rPos, en) {
+    if (!isWorldMode || !WC.circ || WC.poleN == null || rPos.renderY == null || en.y == null) return false;
+    const C = WC.circ, nearPole = Math.min(Math.abs(en.y - WC.poleN), Math.abs(en.y - WC.poleS)) < 90000;
+    if (!nearPole || Math.abs(wcWrapD(en.x - rPos.renderX)) < C / 4) return false;
+    const P = Math.abs(en.y - WC.poleN) < Math.abs(en.y - WC.poleS) ? WC.poleN : WC.poleS;
+    const nx = rPos.renderX + C / 2, ny = 2 * P - rPos.renderY;
+    rPos.renderX = en.x + wcWrapD(nx - en.x); rPos.renderY = ny;
+    if (rPos.flA !== undefined) rPos.flA += Math.PI; if (rPos.renderAngle !== undefined) rPos.renderAngle += Math.PI;
+    if (en.id === myId) {
+        const W = canvas.width * fov, H = canvas.height * fov, ccx = camera.x + W / 2, ccy = camera.y + H / 2;
+        const ncx = rPos.renderX + wcWrapD(ccx + C / 2 - rPos.renderX), ncy = 2 * P - ccy;
+        camera.x = ncx - W / 2; camera.y = ncy - H / 2;
+        WC.roll = (WC.roll || 0) + Math.PI; if (WC.roll > Math.PI) WC.roll -= Math.PI * 2;
+    }
+    return true;
+}
+function wcNoise2(x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, h = (i, j) => { let n = (i * 374761393 + j * 668265263) | 0; n = (n ^ (n >>> 13)) * 1274126177 | 0; return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
+    const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+    return (h(xi, yi) * (1 - u) + h(xi + 1, yi) * u) * (1 - v) + (h(xi, yi + 1) * (1 - u) + h(xi + 1, yi + 1) * u) * v;
+}
+// The polar caps: sea ice from ~66° to the pole and – drawn the same way – past it, where the chart folds over.
+// Bands depend only on the distance to the pole, so the far side of the pole matches this side exactly.
+function wcDrawPolar(s, W, H) {
+    if (WC.poleN == null) return;
+    const R = (24 / 180) * (WC.circ / 2), now = Date.now() / 1000, pad = WC.roll ? Math.hypot(W, H) : 0;
+    const vx0 = camera.x - pad * fov, vy0 = camera.y - pad * fov, vy1 = camera.y + (H + pad) * fov;
+    for (const P of [WC.poleN, WC.poleS]) {
+        const y0 = Math.max(vy0, P - R), y1 = Math.min(vy1, P + R); if (y1 <= y0) continue;
+        const sy0 = worldToScreenY(y0), sy1 = worldToScreenY(y1);
+        ctx.fillStyle = '#dfe9ef'; ctx.fillRect(-pad, sy0, W + 2 * pad, sy1 - sy0);
+        const step = Math.max(24, 60 * s);                                    // sastrugi: wind-carved snow ridges running along the latitude lines
+        for (let y = Math.floor(y0 / 900) * 900; y < y1; y += 900) {
+            const d = Math.abs(y - P), n = wcNoise2(d / 4000, 3.7), sy = worldToScreenY(P + Math.sign(y - P || 1) * d);
+            if (n < 0.45) continue; ctx.fillStyle = `rgba(150,180,200,${(n - 0.45) * 0.5})`; ctx.fillRect(-pad, sy, W + 2 * pad, Math.max(1, 70 * s * n));
+        }
+        // the ragged ice edge, with floes breaking off into the polar sea
+        const edgeY = P + (P === WC.poleN ? R : -R), sEdge = worldToScreenY(edgeY);
+        if (sEdge > -200 && sEdge < H + 200) {
+            for (let x = Math.floor(vx0 / 1400) * 1400; x < camera.x + (W + pad) * fov; x += 1400) {
+                const r = wcRng(Math.floor(x / 1400) * 7919 + (P > 0 ? 1 : 0)), off = (r() - 0.3) * 6000 * (P === WC.poleN ? 1 : -1);
+                ctx.fillStyle = '#e8f0f4'; ctx.beginPath(); ctx.ellipse(worldToScreenX(x + r() * 900), worldToScreenY(edgeY + off), (300 + r() * 900) * s, (180 + r() * 500) * s, r() * 3, 0, 7); ctx.fill();
+            }
+        }
+        // the pole itself: every meridian meets on this line of the chart
+        const sp = worldToScreenY(P);
+        if (sp > -80 && sp < H + 80) {
+            ctx.strokeStyle = 'rgba(220,60,60,.55)'; ctx.setLineDash([10, 8]); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-pad, sp); ctx.lineTo(W + pad, sp); ctx.stroke(); ctx.setLineDash([]);
+            const cx = W / 2; ctx.fillStyle = '#c0392b'; for (let i = 0; i < 6; i++) { ctx.fillStyle = i % 2 ? '#fff' : '#c0392b'; ctx.fillRect(cx - 4 * s - 2, sp - (i + 1) * 14 * s, 8 * s + 4, 14 * s); }
+            ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.max(12, 20 * s)}px Ubuntu, sans-serif`; ctx.textAlign = 'center'; ctx.fillText(P === WC.poleN ? 'NORTH POLE · 90°N' : 'SOUTH POLE · 90°S', cx, sp + 26 * Math.max(0.6, s));
+        }
+    }
+}
+
+// ---- liveries and aircraft types ----
+const WC_AL_IDX = ['CA', 'WR', 'SJ', 'KW', 'HP', 'PL'];
+function wcAirline(al) { return (WC.air && WC.air.airlines[al]) || { name: 'Airline', c1: '#1d6fa5', c2: '#f2b233', tail: '#14213d' }; }
+function wcPlanePathFor(g, ac) {
+    if (ac !== 'prop') { wcPlanePath(g); return; }
+    g.beginPath();                                                                                     // turboprop: straight high wing, T-tail
+    g.moveTo(-100, -4); g.lineTo(-88, -36); g.lineTo(-78, -36); g.lineTo(-74, -6); g.lineTo(-10, -8); g.lineTo(-6, -98); g.lineTo(14, -98); g.lineTo(18, -9);
+    g.lineTo(92, -9); g.quadraticCurveTo(110, -7, 110, 0); g.quadraticCurveTo(110, 7, 92, 9);
+    g.lineTo(18, 9); g.lineTo(14, 98); g.lineTo(-6, 98); g.lineTo(-10, 8); g.lineTo(-74, 6); g.lineTo(-78, 36); g.lineTo(-88, 36); g.lineTo(-100, 4); g.closePath();
+}
+function wcPlaneSprite(liv, shadow) {
+    let al, ac; if (typeof liv === 'string' && liv.includes(':')) [al, ac] = liv.split(':'); else { al = WC_AL_IDX[(liv | 0) % 6]; ac = 'narrow'; }
+    const key = (shadow ? 'plS' : 'pl') + al + ac;
+    let c = wcSpriteCache.get(key); if (c) return c;
+    const sc = { prop: 0.7, narrow: 1, wide: 1.34 }[ac] || 1, CW = Math.ceil(260 * sc), CH = Math.ceil(230 * sc);
+    c = document.createElement('canvas'); c.width = Math.ceil(CW * wcSPR); c.height = Math.ceil(CH * wcSPR);
+    const g = c.getContext('2d'); g.scale(wcSPR * sc, wcSPR * sc); g.translate(125, 115);
+    if (shadow) { g.fillStyle = 'rgba(6,10,16,.32)'; wcPlanePathFor(g, ac); g.fill(); }
+    else {
+        const L = wcAirline(al);
+        g.fillStyle = '#59636b';
+        if (ac === 'wide') for (const y of [-38, -66, 38, 66]) { wcRR(g, y < -50 || y > 50 ? -8 : 4, y - 8, 32, 16, 7); g.fill(); }
+        else if (ac === 'narrow') for (const y of [-46, 46]) { wcRR(g, 2, y - 8, 34, 16, 7); g.fill(); }
+        g.fillStyle = '#eef1f3'; wcPlanePathFor(g, ac); g.fill(); g.strokeStyle = 'rgba(40,50,60,.45)'; g.lineWidth = 1.5; g.stroke();
+        if (ac === 'prop') for (const y of [-52, 52]) { g.fillStyle = '#59636b'; wcRR(g, 12, y - 7, 30, 14, 6); g.fill(); g.strokeStyle = 'rgba(30,30,30,.55)'; g.lineWidth = 3; g.beginPath(); g.moveTo(46, y - 22); g.lineTo(46, y + 22); g.stroke(); }
+        g.fillStyle = L.c1; g.fillRect(-96, -3.5, 190, 7);                                       // cheat line
+        g.fillStyle = L.tail || L.c1; g.beginPath(); g.moveTo(-112, -4); g.lineTo(-84, -4); g.lineTo(-74, 0); g.lineTo(-84, 4); g.lineTo(-112, 4); g.closePath(); g.fill();   // fin
+        g.fillStyle = L.c2; for (const y of [-92, 92]) { g.beginPath(); g.arc(ac === 'prop' ? 4 : -52, y, 5, 0, 7); g.fill(); }
+        g.fillStyle = '#1e2a33'; g.beginPath(); g.moveTo(98, -7); g.quadraticCurveTo(112, -5, 112, 0); g.quadraticCurveTo(112, 5, 98, 7); g.closePath(); g.fill();
+        g.fillStyle = '#2d3e4a'; for (let x = -70; x < 90; x += 9) { g.fillRect(x, -11, 4, 2.4); g.fillRect(x, 8.6, 4, 2.4); }
+        g.save(); g.fillStyle = L.c1; g.font = 'bold 9px Ubuntu, Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(L.name.toUpperCase().slice(0, 18), 4, -15); g.restore();
+    }
+    c._w = CW; c._h = CH; c._ox = 125 * sc; c._oy = 115 * sc; wcSpriteCache.set(key, c); return c;
+}
+function wcDrawPlane(context, sx, sy, a, alt, liv) {
+    const s = 1 / fov, k = 1 + 0.8 * alt, body = wcPlaneSprite(liv, false), sh = wcPlaneSprite(liv, true);
+    context.save(); context.translate(sx + alt * 260 * s, sy + alt * 320 * s); context.rotate(a); context.scale(0.95, 0.95);
+    context.globalAlpha = 1 - alt * 0.45; context.drawImage(sh, -sh._ox * s, -sh._oy * s, sh._w * s, sh._h * s); context.restore();
+    context.save(); context.translate(sx, sy); context.rotate(a); context.scale(k, k);
+    context.drawImage(body, -body._ox * s, -body._oy * s, body._w * s, body._h * s);
+    if ((performance.now() / 500 | 0) % 2 === 0) { context.fillStyle = '#ff3b3b'; context.beginPath(); context.arc(-50 * s, -body._oy * 0.82 * s, 3 * s + 1, 0, 7); context.fill(); context.fillStyle = '#3bff6b'; context.beginPath(); context.arc(-50 * s, body._oy * 0.82 * s, 3 * s + 1, 0, 7); context.fill(); }
+    context.restore();
+}
+function wcDrawFlightEntity(context, rPos, en) {
+    const f = en.fl;
+    rPos.flA = lerpAngle(rPos.flA !== undefined ? rPos.flA : f.a, f.a, 0.3);
+    rPos.flAlt = rPos.flAlt !== undefined ? rPos.flAlt + (f.alt - rPos.flAlt) * 0.2 : f.alt;
+    wcDrawPlane(context, 0, 0, rPos.flA, rPos.flAlt, f.al ? f.al + ':' + (f.ac || 'narrow') : (f.liv || 0));
+    const k = (1 + 0.8 * rPos.flAlt) * (f.ac === 'prop' ? 0.8 : 1);
+    context.save(); context.scale(k, k); drawEntityBody(context, rPos); context.restore();
+}
+
+// ---- scheduled air traffic: every route flies on a timetable, the same one the departures boards show ----
+WC._aiPaths = new Map();
+function wcAiPath(l) {
+    let P = WC._aiPaths.get(l.fn + l.from); if (P) return P;
+    const A = WC.airports.find(a => a.city === l.from), B = WC.airports.find(a => a.city === l.to); if (!A || !B) return null;
+    const pts = wcGCPath(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 80), cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    P = { pts, cum, L: cum[cum.length - 1] }; WC._aiPaths.set(l.fn + l.from, P); return P;
+}
+function wcAiFlights(now) {                                   // every scheduled flight in the air right now: [leg, fraction]
+    const out = []; if (!WC.air) return out;
+    for (const l of WC.air.legs) { const D = l.mins * 60000; for (let k = Math.floor((now - l.off) / l.per); k * l.per + l.off + D > now && k > -5; k--) { const t0 = k * l.per + l.off; if (now >= t0) out.push([l, (now - t0) / D]); } }
+    return out;
+}
+function wcAiPos(l, q) {
+    const P = wcAiPath(l); if (!P) return null; const d = q * P.L; let i = 1; while (i < P.cum.length - 1 && P.cum[i] < d) i++;
+    const a = P.pts[i - 1], b = P.pts[i], t = (d - P.cum[i - 1]) / ((P.cum[i] - P.cum[i - 1]) || 1);
+    let x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t, ang = Math.atan2(b[1] - a[1], b[0] - a[0]); const u = wcUnfold(x, y); if (u[2]) ang += Math.PI;
+    return { x: u[0], y: u[1], a: ang, alt: Math.max(0, Math.min(1, q * 9, (1 - q) * 9)) };
+}
+function wcDrawAiTraffic(s, vx0, vy0, vx1, vy1) {
+    if (!WC.air || WC.viewMode && s > 1.5) return;
+    const now = Date.now(); WC._aiNow = WC._aiNow && now - WC._aiNow.t < 1000 ? WC._aiNow : { t: now, list: wcAiFlights(now) };
+    for (const [l, q0] of WC._aiNow.list) {
+        const q = q0 + (now - WC._aiNow.t) / (l.mins * 60000); if (q > 1) continue;
+        const p = wcAiPos(l, q); if (!p) continue; const x = wcNearX(p.x);
+        if (x < vx0 - 600 || x > vx1 + 600 || p.y < vy0 - 600 || p.y > vy1 + 600) continue;
+        wcDrawPlane(ctx, worldToScreenX(x), worldToScreenY(p.y), p.a, p.alt, l.al + ':' + l.ac);
+    }
+}
+
+// ---- culture: palettes, signs in the local script, festivals ----
+const WC_CULT_WALL = {
+    west: { low: ['#a8754a', '#b98a5e', '#8f6a45', '#c29a6b', '#9b6b4f'], tower: '#9c8a74' },
+    sun: { low: ['#efe8da', '#f3ead6', '#e9dcc3', '#f6f1e7', '#e8d9bd'], tower: '#d8d2c4' },
+    isles: { low: ['#3fb6a8', '#f08a5d', '#f6d365', '#7fc8f8', '#e86a92', '#9ad27a'], tower: '#8fc9c0' }
+};
+function wcCultureOf(cityId) { const c = WC.cityById ? WC.cityById.get(cityId) : (WC.cities || []).find(q => q.id === cityId); return c && c.culture; }
+const WC_SOLANESE = { 'CITY HALL': 'CÁSA CIVÁ', SHOP: 'TÈNDA', BANK: 'BÁNCA', HOTEL: 'PÒSADA', CAFE: 'CÁFÈ', CAFÉ: 'CÁFÈ', MARKET: 'MERCÁT', BAKERY: 'FORNÈRIA', MALL: 'GALÈRIA', AIRPORT: 'AÈROPÒRT', SCHOOL: 'ESCÒLA', MOTORS: 'MÒTORS', INN: 'ALBÈRGA', SOUVENIRS: 'RÈCORDS', GROCERY: 'BOTÈGA', STORE: 'TÈNDA', PHARMACY: 'FÁRMACIA', BAR: 'BÁRRA', LEVELS: 'PIÁNOS', HANGAR: 'HÁNGAR' };
+function wcSolanese(text) { let t = String(text).toUpperCase(); if (WC_SOLANESE[t]) return WC_SOLANESE[t]; return t.split(' ').map(w => WC_SOLANESE[w] || w.replace(/A/g, 'Á').replace(/E/g, 'È').replace(/O/g, 'Ò')).join(' '); }
+// Kaimanan: an invented script. Each letter is a rounded glyph built from its code, so a word always looks the same.
+function wcGlyphs(g, text, cx, cy, h, col) {
+    const t = String(text).replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 16); if (!t) return;
+    const w = h * 0.86, x0 = cx - t.length * w / 2, r = h * 0.3;
+    g.save(); g.strokeStyle = col; g.fillStyle = col; g.lineWidth = Math.max(1, h * 0.11); g.lineCap = 'round';
+    for (let i = 0; i < t.length; i++) {
+        const c = t.charCodeAt(i) * 7 + 3, x = x0 + i * w + w / 2; g.beginPath();
+        if (c & 1) g.arc(x, cy, r, 0.4, Math.PI * 2 - 0.4); else { g.moveTo(x - r, cy - r); g.quadraticCurveTo(x, cy - r * 1.6, x + r, cy - r); }
+        if (c & 2) { g.moveTo(x, cy - r); g.lineTo(x, cy + r * 1.1); }
+        if (c & 4) { g.moveTo(x - r, cy + r * 0.7); g.quadraticCurveTo(x, cy + r * 1.5, x + r, cy + r * 0.7); }
+        if (c & 8) { g.moveTo(x - r, cy); g.lineTo(x + r * 0.4, cy); }
+        g.stroke(); if (c % 3 === 0) { g.beginPath(); g.arc(x + r * 0.2, cy - r * 1.5, h * 0.08, 0, 7); g.fill(); }
+    }
+    g.restore();
+}
+function wcFestival(city, now = Date.now()) {
+    const cu = city && WC.cultures && WC.cultures[city.culture]; if (!cu) return null;
+    const dms = WC.dayMs || WC_DAY_MS, hrs = 6 + now / dms * 24 + city.tz, day = Math.floor(hrs / 24), h = ((hrs % 24) + 24) % 24;
+    return (day + cu.idx) % 3 === 0 && (h >= 18 || h < 1) ? cu : null;
+}
+WC.fw = [];
+function wcDrawFestival(s, W, H) {
+    if (WC.viewMode) return;
+    const cx = camera.x + W * fov / 2, cy = camera.y + H * fov / 2, c = wcCityHere(cx, cy), cu = c && wcFestival(c), now = performance.now() / 1000;
+    if (cu && (!WC._fwT || now - WC._fwT > 0.55)) {
+        WC._fwT = now; const r = Math.random, x = cx + (r() - 0.5) * W * fov * 0.9, y = cy + (r() - 0.6) * H * fov * 0.7, hue = Math.floor(r() * 360), n = 44;
+        for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2, v = 160 + r() * 120; WC.fw.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t0: now, hue: (hue + (i % 3) * 25) % 360 }); }
+    }
+    WC.fw = WC.fw.filter(p => now - p.t0 < 1.7); if (!WC.fw.length) return;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    for (const p of WC.fw) { const t = now - p.t0, x = p.x + p.vx * t, y = p.y + p.vy * t + 90 * t * t, a = 1 - t / 1.7; ctx.fillStyle = `hsla(${p.hue},100%,65%,${a})`; ctx.beginPath(); ctx.arc(worldToScreenX(x), worldToScreenY(y), Math.max(1.5, 4 * s), 0, 7); ctx.fill(); }
+    ctx.restore();
+}
+// Entering a city: its name, its culture and the local greeting, briefly, in the middle of the screen.
+function wcCityWelcome(W, H) {
+    if (WC.scene !== 'ext') return;
+    const c = wcCityHere(camera.x + W * fov / 2, camera.y + H * fov / 2), id = c ? c.id : '';
+    if (id !== WC._cityNow) { WC._cityNow = id; if (c && WC._cityNowInit) WC._welcome = { c, t0: performance.now() }; WC._cityNowInit = true; }
+    const w = WC._welcome; if (!w) return; const t = (performance.now() - w.t0) / 1000; if (t > 4.5) { WC._welcome = null; return; }
+    const a = Math.min(1, t * 2, (4.5 - t) * 1.5), cu = WC.cultures && WC.cultures[w.c.culture], fest = wcFestival(w.c);
+    ctx.save(); ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(W / 2 - 300, H * 0.16, 600, fest ? 118 : 92);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 34px Georgia, serif'; ctx.fillText(w.c.name.toUpperCase(), W / 2, H * 0.16 + 40);
+    if (cu) { ctx.font = '15px Ubuntu, sans-serif'; ctx.fillStyle = '#ffe9a8'; ctx.fillText(`${cu.name} · ${wcTzLabel(w.c.tz)} · "${cu.greet}"`, W / 2, H * 0.16 + 66); if (w.c.culture === 'isles') wcGlyphs(ctx, w.c.name, W / 2, H * 0.16 + 84, 13, 'rgba(255,255,255,.8)'); }
+    if (fest) { ctx.fillStyle = '#ff9ad2'; ctx.font = 'bold 15px Ubuntu, sans-serif'; ctx.fillText(`🎆 ${fest.fest} tonight!`, W / 2, H * 0.16 + 106); }
+    ctx.restore();
+}
+
+// ---- the view out of the window, at the true height and cached ----
+// The building's footprint is the floor plan scaled down, so at ground level the street outside lines up with the walls.
+// Higher floors see the ground further below: it shrinks and slides more slowly (true perspective). Your own building
+// isn't drawn – you're standing in it. The view is rendered into a cache a little larger than the screen and only
+// redrawn when you've walked past the margin or every 350 ms, instead of every frame.
+function wcViewBuilding(D) {
+    if (D._vb) return D._vb;
+    let b = null;
+    if (D.bid) b = WC.allBld.get(D.bid) || null;
+    else if (D.hid) for (const q of WC.allBld.values()) if (q.hid === D.hid) { b = q; break; }
+    if (b) D._vb = b; return b;
+}
+function wcDrawOutsideView(D) {
+    const b = wcViewBuilding(D); if (!b) return false;
+    const fl = D.floor, W = canvas.width, H = canvas.height, S = Math.max(0.5, Math.min(fl.w / b.w, fl.h / b.h)), A = 1 + (D.theme.eh || 0) / 60;
+    const fovE = fov * A / S, icx = camera.x + W * fov / 2, icy = camera.y + H * fov / 2;
+    const gx = b.x + b.w / 2 + (icx - (fl.x + fl.w / 2)) / S, gy = b.y + b.h / 2 + (icy - (fl.y + fl.h / 2)) / S;
+    const V = WC.vcache || (WC.vcache = { c: document.createElement('canvas') }), M = 140, CW = W + 2 * M, CH = H + 2 * M, now = performance.now();
+    const dx = (gx - (V.gx ?? 1e12)) / fovE, dy = (gy - (V.gy ?? 1e12)) / fovE;
+    if (V.c.width !== CW || V.c.height !== CH || Math.abs(V.fov - fovE) > 1e-6 || V.bid !== b.id || Math.abs(dx) > M * 0.8 || Math.abs(dy) > M * 0.8 || now - V.t > 350) {
+        if (V.c.width !== CW || V.c.height !== CH) { V.c.width = CW; V.c.height = CH; V.g = V.c.getContext('2d'); wcBlurGuard(V.g); }
+        V.fov = fovE; V.bid = b.id; V.gx = gx; V.gy = gy; V.t = now;
+        const sv = { x: camera.x, y: camera.y, f: fov, cv: canvas, cx: ctx };
+        canvas = V.c; ctx = V.g; fov = fovE; camera.x = gx - CW * fov / 2; camera.y = gy - CH * fov / 2;
+        WC.viewMode = true; WC.viewSkip = b.id; WC.viewHc = Math.max(1600, 1900 * fovE) + (D.theme.eh || 0) * 1.2;
+        try { ctx.save(); ctx.clearRect(0, 0, CW, CH); wcDrawExteriorWrapped(); } catch (e) { console.warn('view', e); }
+        finally { ctx.restore(); canvas = sv.cv; ctx = sv.cx; fov = sv.f; camera.x = sv.x; camera.y = sv.y; WC.viewMode = false; WC.viewSkip = 0; WC.viewHc = 0; }
+    }
+    ctx.drawImage(V.c, -M - (gx - V.gx) / fovE, -M - (gy - V.gy) / fovE);
+    ctx.fillStyle = `rgba(160,200,235,${Math.min(0.28, 0.07 + 0.015 * A)})`; ctx.fillRect(0, 0, W, H);
+    return true;
+}
+
+// ---- in-flight screen: a real globe now ----
+function wcIfeDraw() {
+    const I = wcIfe; if (!I || !I.open || I.tab !== 'route' || !wcFlight || !WC.circ || WC.poleN == null) return;
+    const f = wcFlight, cv = I.cv, g = cv.getContext('2d'), Wc = cv.width, Hc = cv.height, C = WC.circ;
+    const me = gameState.entities.find(e => e.id === myId), rp = me && renderEntities.get(me.id), u = wcUnfold(rp ? rp.renderX : (me ? me.x : 0), rp ? rp.renderY : (me ? me.y : 0));
+    const plat = wcLat(u[1]), plon = u[0] / C * Math.PI * 2;
+    if (!I.drag && performance.now() - (I.idle || 0) > 4000) { I.rot *= 0.94; I.tilt = (I.tilt || 0) * 0.94; }
+    const lc = plon + I.rot, pc = Math.max(-1.45, Math.min(1.45, plat * 0.8 + (I.tilt || 0))), R = Hc * 0.46, cx = Wc * 0.36, cy = Hc / 2;
+    const sinPc = Math.sin(pc), cosPc = Math.cos(pc);
+    const P = (lat, lon) => { const dl = lon - lc, cl = Math.cos(lat); return [cx + R * cl * Math.sin(dl), cy - R * (cosPc * Math.sin(lat) - sinPc * cl * Math.cos(dl)), sinPc * Math.sin(lat) + cosPc * cl * Math.cos(dl)]; };
+    const PM = (x, y) => { const q = wcUnfold(x, y); return P(wcLat(q[1]), q[0] / C * Math.PI * 2); };
+    const bg = g.createLinearGradient(0, 0, 0, Hc); bg.addColorStop(0, '#040a16'); bg.addColorStop(1, '#0b1d33'); g.fillStyle = bg; g.fillRect(0, 0, Wc, Hc);
+    for (let i = 0; i < 80; i++) { g.fillStyle = `rgba(255,255,255,${0.25 + (i % 3) * 0.2})`; g.fillRect((i * 97) % Wc, (i * 53) % Hc, 1.3, 1.3); }
+    const oc = g.createRadialGradient(cx - R * 0.35, cy - R * 0.35, R * 0.1, cx, cy, R); oc.addColorStop(0, '#2f7fbf'); oc.addColorStop(1, '#0c3358'); g.fillStyle = oc; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.fill();
+    // land and ice, sampled on a 3° grid (cached per view)
+    const key = Math.round(lc * 40) + ',' + Math.round(pc * 40);
+    if (I._lk !== key) {
+        I._lk = key; const L = WC.land, cells = [], st = Math.PI / 60;
+        for (let la = -Math.PI / 2; la < Math.PI / 2; la += st) for (let lo = 0; lo < Math.PI * 2; lo += st) {
+            const lm = la + st / 2, om = lo + st / 2, x = om / (Math.PI * 2) * C, y = wcYofLat(lm), ice = Math.abs(lm) > 1.16, land = x > L.x0 && x < L.x1 && y > L.y0 && y < L.y1;
+            if (!ice && !land) continue; const p = P(lm, om); if (p[2] < 0) continue;
+            cells.push([P(la, lo), P(la, lo + st), P(la + st, lo + st), P(la + st, lo), ice ? 0 : 1, p[2], om]);
+        }
+        I._cells = cells;
+    }
+    const sunLon = (((Date.now() % (WC.dayMs || WC_DAY_MS)) / (WC.dayMs || WC_DAY_MS)) * -Math.PI * 2 + Math.PI / 2 + WC.center / C * Math.PI * 2);
+    for (const [a, b, c2, d, land, z, om] of I._cells) {
+        const day = Math.cos(om - sunLon), lit = 0.45 + 0.55 * z, dim = day < 0 ? 0.55 : 1;
+        g.fillStyle = land ? `rgb(${Math.round(95 * lit * dim)},${Math.round(150 * lit * dim)},${Math.round(78 * lit * dim)})` : `rgb(${Math.round(232 * lit * dim)},${Math.round(240 * lit * dim)},${Math.round(246 * lit * dim)})`;
+        g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.lineTo(c2[0], c2[1]); g.lineTo(d[0], d[1]); g.closePath(); g.fill();
+    }
+    // graticule, the date line
+    g.lineWidth = 1;
+    for (let k = 0; k < 12; k++) { const lo = k * Math.PI / 6, idl = k === 0; g.strokeStyle = idl ? 'rgba(255,110,110,.85)' : 'rgba(255,255,255,.14)'; g.setLineDash(idl ? [5, 4] : []); g.beginPath(); let pen = false; for (let la = -90; la <= 90; la += 3) { const p = P(la * Math.PI / 180, lo); if (p[2] < 0) { pen = false; continue; } pen ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); pen = true; } g.stroke(); }
+    g.setLineDash([]); g.strokeStyle = 'rgba(255,255,255,.12)';
+    for (let la = -60; la <= 60; la += 30) { g.beginPath(); let pen = false; for (let lo = 0; lo <= 360; lo += 4) { const p = P(la * Math.PI / 180, lo * Math.PI / 180); if (p[2] < 0) { pen = false; continue; } pen ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); pen = true; } g.stroke(); }
+    // the route: a great circle, over the pole when that's shorter
+    const A = WC.airports.find(a => a.city === f.from), B = WC.airports.find(a => a.city === f.to);
+    if (A && B) {
+        const pts = wcGCPath(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 120);
+        for (let i = 1; i < pts.length; i++) { const p = PM(...pts[i - 1]), q = PM(...pts[i]); if (p[2] < 0 || q[2] < 0) continue; g.strokeStyle = '#ffd23d'; g.lineWidth = 2.4; g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.stroke(); }
+    }
+    for (const c of WC.cities) { const p = PM(c.cx, c.cy); if (p[2] < 0.02) continue; const k = c.id === f.from || c.id === f.to; g.fillStyle = k ? '#ffd23d' : 'rgba(255,255,255,.85)'; g.beginPath(); g.arc(p[0], p[1], k ? 4 : 2.3, 0, 7); g.fill(); if (k || p[2] > 0.4) { g.font = `${k ? 'bold 12px' : '10px'} Ubuntu, sans-serif`; g.textAlign = 'left'; g.fillText(c.code, p[0] + 5, p[1] - 4); } }
+    for (const [la, lab] of [[Math.PI / 2, 'N'], [-Math.PI / 2, 'S']]) { const p = P(la, 0); if (p[2] > 0) { g.fillStyle = '#ff6b6b'; g.beginPath(); g.arc(p[0], p[1], 3, 0, 7); g.fill(); g.fillStyle = '#ffb3b3'; g.font = 'bold 10px Ubuntu'; g.fillText(lab + ' POLE', p[0] + 5, p[1] + 3); } }
+    const ap = P(-plat, plon + Math.PI); if (ap[2] > 0) { g.strokeStyle = 'rgba(255,120,200,.8)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(ap[0] - 5, ap[1] - 5); g.lineTo(ap[0] + 5, ap[1] + 5); g.moveTo(ap[0] + 5, ap[1] - 5); g.lineTo(ap[0] - 5, ap[1] + 5); g.stroke(); }
+    const pp = P(plat, plon), hd = rp && rp.flA !== undefined ? rp.flA + (u[2] ? Math.PI : 0) : 0, ahead = PM(u[0] + Math.cos(hd) * 20000, u[1] + Math.sin(hd) * 20000), ang = Math.atan2(ahead[1] - pp[1], ahead[0] - pp[0]);
+    g.save(); g.translate(pp[0], pp[1]); g.rotate(ang); g.fillStyle = '#fff'; g.beginPath(); g.moveTo(10, 0); g.lineTo(-7, -7); g.lineTo(-3, 0); g.lineTo(-7, 7); g.closePath(); g.fill(); g.restore();
+    g.strokeStyle = 'rgba(150,200,255,.35)'; g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, R + 1, 0, 7); g.stroke();
+    // side panel: the flight at a glance
+    const x0 = Wc * 0.68; g.textAlign = 'left'; g.fillStyle = '#fff'; g.font = 'bold 16px Ubuntu, sans-serif'; g.fillText(`${f.fn || ''} ${f.fromCode} → ${f.toCode}`, x0, 34);
+    g.font = '12px Ubuntu, sans-serif'; g.fillStyle = 'rgba(255,255,255,.75)';
+    const lines = [f.alName ? `${f.alName} · ${f.acName}` : '', f.cls === 'J' ? 'Business class' : 'Economy class', f.pole ? `Polar route over the ${f.pole === 'N' ? 'North' : 'South'} Pole` : `Great-circle route · ${({ east: 'eastbound', west: 'westbound', north: 'northbound', south: 'southbound' })[f.dir] || ''}`,
+        `${Math.round(f.rem / 1000).toLocaleString()} km to go · ETA ${Math.floor(f.eta / 60)}:${String(f.eta % 60).padStart(2, '0')}`, `Lat ${Math.abs(plat * 180 / Math.PI).toFixed(1)}°${plat >= 0 ? 'N' : 'S'} · Lon ${(((plon * 180 / Math.PI) % 360 + 540) % 360 - 180).toFixed(1)}°`, f.next ? `Then: ${f.next}` : ''];
+    lines.filter(Boolean).forEach((t, i) => g.fillText(t, x0, 58 + i * 19));
+    g.fillStyle = '#ff9ad2'; g.fillText('✕ your antipode · drag to spin', x0, Hc - 14);
+}
+
+// ---- check-in: one card per destination, every airline and connection as a buy row, Economy or Business ----
+let wcCardCls = 'Y';
+function wcRenderCards(p) {
+    if (!wcCardsEl) {
+        wcCardsEl = document.createElement('div'); wcCardsEl.id = 'wc-cards';
+        wcCardsEl.innerHTML = '<div class="wcc-head"><div><div class="wcc-title"></div><div class="wcc-sub"></div></div><div class="wcc-cls"><button data-c="Y">Economy</button><button data-c="J">Business</button></div><button class="wcc-x" title="Close">✕</button></div><div class="wcc-grid"></div>';
+        document.body.appendChild(wcCardsEl);
+        wcCardsEl.querySelector('.wcc-x').addEventListener('click', () => { wcCardsEl.style.display = 'none'; wcCardsEl.dataset.closed = wcCardsEl.dataset.id; });
+        wcCardsEl.querySelectorAll('.wcc-cls button').forEach(b => b.addEventListener('click', () => { wcCardCls = b.dataset.c; wcCardsEl.dataset.key = ''; wcRenderCards(wcCardsEl._p); }));
+        wcCardsEl.addEventListener('wheel', e => e.stopPropagation(), { passive: true });
+    }
+    if (!p) { wcCardsEl.style.display = 'none'; wcCardsEl.dataset.id = ''; return; }
+    wcCardsEl._p = p;
+    if (wcCardsEl.dataset.closed === p.id) return;
+    const key = JSON.stringify([p.id, p.lines, wcCardCls, p.actions.map(a => [a.a, a.on, a.onJ])]);
+    wcCardsEl.style.display = 'flex';
+    if (wcCardsEl.dataset.key === key) return;
+    wcCardsEl.dataset.key = key; wcCardsEl.dataset.id = p.id;
+    wcCardsEl.querySelector('.wcc-title').textContent = p.title || '';
+    wcCardsEl.querySelector('.wcc-sub').textContent = (p.lines || []).join(' · ');
+    wcCardsEl.querySelectorAll('.wcc-cls button').forEach(b => b.classList.toggle('on', b.dataset.c === wcCardCls));
+    wcCardsEl.querySelector('.wcc-grid').innerHTML = wcItinCardsHtml(p.actions, wcCardCls);
+    wcCardsEl.querySelectorAll('.wcc-buy').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); worldSend('world_interact', { id: p.id, a: b.dataset.a, cls: wcCardCls }); }));
+}
+function wcItinCardsHtml(actions, cls) {
+    const head = { east: 'Eastbound →', west: '← Westbound', north: '↑ Northbound', south: '↓ Southbound' }, groups = new Map();
+    for (const a of actions) (groups.get(a.city) || groups.set(a.city, []).get(a.city)).push(a);
+    return [...groups.values()].map(list => { const a0 = list[0]; return `
+        <div class="wcc-card">
+          <div class="wcc-img" style="background-image:url(${wcCitySnapshot(a0.city)})"><span class="wcc-code">${escapeHTML(a0.code)}</span><span class="wcc-tz">${escapeHTML(wcTzLabel(a0.tz))}</span></div>
+          <div class="wcc-cap"><div class="wcc-name">${escapeHTML(a0.name)}</div><div class="wcc-meta">${list.some(a => a.pole && !a.stops) ? `🧭 Over the ${list.find(a => a.pole && !a.stops).pole === 'N' ? 'North' : 'South'} Pole` : head[a0.head] || ''} · ${a0.km.toLocaleString()} km</div>
+          ${list.map(a => { const on = cls === 'J' ? a.onJ : a.on, fare = cls === 'J' ? a.fareJ : a.fare, L = wcAirline(a.legs[0].al);
+            return `<button class="wcc-buy" data-a="${escapeHTML(a.a)}" ${on ? '' : 'disabled'}><span class="wcc-al">${a.legs.map(l => `<i style="background:${wcAirline(l.al).c1}"></i>`).join('')}${escapeHTML(a.legs.map(l => l.fn).join(' + '))}</span><span class="wcc-route">${a.stops ? `${a.stops} stop · via ${escapeHTML(a.via.join(', '))}` : 'Nonstop'} · ${a.mins} min · ${escapeHTML(L.name)}${a.legs.length > 1 && a.legs.some(l => l.al !== a.legs[0].al) ? ' +' : ''}</span><b>${fare.toLocaleString()}</b></button>`; }).join('')}
+          </div>
+        </div>`; }).join('');
+}
+// the departures board: the real timetable for this airport
+function wcDepartures(D) {
+    const A = (WC.airports || []).find(a => a.city === (D.theme && D.theme.city)); if (!A || !WC.air) return [];
+    const now = Date.now(); if (WC._dep && WC._dep.k === A.code && now - WC._dep.t < 1000) return WC._dep.l;
+    const city = WC.cities.find(c => c.id === A.city), dms = WC.dayMs || WC_DAY_MS, rows = [];
+    for (const l of WC.air.legs) if (l.from === A.city) for (let k = Math.ceil((now - 60000 - l.off) / l.per), j = 0; j < 2; j++, k++) { const t = k * l.per + l.off; rows.push([t, l]); }
+    rows.sort((p, q) => p[0] - q[0]);
+    const clock = t => { const h = ((6 + (t % dms) / dms * 24 + city.tz) % 24 + 24) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); };
+    const out = rows.slice(0, 10).map(([t, l]) => { const B = WC.airports.find(a => a.city === l.to), st = t - now < 0 ? 'DEPARTED' : t - now < 90000 ? 'BOARDING' : (l.off % 7 === 0 ? 'DELAYED' : 'ON TIME'); return `${clock(t)} ${l.fn.padEnd(6)} ${B.code} ${WC.cities.find(c => c.id === l.to).name.toUpperCase().slice(0, 11).padEnd(11)} ${st}`; });
+    WC._dep = { k: A.code, l: out, t: now }; return out;
+}
+
+// ---- the phone ----
+const PH = { open: false, app: 'home', inbox: [], msgs: [], chat: null, flights: null, trip: null, hotels: null, players: null, unread: 0, from: null };
+const PH_APPS = [['maps', '🗺', 'Maps'], ['flights', '✈', 'Flights'], ['trips', '🎫', 'Trips'], ['hotels', '🏨', 'Hotels'], ['taxi', '🚕', 'Taxi'], ['bank', '🏦', 'Wallet'], ['clock', '🕐', 'World clock'], ['msgs', '💬', 'Messages'], ['work', '💼', 'Work'], ['settings', '⚙', 'Settings']];
+function phEl() {
+    if (PH.el) return PH.el;
+    const btn = document.createElement('button'); btn.id = 'wc-phone-btn'; btn.innerHTML = '📱<span id="ph-badge"></span>'; btn.title = 'Phone (P)'; btn.onclick = () => phToggle(); document.body.appendChild(btn);
+    const el = document.createElement('div'); el.id = 'wc-phone';
+    el.innerHTML = '<div class="ph-frame"><div class="ph-notch"></div><div class="ph-status"><span id="ph-time"></span><span id="ph-loc"></span><span>5G ▮▮▮ 🔋</span></div><div class="ph-screen" id="ph-screen"></div><button class="ph-homebar" title="Home"></button></div>';
+    document.body.appendChild(el);
+    el.querySelector('.ph-homebar').onclick = () => phGo('home');
+    el.addEventListener('wheel', e => e.stopPropagation(), { passive: true });
+    el.addEventListener('keydown', e => e.stopPropagation());
+    PH.el = el; PH.btn = btn;
+    setInterval(() => { if (!isWorldMode) { btn.style.display = 'none'; el.classList.remove('open'); return; } btn.style.display = 'flex'; phStatus(); if (PH.open && (PH.app === 'clock' || PH.app === 'trips' || PH.app === 'bank' || PH.app === 'work')) phRender(); }, 1000);
+    return el;
+}
+function phToggle(on) { phEl(); PH.open = on === undefined ? !PH.open : on; PH.el.classList.toggle('open', PH.open); if (PH.open) { PH.unread = 0; phBadge(); phRender(); } }
+function phGo(app) { PH.app = app; PH.chat = null; if (app === 'flights') worldSend('world_phone', { act: 'flights', from: PH.from || undefined }); if (app === 'trips') worldSend('world_phone', { act: 'trip' }); if (app === 'hotels') worldSend('world_phone', { act: 'hotels' }); if (app === 'msgs') worldSend('world_phone', { act: 'players' }); if (app === 'maps') { phToggle(false); wcMapToggle(true); return; } phRender(); }
+function phBadge() { const b = document.getElementById('ph-badge'); if (b) { b.textContent = PH.unread ? PH.unread : ''; b.style.display = PH.unread ? 'flex' : 'none'; } }
+function phLocalTime(tz) { const dms = WC.dayMs || WC_DAY_MS, hrs = 6 + Date.now() / dms * 24 + tz, h = ((hrs % 24) + 24) % 24; return { hh: String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'), day: Math.floor(hrs / 24), h }; }
+function phMyTz() { const me = gameState.entities.find(e => e.id === myId); return isWorldMode && WC.circ ? wcTzAt(me ? me.x : WC.pos.x) : 0; }
+function phStatus() { const t = document.getElementById('ph-time'), l = document.getElementById('ph-loc'); if (!t) return; t.textContent = phLocalTime(phMyTz()).hh; const me = gameState.entities.find(e => e.id === myId), c = me && WC.scene === 'ext' ? wcCityHere(me.x, me.y) : null; l.textContent = c ? c.code : WC.scene === 'ext' ? '' : '🏠'; }
+function phHead(title, back = 'home') { return `<div class="ph-head"><button class="ph-back" data-go="${back}">‹</button><b>${title}</b></div>`; }
+function phRender() {
+    if (!PH.open) return; const sc = document.getElementById('ph-screen'); if (!sc) return; const st = worldState || {};
+    let h = '';
+    switch (PH.app) {
+        case 'home':
+            h = `<div class="ph-wall"><div class="ph-big">${phLocalTime(phMyTz()).hh}</div><div class="ph-date">${escapeHTML((wcCityHere(camera.x + canvas.width * fov / 2, camera.y + canvas.height * fov / 2) || { name: 'On the road' }).name)}</div></div><div class="ph-grid">` + PH_APPS.map(([id, ic, nm]) => `<button class="ph-app" data-go="${id}"><span>${ic}</span>${nm}${id === 'msgs' && PH.unread ? '<em>' + PH.unread + '</em>' : ''}</button>`).join('') + '</div>';
+            break;
+        case 'flights': {
+            const F = PH.flights; h = phHead('Flights');
+            if (!F) { h += '<div class="ph-empty">Searching flights…</div>'; break; }
+            h += `<div class="ph-row"><label>From <select id="ph-from">${F.airports.map(a => `<option value="${a.city}" ${a.city === F.from ? 'selected' : ''}>${a.code}</option>`).join('')}</select></label><div class="ph-seg"><button data-cls="Y" class="${wcCardCls === 'Y' ? 'on' : ''}">Economy</button><button data-cls="J" class="${wcCardCls === 'J' ? 'on' : ''}">Business</button></div></div>`;
+            const groups = new Map(); for (const a of F.list) (groups.get(a.city) || groups.set(a.city, []).get(a.city)).push(a);
+            h += '<div class="ph-list">' + [...groups.values()].map(list => `<div class="ph-dest"><div class="ph-dh"><b>${escapeHTML(list[0].code)}</b> ${escapeHTML(list[0].name)} <small>${wcTzLabel(list[0].tz)}</small></div>` + list.map(a => {
+                const fare = wcCardCls === 'J' ? a.fareJ : a.fare, on = wcCardCls === 'J' ? a.onJ : a.on;
+                return `<button class="ph-opt" data-buy="${escapeHTML(a.a.slice(4))}" ${on ? '' : 'disabled'}><span>${a.legs.map(l => `<i style="background:${wcAirline(l.al).c1}"></i>${escapeHTML(l.fn)}`).join(' ')}<small>${a.stops ? 'via ' + escapeHTML(a.via.join(', ')) : 'Nonstop'} · ${a.mins} min</small></span><b>${fare.toLocaleString()}</b></button>`; }).join('') + '</div>').join('') + '</div>';
+            break;
+        }
+        case 'trips': {
+            const T = PH.trip; h = phHead('Trips');
+            if (!T) { h += '<div class="ph-empty">No trips booked.<br><button class="ph-btn" data-go="flights">Book a flight</button></div>'; break; }
+            h += `<div class="ph-note">Valid for ${Math.max(0, Math.round(T.left / 60000))} more minutes · ${T.cls === 'J' ? 'Business' : 'Economy'}</div>` + T.legs.map((l, i) => `<div class="ph-pass${i < T.i ? ' done' : i === T.i ? ' now' : ''}" style="--al:${wcAirline(l.al).c1}"><div class="ph-pt"><b>${escapeHTML(l.alName)}</b><span>${escapeHTML(l.fn)}</span></div><div class="ph-pr"><div><big>${escapeHTML(l.from)}</big><small>${escapeHTML(l.fromName)}</small></div><div class="ph-plane">✈</div><div><big>${escapeHTML(l.to)}</big><small>${escapeHTML(l.toName)}</small></div></div><div class="ph-pf"><span>${escapeHTML(l.ac)} · Gate 2</span><span class="ph-qr">${Array.from({ length: 36 }, (_, k) => `<i class="${(l.fn.charCodeAt(k % l.fn.length) * (k + 3)) % 3 ? '' : 'on'}"></i>`).join('')}</span></div>${i < T.i ? '<div class="ph-stamp">FLOWN</div>' : ''}</div>`).join('') + `<button class="ph-btn" data-nav="airport">🧭 Navigate to the airport</button>`;
+            break;
+        }
+        case 'hotels': {
+            const Hh = PH.hotels; h = phHead('Hotels');
+            if (!Hh) { h += '<div class="ph-empty">Finding rooms nearby…</div>'; break; }
+            h += '<div class="ph-list">' + Hh.list.map(q => `<div class="ph-hotel"><div><b>${escapeHTML(q.name)}</b><small>${q.k === 'hotel' ? '★'.repeat(q.stars || 4) : q.k === 'inn' ? 'Inn' : 'Motel'} · ${escapeHTML(q.city)} · ${q.km} km</small></div>${Hh.stay === q.bid ? '<span class="ph-tag">Booked</span>' : `<button class="ph-btn sm" data-book="${q.bid}">Book ${q.price}</button>`}<button class="ph-btn sm ghost" data-pin="${q.x},${q.y},${escapeHTML(q.name)}">🧭</button></div>`).join('') + '</div>';
+            break;
+        }
+        case 'taxi':
+            h = phHead('Taxi') + '<div class="ph-note">A cab comes to you, wherever you are on the road.</div><div class="ph-tiles">' + [['home', '🏠 Home'], ['work', '💼 Work'], ['airport', '✈ Airport'], ['hotel', '🏨 Hotel'], ['bank', '🏦 Bank'], ['mall', '🛍 Mall'], ['shop', '🛒 Shop'], ['fuel', '⛽ Fuel']].map(([t, l]) => `<button class="ph-btn" data-taxi="${t}">${l}</button>`).join('') + '</div><button class="ph-btn ghost" data-taxi="cancel">Cancel ride</button>';
+            break;
+        case 'bank':
+            h = phHead('Wallet') + `<div class="ph-card"><small>Cash (unbanked)</small><big>💵 ${Math.floor(st.sessionCoins || 0).toLocaleString()}</big><small>Bank account</small><big>🏦 ${Math.floor(st.bank || 0).toLocaleString()}</big></div><div class="ph-note">Cash is lost if you die – deposit it at any ATM. Casino winnings and wages go straight to the bank.</div><button class="ph-btn" data-nav="atm">🧭 Nearest ATM</button><button class="ph-btn ghost" data-nav="bank">🧭 Central Bank</button>`;
+            break;
+        case 'clock': {
+            const my = phLocalTime(phMyTz());
+            h = phHead('World clock') + '<div class="ph-list">' + (WC.cities || []).slice().sort((a, b) => a.tz - b.tz).map(c => { const t = phLocalTime(c.tz), d = t.day - my.day, cu = WC.cultures && WC.cultures[c.culture], f = wcFestival(c); return `<div class="ph-clk"><span>${t.h >= 6 && t.h < 19 ? '☀' : '🌙'}</span><div><b>${escapeHTML(c.name)}</b><small>${wcTzLabel(c.tz)} · ${cu ? escapeHTML(cu.name) : ''}${f ? ' · 🎆 ' + escapeHTML(f.fest) : ''}</small></div><div class="ph-t">${t.hh}<small>${d === 0 ? 'Today' : d > 0 ? 'Tomorrow' : 'Yesterday'}</small></div></div>`; }).join('') + '</div>';
+            break;
+        }
+        case 'msgs':
+            if (PH.chat) {
+                const conv = PH.msgs.filter(m => m.from === PH.chat || m.to === PH.chat);
+                h = `<div class="ph-head"><button class="ph-back" data-chat="">‹</button><b>${escapeHTML(PH.chat)}</b></div><div class="ph-conv" id="ph-conv">` + conv.map(m => `<div class="ph-bub${m.mine ? ' me' : ''}">${escapeHTML(m.text)}</div>`).join('') + '</div><form class="ph-send" id="ph-send"><input id="ph-in" maxlength="200" placeholder="Message" autocomplete="off"><button>↑</button></form>';
+                break;
+            }
+            h = phHead('Messages') + '<div class="ph-sub">Players online</div><div class="ph-list">' + ((PH.players && PH.players.list) || []).filter(q => !q.me).map(q => `<button class="ph-pl" data-chat="${escapeHTML(q.name)}"><b>${escapeHTML(q.name)}</b><small>${escapeHTML(q.city)}</small></button>`).join('') + (PH.players && PH.players.list.filter(q => !q.me).length ? '' : '<div class="ph-empty">Nobody else is online.</div>') + '</div><div class="ph-sub">Notifications</div><div class="ph-list">' + PH.inbox.slice(-30).reverse().map(n => `<div class="ph-ntf ${n.level || ''}">${escapeHTML(n.text)}</div>`).join('') + '</div>';
+            break;
+        case 'work': {
+            const j = st.job; h = phHead('Work');
+            h += j ? `<div class="ph-card"><small>${escapeHTML(j.name)}</small><big>${escapeHTML(j.rank)} ${escapeHTML(j.role)}</big><small>${j.tasks} tasks done · next promotion in ${j.next || '—'} · pay ${j.pay} per task</small></div><button class="ph-btn" data-nav="work">🧭 Navigate to work</button>` : '<div class="ph-empty">You are not employed. Walk into any office, shop or farm with a "Hiring" sign.</div>';
+            break;
+        }
+        case 'settings':
+            h = phHead('Settings') + `<div class="ph-sub">Graphics</div><div class="ph-seg wide">${[['auto', 'Auto'], ['high', 'High'], ['fast', 'Fast']].map(([k, l]) => `<button data-gfx="${k}" class="${WC.gfx === k ? 'on' : ''}">${l}</button>`).join('')}</div><div class="ph-note">Auto drops the glow effects when the frame rate dips. Currently: ${WC_HQ ? 'full effects' : 'fast mode'} · ${currentFps} FPS</div><div class="ph-sub">Satnav</div><button class="ph-btn ghost" data-nav="off">Turn satnav off</button><div class="ph-note">P opens and closes the phone. Esc closes it.</div>`;
+            break;
+    }
+    sc.innerHTML = h;
+    sc.querySelectorAll('[data-go]').forEach(b => b.onclick = () => phGo(b.dataset.go));
+    sc.querySelectorAll('[data-cls]').forEach(b => b.onclick = () => { wcCardCls = b.dataset.cls; phRender(); });
+    const fr = sc.querySelector('#ph-from'); if (fr) fr.onchange = () => { PH.from = fr.value; PH.flights = null; phRender(); worldSend('world_phone', { act: 'flights', from: fr.value }); };
+    sc.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => worldSend('world_phone', { act: 'buy', from: PH.flights.from, key: b.dataset.buy, cls: wcCardCls }));
+    sc.querySelectorAll('[data-book]').forEach(b => b.onclick = () => { worldSend('world_phone', { act: 'book', bid: +b.dataset.book }); setTimeout(() => worldSend('world_phone', { act: 'hotels' }), 400); });
+    sc.querySelectorAll('[data-pin]').forEach(b => b.onclick = () => { const [x, y, ...n] = b.dataset.pin.split(','); wcSetNav('pin', { x: +x, y: +y, label: n.join(',') }); });
+    sc.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => wcSetNav(b.dataset.nav));
+    sc.querySelectorAll('[data-taxi]').forEach(b => b.onclick = () => { if (b.dataset.taxi === 'cancel') worldSend('world_taxi', { act: 'cancel' }); else worldSend('world_taxi', { t: b.dataset.taxi }); phToggle(false); });
+    sc.querySelectorAll('[data-gfx]').forEach(b => b.onclick = () => { WC.gfx = b.dataset.gfx; try { localStorage.setItem('wcGfx', WC.gfx); } catch (e) {} WC_HQ = WC.gfx !== 'fast'; phRender(); });
+    sc.querySelectorAll('[data-chat]').forEach(b => b.onclick = () => { PH.chat = b.dataset.chat || null; phRender(); });
+    const form = sc.querySelector('#ph-send'); if (form) { const inp = sc.querySelector('#ph-in'); setTimeout(() => inp.focus(), 30); form.onsubmit = e => { e.preventDefault(); if (inp.value.trim()) worldSend('world_phone', { act: 'dm', to: PH.chat, text: inp.value.trim() }); inp.value = ''; }; const cv = sc.querySelector('#ph-conv'); cv.scrollTop = cv.scrollHeight; }
+}
+function phOnMsg(d) {
+    switch (d.act) {
+        case 'flights': PH.flights = d; PH.from = d.from; break;
+        case 'trip': PH.trip = d.trip; break;
+        case 'hotels': PH.hotels = d; break;
+        case 'players': PH.players = d; break;
+        case 'msg': PH.msgs.push(d); if (PH.msgs.length > 200) PH.msgs.shift(); if (!d.mine) { if (!(PH.open && PH.app === 'msgs' && PH.chat === d.from)) { PH.unread++; phBadge(); wcToast(`💬 ${d.from}: ${d.text}`); } } break;
+    }
+    if (PH.open) phRender();
+}
+
 function drawWorldEnvironment() {
     if (!wcTex) wcMakeTex();
+    if (WC.roll) { WC.roll *= 0.965; if (Math.abs(WC.roll) < 0.002) WC.roll = 0; }
     ctx.save();
-    if (WC.scene === 'ext') wcDrawExterior(); else wcDrawInterior();
+    if (WC.scene === 'ext') wcDrawExteriorWrapped(); else wcDrawInterior();
     ctx.restore();
+    if (WC.scene === 'ext' && !WC.roll) wcCityWelcome(canvas.width, canvas.height);
     wcIfeDraw();
     wcPositionPrompt();                                                   // keep the bubble glued to its building / car
     const now = performance.now(); if (now - wcChipT > 400) { wcChipT = now; wcRenderChip(); }   // shift countdown
@@ -4470,7 +4852,7 @@ function connectWS(regionStr, modeStr) {
 
             const latency = performance.now() - data.time;
 
-            document.getElementById('ping-display').innerText = ` ${latency.toFixed(1)} ms ${data.locationl}`;
+            document.getElementById('ping-display').innerText = ` ${latency.toFixed(1)} ms${data.location ? ' ' + data.location : ''}`;
 
             setTimeout(sendPing, latency*2);
 
@@ -5440,6 +5822,8 @@ ctx.translate(-((camera.x / fov) % scaledGridSize), -((camera.y / fov) % scaledG
 
     // World geometry is only a backdrop layer. Arena entities and combat
     // continue through the exact same shared renderer below.
+    const wcRolling = isWorldMode && WC.roll;
+    if (wcRolling) { ctx.fillStyle = '#dfe9ef'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.save(); ctx.translate(canvas.width / 2, canvas.height / 2); ctx.rotate(WC.roll); ctx.translate(-canvas.width / 2, -canvas.height / 2); }
     if (isWorldMode) drawWorldEnvironment();
 
     // --- TDM BASE DRAWING ---
@@ -6163,7 +6547,7 @@ if (e.square) {
 
 
 
-        const sx = worldToScreenX(rPos.renderX);
+        const sx = worldToScreenX(wcNearX(rPos.renderX));                  // the copy of this tank nearest the camera (the world wraps)
 
         const sy = worldToScreenY(rPos.renderY);
 
@@ -6304,6 +6688,7 @@ if (e.square) {
 
     });
 
+    if (wcRolling) ctx.restore();
     if (drawCounter % 10 === 0) {
 
         updateLeaderboard();
@@ -6365,6 +6750,8 @@ window.onkeydown = e => {
 
     if (isTypingInField(e)) return;
     if (typeof CAS !== 'undefined' && CAS.open) { if (e.key === 'Escape') casClose(); return; }
+    if (isWorldMode && (e.key === 'p' || e.key === 'P')) { phToggle(); return; }
+    if (isWorldMode && PH.open && e.key === 'Escape') { phToggle(false); return; }
 
     let key = e.key.toLowerCase();
 
