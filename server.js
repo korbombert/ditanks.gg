@@ -2935,10 +2935,10 @@ setInterval(() => {
 // a flight from a CT+12 city to a CT-6 city is shorter – and operated – eastbound.
 // Every city centre is a multiple of W_S from every other, so all cities share one global road grid.
 const W_S = 600;
-const W_GAP = 450000;                       // distance between neighbouring city centres = one 6-hour time zone
+const W_GAP = 675000;                       // distance between neighbouring city centres = one 6-hour time zone
 const W_COLS = 4;                           // CT-6, CT, CT+6, CT+12
 const W_CIRC = W_COLS * W_GAP;              // east-west circumference of the world
-const W_MARGIN = 50400;                     // land between the outermost city centres and the coast
+const W_MARGIN = 75600;                     // land between the outermost city centres and the coast
 const W_SHORE = 1800;                       // width of the beach strip that ends the land
 const W_EXTY = 2 * W_MARGIN + W_GAP;        // north-south size of the world
 const W_EXT = Math.max(W_CIRC, W_EXTY);     // index size (chunks / collision buckets)
@@ -2964,9 +2964,23 @@ const W_CITIES = [
     { id: 'redmesa',  name: 'Redmesa',      code: 'RMS', col: 0, row: 0, seedAdd: 404, style: 'generic', theme: 'mesa',    size: 25200, wageMul: 1.0,  priceMul: 0.9,  toll: 20 },
     { id: 'cedar',    name: 'Cedar Hollow', code: 'CDH', col: 0, row: 1, seedAdd: 505, style: 'rural',   theme: 'pine',    size: 15600, wageMul: 0.55, priceMul: 0.4,  toll: 5 },
     { id: 'kaimana',  name: 'Kaimana Bay',  code: 'KMB', col: 3, row: 0, seedAdd: 606, style: 'generic', theme: 'tropic',  size: 26400, wageMul: 1.25, priceMul: 1.2,  toll: 25 },
-    { id: 'hanami',   name: 'Hanami Ridge', code: 'HNR', col: 3, row: 1, seedAdd: 707, style: 'generic', theme: 'blossom', size: 24600, wageMul: 1.35, priceMul: 1.45, toll: 30 }
+    { id: 'hanami',   name: 'Hanami Ridge', code: 'HNR', col: 3, row: 1, seedAdd: 707, style: 'generic', theme: 'blossom', size: 24600, wageMul: 1.35, priceMul: 1.45, toll: 30 },
+    // the interior of the continent: four towns half-way between the northern and southern cities, and three crossroads
+    // towns between the time-zone columns (those keep their local solar offset: CT-3, CT+3, CT+9)
+    { id: 'dustwater', name: 'Dustwater',   code: 'DSW', col: 0,   row: 0.5, seedAdd: 808,  style: 'rural',   theme: 'mesa',   size: 14400, wageMul: 0.6,  priceMul: 0.45, toll: 5 },
+    { id: 'lakemont',  name: 'Lakemont',    code: 'LKM', col: 1,   row: 0.5, seedAdd: 909,  style: 'generic', theme: 'port',   size: 17400, wageMul: 1.05, priceMul: 1.0,  toll: 15 },
+    { id: 'amberfield', name: 'Amberfield', code: 'AMB', col: 2,   row: 0.5, seedAdd: 1010, style: 'rural',   theme: 'sun',    size: 15000, wageMul: 0.65, priceMul: 0.5,  toll: 5 },
+    { id: 'palmhaven', name: 'Palmhaven',   code: 'PLH', col: 3,   row: 0.5, seedAdd: 1111, style: 'generic', theme: 'tropic', size: 16800, wageMul: 1.1,  priceMul: 1.05, toll: 15 },
+    { id: 'junction',  name: 'Junction Falls', code: 'JNF', col: 0.5, row: 0.5, seedAdd: 1212, tz: -3, style: 'generic', theme: 'pine', size: 13800, wageMul: 0.9, priceMul: 0.8, toll: 10 },
+    { id: 'meridian',  name: 'Meridian Crossing', code: 'MRX', col: 1.5, row: 0.5, seedAdd: 1313, tz: 3, style: 'generic', theme: 'hill', size: 15600, wageMul: 1.0, priceMul: 0.95, toll: 10 },
+    { id: 'saffron',   name: 'Saffron Vale', code: 'SFV', col: 2.5, row: 0.5, seedAdd: 1414, tz: 9, style: 'oldtown', theme: 'old', size: 14400, wageMul: 1.0, priceMul: 1.1, toll: 10 }
 ];
-for (const c of W_CITIES) { c.cx = W_GAP / 2 + c.col * W_GAP; c.cy = W_CY + c.row * W_GAP; c.tz = (c.col - 1) * 6; c.border = c.size * 1.4; c.bp = null; }
+// Centres snap to the shared 600-unit road grid (relative to Central City), so every town's roads line up with the highways.
+for (const c of W_CITIES) {
+    c.cx = W_CX + Math.round((c.col - 1) * W_GAP / W_S) * W_S; c.cy = W_CY + Math.round(c.row * W_GAP / W_S) * W_S;
+    if (c.tz === undefined) c.tz = (c.col - 1) * 6;
+    c.border = c.size * 1.4; c.bp = null;
+}
 // City limit test. bp = outline radius sampled at W_BORDER_N angles (filled in when the layout is built).
 function cityBorderAt(c, ang) {
     if (!c.bp) return c.size;
@@ -3118,7 +3132,7 @@ function buildCityLayout(seed, city, idx) {
     };
     const nid = () => L.nid++;
     const style = city.style || 'generic';
-    const RURAL = style === 'rural' ? 1.9 : home ? 1.3 : 1.24, CORE = { cyber: 0.34, oldtown: 0.28, rural: 0.12 }[style] || 0.2;
+    const RURAL = style === 'rural' ? (R0 > 15000 ? 1.9 : 1.45) : home ? 1.3 : 1.24, CORE = { cyber: 0.34, oldtown: 0.28, rural: 0.12 }[style] || 0.2;
 
     // ---- 1. macro cells -----------------------------------------------------------------------------
     const M = Math.ceil(R0 * 1.36 * RURAL / 3600) + 1, MN = 2 * M;         // macro index I in [-M, M)
@@ -3204,9 +3218,9 @@ function buildCityLayout(seed, city, idx) {
         L.buildings.push(b); rectCol(b.x, b.y, b.w, b.h);
         return b;
     }
-    const addTree = (x, y, v, r = 9) => { L.props.push({ k: 'tree', x: Math.round(x), y: Math.round(y), v: v | 0, r: 24 + (v % 4) * 6 }); circCol(x, y, r); };
-    const addBench = (x, y, horiz = true) => { const w = horiz ? 56 : 20, h = horiz ? 20 : 56; L.props.push({ k: 'bench', x: Math.round(x - w / 2), y: Math.round(y - h / 2), w, h }); rectCol(x - w / 2, y - h / 2, w, h); };
-    const addLamp = (x, y) => { L.props.push({ k: 'lamp', x: Math.round(x), y: Math.round(y) }); circCol(x, y, 5); };
+    const addTree = (x, y, v, r = 9) => { const t = { k: 'tree', t: 1, x: Math.round(x), y: Math.round(y), v: v | 0, r }; L.props.push(t); L.colliders.push(t); };   // a tree is its own collider
+    const addBench = (x, y, horiz = true) => { const w = horiz ? 56 : 20, h = horiz ? 20 : 56, b = { k: 'bench', t: 0, x: Math.round(x - w / 2), y: Math.round(y - h / 2), w, h }; L.props.push(b); L.colliders.push(b); };
+    const addLamp = (x, y) => { const l = { k: 'lamp', t: 1, x: Math.round(x), y: Math.round(y), r: 5 }; L.props.push(l); L.colliders.push(l); };   // props double as their own colliders
     const addDeco = (k, x, y, w, h, extra) => L.props.push(Object.assign({ k, x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) }, extra || {}));
     function addLot(x, y, w, h, dealer) {
         const lot = { id: nid(), x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), dealer: !!dealer };
@@ -3233,7 +3247,7 @@ function buildCityLayout(seed, city, idx) {
         addLamp(B.x + o, B.y + B.h - o); addLamp(B.x + B.w - o, B.y + B.h - o);
         addLamp(B.x + B.w / 2, B.y + o); addLamp(B.x + B.w / 2, B.y + B.h - o);
         addLamp(B.x + o, B.y + B.h / 2); addLamp(B.x + B.w - o, B.y + B.h / 2);
-        if (wHash(seed, Math.round(B.x), Math.round(B.y)) < 0.55) { const ax = Math.round(B.x + B.w * 0.27), ay = Math.round(B.y + 6); L.props.push({ k: 'atm', x: ax, y: ay, w: 26, h: 14 }); rectCol(ax, ay, 26, 14); }
+        if (wHash(seed, Math.round(B.x), Math.round(B.y)) < 0.55) { const ax = Math.round(B.x + B.w * 0.27), ay = Math.round(B.y + 6), atm = { k: 'atm', t: 0, x: ax, y: ay, w: 26, h: 14 }; L.props.push(atm); L.colliders.push(atm); }
     }
     const inset = (r, d) => ({ x: r.x + d, y: r.y + d, w: r.w - 2 * d, h: r.h - 2 * d });
 
@@ -3693,63 +3707,197 @@ function cityBorderOutline(C, city) {
     return mx.map((_, i) => Math.round(win(mx, i, v => v.reduce((p, q) => p + q, 0) / v.length)));
 }
 
-// ---- along the highways: service areas (fuel, motel, diner), forests, lakes and billboards ------------------------------
-function addHighwayExtras(L, seed) {
-    let id = 9000000;
-    const rect = (h, s, side, u0, v0, w, hh) => {
-        const E = h.hw + 30;
-        if (h.a === 'h') return { x: Math.round(s + u0), y: Math.round(side > 0 ? h.p + E + v0 : h.p - E - v0 - hh), w: Math.round(w), h: Math.round(hh) };
-        return { x: Math.round(side > 0 ? h.p + E + v0 : h.p - E - v0 - hh), y: Math.round(s + u0), w: Math.round(hh), h: Math.round(w) };
+// ---- the countryside: service areas along every highway, and forests, farms, villages, orchards, wind farms, lakes and
+// rocks both beside the highways and across the open interior of the continent. An occupancy grid keeps features from
+// overlapping each other, the roads and the towns.
+function addCountryside(L, seed) {
+    let id = 50000000;
+    const OC = 400, occ = new Set(), key = (i, j) => i * 100000 + j;
+    const cellsOf = (r, fn) => { for (let i = Math.floor(r.x / OC); i <= Math.floor((r.x + r.w) / OC); i++) for (let j = Math.floor(r.y / OC); j <= Math.floor((r.y + r.h) / OC); j++) if (fn(key(i, j)) === false) return false; return true; };
+    const mark = r => cellsOf(r, k => { occ.add(k); });
+    const nearCity = (x, y, m) => W_CITIES.some(c => Math.abs(x - c.cx) < c.extR + m && Math.abs(y - c.cy) < c.extR + m && Math.hypot(x - c.cx, y - c.cy) < c.extR + m);   // extR covers the farm/forest ring too
+    const free = (r, m = 2200) => {
+        if (r.x < W_LAND.x0 + 600 || r.y < W_LAND.y0 + 600 || r.x + r.w > W_LAND.x1 - 600 || r.y + r.h > W_LAND.y1 - 600) return false;
+        for (const [px, py] of [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h], [r.x + r.w / 2, r.y + r.h / 2]]) if (nearCity(px, py, m)) return false;
+        return cellsOf(r, k => !occ.has(k));
     };
-    const pt = (h, s, side, u, v) => { const E = h.hw + 30; return h.a === 'h' ? { x: s + u, y: h.p + side * (E + v) } : { x: h.p + side * (E + v), y: s + u }; };
-    const doorDir = (h, side) => h.a === 'h' ? (side > 0 ? 'N' : 'S') : (side > 0 ? 'W' : 'E');
+    // highways and their junctions are off limits
+    for (const h of L.highways) mark(h.a === 'h' ? { x: h.s0, y: h.p - 340, w: h.s1 - h.s0, h: 680 } : { x: h.p - 340, y: h.s0, w: 680, h: h.s1 - h.s0 });
+    for (const j of L.xjunctions) if (j.tj) mark({ x: j.x - 900, y: j.y - 900, w: 1800, h: 1800 });
+    const tree = (x, y, v, check = true) => {
+        const r = { x: x - 30, y: y - 30, w: 60, h: 60 }; if (check && !free(r, 400)) return false;
+        const t = { k: 'tree', t: 1, x: Math.round(x), y: Math.round(y), v, r: 10 }; L.props.push(t); L.colliders.push(t); return true;
+    };
     const bld = (kind, r, extra) => {
-        const b = Object.assign({ id: id++, k: kind, x: r.x, y: r.y, w: r.w, h: r.h }, extra || {}), d = b.door || (b.door = { dir: 'S' });
+        const b = Object.assign({ id: id++, k: kind, x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) }, extra || {}), d = b.door || (b.door = { dir: 'S' });
         d.x = Math.round(d.dir === 'E' ? b.x + b.w : d.dir === 'W' ? b.x : b.x + b.w / 2); d.y = Math.round(d.dir === 'S' ? b.y + b.h : d.dir === 'N' ? b.y : b.y + b.h / 2);
         L.buildings.push(b); L.colliders.push({ t: 0, x: b.x, y: b.y, w: b.w, h: b.h }); return b;
     };
-    const tree = (x, y, v) => { L.props.push({ k: 'tree', x: Math.round(x), y: Math.round(y), v, r: 24 + (v % 4) * 6 }); L.colliders.push({ t: 1, x, y, r: 10 }); };
+    const deco = (k, r, extra, solid) => { L.props.push(Object.assign({ k, x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) }, extra || {})); if (solid) L.colliders.push({ t: 0, x: r.x, y: r.y, w: r.w, h: r.h }); };
+    const house = (r, dir, rng, price) => {
+        const hid = 'v' + id, b = bld('house', r, { s: Math.floor(rng() * 9999), t: Math.floor(rng() * 6), r: Math.floor(rng() * 6), door: { dir }, tier: rng() < 0.3 ? 1 : 0, price, hid, gar: rng() > 0.5, por: rng() > 0.4, fen: rng() > 0.4, lot: [Math.round(r.x - 30), Math.round(r.y - 30), Math.round(r.w + 60), Math.round(r.h + 60)] });
+        L.houses.push(b); return b;
+    };
+    const stats = { trees: 0, farms: 0, villages: 0, forests: 0, turbines: 0, lakes: 0 };
+
+    // ---- features (each returns false if it does not fit) ----
+    function forest(cx, cy, rad, rng, dens = 1) {
+        if (!free({ x: cx - rad * 0.4, y: cy - rad * 0.4, w: rad * 0.8, h: rad * 0.8 }, 1500)) return false;
+        const n = Math.floor(rad * rad / 70000 * dens); let k = 0;
+        for (let i = 0; i < n; i++) { const a = rng() * Math.PI * 2, d = Math.sqrt(rng()) * rad * (0.85 + 0.15 * Math.sin(a * 3 + cx)); if (tree(cx + Math.cos(a) * d, cy + Math.sin(a) * d, rng() < 0.75 ? Math.floor(rng() * 4) * 2 : Math.floor(rng() * 8))) k++; }
+        mark({ x: cx - rad, y: cy - rad, w: 2 * rad, h: 2 * rad });
+        stats.forests++; stats.trees += k; return k > 0;
+    }
+    function farm(cx, cy, rng) {
+        const nx = 2 + Math.floor(rng() * 2), ny = 2, fw = 520, fh = 420, gap = 40, W = nx * (fw + gap) + 420, H = ny * (fh + gap);
+        const R = { x: cx - W / 2, y: cy - H / 2, w: W, h: H }; if (!free({ x: R.x - 80, y: R.y - 80, w: R.w + 160, h: R.h + 160 })) return false;
+        mark({ x: R.x - 80, y: R.y - 80, w: R.w + 160, h: R.h + 160 });
+        const crop = Math.floor(rng() * 5);
+        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+            const f = { id: id++, x: Math.round(R.x + i * (fw + gap)), y: Math.round(R.y + j * (fh + gap)), w: fw, h: fh, kind: 'farm', crop: (crop + i + j) % 5, target: 12 };
+            L.fields.push(f); deco('fence', { x: f.x - 14, y: f.y - 14, w: f.w + 28, h: f.h + 28 });
+        }
+        const sx = R.x + nx * (fw + gap) + 30;                    // farmstead to the east of the fields
+        house({ x: sx, y: R.y + 40, w: 150, h: 110 }, 'S', rng, 6500).k = 'farmhouse';
+        bld('barn', { x: sx + 10, y: R.y + 300, w: 240, h: 160 }, { s: Math.floor(rng() * 9999), door: { dir: 'S' } });
+        deco('silo', { x: sx + 280, y: R.y + 60, w: 84, h: 84 }); L.colliders.push({ t: 1, x: sx + 322, y: R.y + 102, r: 42 });
+        for (let q = 0; q < 5; q++) { const hx = sx + 40 + rng() * 280, hy = R.y + 500 + rng() * Math.max(40, H - 560); if (hy < R.y + H - 30) { deco('hay', { x: hx - 18, y: hy - 18, w: 36, h: 36 }); L.colliders.push({ t: 1, x: hx, y: hy, r: 16 }); } }
+        stats.farms++; return true;
+    }
+    function orchard(cx, cy, rng) {
+        const nx = 6 + Math.floor(rng() * 4), ny = 4 + Math.floor(rng() * 3), sp = 130, R = { x: cx - nx * sp / 2, y: cy - ny * sp / 2, w: nx * sp, h: ny * sp };
+        if (!free(R)) return false; mark(R); const v = rng() < 0.5 ? 1 : 5;
+        deco('meadow', { x: R.x - 30, y: R.y - 30, w: R.w + 60, h: R.h + 60 });
+        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) tree(R.x + (i + 0.5) * sp, R.y + (j + 0.5) * sp, v, false);
+        stats.trees += nx * ny; return true;
+    }
+    function windfarm(cx, cy, rng, horiz) {
+        const n = 3 + Math.floor(rng() * 4), sp = 320, R = horiz ? { x: cx - n * sp / 2, y: cy - 120, w: n * sp, h: 240 } : { x: cx - 120, y: cy - n * sp / 2, w: 240, h: n * sp };
+        if (!free(R)) return false; mark(R);
+        for (let i = 0; i < n; i++) { const x = horiz ? R.x + (i + 0.5) * sp : cx, y = horiz ? cy : R.y + (i + 0.5) * sp; L.props.push({ k: 'turbine', x: Math.round(x - 12), y: Math.round(y - 12), w: 24, h: 24, ph: Math.round(rng() * 628) / 100 }); L.colliders.push({ t: 1, x, y, r: 13 }); }
+        stats.turbines += n; return true;
+    }
+    function lake(cx, cy, rng) {
+        const rx = 500 + rng() * 900, ry = 300 + rng() * 500, R = { x: cx - rx - 60, y: cy - ry - 60, w: 2 * rx + 120, h: 2 * ry + 120 };
+        if (!free(R)) return false; mark(R);
+        L.props.push({ k: 'lake', x: Math.round(R.x), y: Math.round(R.y), w: Math.round(R.w), h: Math.round(R.h), rx: Math.round(rx), ry: Math.round(ry) });
+        for (let i = 0; i < 10; i++) { const a = rng() * Math.PI * 2; tree(cx + Math.cos(a) * (rx + 140 + rng() * 200), cy + Math.sin(a) * (ry + 140 + rng() * 200), Math.floor(rng() * 8)); }
+        stats.lakes++; return true;
+    }
+    function rocks(cx, cy, rng) {
+        const R = { x: cx - 300, y: cy - 300, w: 600, h: 600 }; if (!free(R)) return false; mark(R);
+        const n = 4 + Math.floor(rng() * 6);
+        for (let i = 0; i < n; i++) { const x = cx + (rng() - 0.5) * 520, y = cy + (rng() - 0.5) * 520, r = 14 + rng() * 26; L.props.push({ k: 'rock', x: Math.round(x - r), y: Math.round(y - r), w: Math.round(2 * r), h: Math.round(2 * r), v: Math.floor(rng() * 4) }); L.colliders.push({ t: 1, x, y, r: r * 0.85 }); }
+        return true;
+    }
+    function meadow(cx, cy, rng) {
+        const R = { x: cx - 450, y: cy - 300, w: 900, h: 600 }; if (!free(R)) return false; mark(R);
+        deco('meadow', R);
+        for (let i = 0; i < 7; i++) { const x = R.x + 60 + rng() * (R.w - 120), y = R.y + 60 + rng() * (R.h - 120); deco('hay', { x: x - 18, y: y - 18, w: 36, h: 36 }); L.colliders.push({ t: 1, x, y, r: 16 }); }
+        return true;
+    }
+    // a hamlet: houses round a small green with a general store and a well; the houses can be bought
+    function village(cx, cy, rng) {
+        const R = { x: cx - 760, y: cy - 760, w: 1520, h: 1520 }; if (!free(R, 3000)) return false; mark(R);
+        deco('green', { x: cx - 320, y: cy - 320, w: 640, h: 640 });
+        deco('well', { x: cx - 26, y: cy - 26, w: 52, h: 52 }); L.colliders.push({ t: 1, x: cx, y: cy, r: 24 });
+        const spots = [];
+        for (let i = 0; i < 4; i++) spots.push(['N', cx - 560 + i * 300, cy - 620]), spots.push(['S', cx - 560 + i * 300, cy + 500]);
+        spots.push(['W', cx - 640, cy - 220], ['W', cx - 640, cy + 120], ['E', cx + 510, cy - 220], ['E', cx + 510, cy + 120]);
+        const store = Math.floor(rng() * spots.length);
+        spots.forEach(([side, x, y], i) => {
+            const dir = { N: 'S', S: 'N', W: 'E', E: 'W' }[side], r = side === 'N' || side === 'S' ? { x, y, w: 170, h: 120 } : { x, y, w: 130, h: 160 };
+            if (i === store) bld('shop', r, { s: 4, t: 2, aw: 2, shop: 'general', sn: 'General Store', door: { dir } });
+            else if (rng() < 0.85) house(r, dir, rng, 9000);
+        });
+        for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; tree(cx + Math.cos(a) * 250, cy + Math.sin(a) * 250, Math.floor(rng() * 8), false); }
+        stats.villages++; return true;
+    }
+
+    // ---- along the highways ----
     const hwRoads = L.xroads.filter(r => r.c === 'x');
     L.services = [];
+    const pt = (h, s, side, v) => { const E = 130 + 30; return h.a === 'h' ? { x: s, y: h.p + side * (E + v) } : { x: h.p + side * (E + v), y: s }; };
     L.highways.forEach((h, hi) => {
         const road = hwRoads[hi], len = h.s1 - h.s0, rng = wRng((seed ^ (hi * 7919 + 13)) >>> 0), stops = [];
-        [0.2, 0.5, 0.8].forEach((fr, i) => {
-            const s = Math.round(h.s0 + len * fr), side = (hi + i) % 2 ? 1 : -1, dd = doorDir(h, side);
-            stops.push(s);
-            const pave = rect(road, s, side, -780, 0, 1820, 860);
-            L.props.push({ k: 'pave', ...pave });
-            // fuel station: canopy + 3 pump islands (drive under it), shop behind
-            const can = rect(road, s, side, -740, 150, 460, 240);
-            L.props.push({ k: 'canopy', ...can, brand: FUEL_BRANDS[(hi + i) % FUEL_BRANDS.length] });
-            for (let q = 0; q < 3; q++) {
-                const c = pt(road, s, side, -740 + 460 * (q + 0.5) / 3, 270);
-                const pr = h.a === 'h' ? { x: Math.round(c.x - 10), y: Math.round(c.y - 34), w: 20, h: 68 } : { x: Math.round(c.x - 34), y: Math.round(c.y - 10), w: 68, h: 20 };
-                L.props.push({ k: 'pump', ...pr, id: id++ }); L.colliders.push({ t: 0, ...pr });
-            }
-            bld('shop', rect(road, s, side, -760, 520, 300, 190), { s: 5, t: 1, aw: 3, shop: 'grocery', sn: 'Grocery', fuel: 1, door: { dir: dd } });
-            bld('shop', rect(road, s, side, -420, 520, 260, 190), { s: 9, t: 3, aw: 0, shop: 'cafe', sn: 'Diner', door: { dir: dd } });
-            bld('motel', rect(road, s, side, 0, 500, 680, 230), { s: 3 + i, r: (hi + i) % 6, nm: ['Starlite Motel', 'Highway Rest', 'Sunset Motor Inn', 'Pine Lodge Motel'][(hi + i) % 4], door: { dir: dd } });
-            const lot = rect(road, s, side, 0, 130, 680, 300);
-            if (h.a === 'h') { const l = { id: id++, ...lot, dealer: false }; L.lots.push(l); }
-            for (let q = 0; q < 6; q++) { const p = pt(road, s, side, -760 + rng() * 1780, 800 + rng() * 160); tree(p.x, p.y, Math.floor(rng() * 8)); }
-            L.services.push({ x: pt(road, s, side, 0, 400).x, y: pt(road, s, side, 0, 400).y, name: 'Service area' });
-        });
-        // forests, lakes, billboards
-        for (let s = h.s0 + 4000; s < h.s1 - 4000; s += 6500) {
-            if (stops.some(q => Math.abs(q - s) < 2600)) continue;
-            const r = rng();
-            if (r < 0.06) { const side = rng() < 0.5 ? 1 : -1, c = pt(road, s, side, 0, 1600 + rng() * 2000); L.props.push({ k: 'lake', x: Math.round(c.x - 900), y: Math.round(c.y - 600), w: 1800, h: 1200, rx: Math.round(500 + rng() * 400), ry: Math.round(300 + rng() * 280) }); continue; }
-            if (r < 0.52) {
-                const side = rng() < 0.5 ? 1 : -1, rad = 500 + rng() * 1100, c = pt(road, s, side, (rng() - 0.5) * 2000, 500 + rad + rng() * 2400), n = Math.floor(rad / 45);
-                for (let q = 0; q < n; q++) { const a = rng() * Math.PI * 2, d = Math.sqrt(rng()) * rad; tree(c.x + Math.cos(a) * d, c.y + Math.sin(a) * d, Math.floor(rng() * 8)); }
-            } else if (r > 0.9) {
-                const side = rng() < 0.5 ? 1 : -1, c = pt(road, s, side, 0, 120), co = W_COMPANIES[Math.floor(rng() * W_COMPANIES.length)];
-                const pr = h.a === 'h' ? { x: Math.round(c.x - 90), y: Math.round(c.y - 8), w: 180, h: 16 } : { x: Math.round(c.x - 8), y: Math.round(c.y - 90), w: 16, h: 180 };
-                L.props.push({ k: 'billboard', ...pr, txt: co.name, col: co.color }); L.colliders.push({ t: 0, ...pr });
+        const nSvc = len > 300000 ? 3 : len > 120000 ? 2 : 1;
+        for (let i = 0; i < nSvc; i++) {
+            const s = Math.round(h.s0 + len * (i + 1) / (nSvc + 1)), side = (hi + i) % 2 ? 1 : -1;
+            if (addServiceArea(L, road, h, s, side, hi, i, () => id++, mark, free)) stops.push(s);
+        }
+        for (let s = h.s0 + 3000; s < h.s1 - 3000; s += 3600) {
+            if (stops.some(q => Math.abs(q - s) < 1800)) continue;
+            for (const side of [-1, 1]) {
+                const r = rng(), off = (lo, hi2) => lo + rng() * (hi2 - lo);
+                if (r < 0.24) { const n = 6 + Math.floor(rng() * 10), v = Math.floor(rng() * 4) * 2, o = off(250, 300); for (let q = 0; q < n; q++) { const c = pt(h, s + q * 75 - n * 37, side, o); if (tree(c.x, c.y, v)) stats.trees++; } const a = pt(h, s - n * 37 - 40, side, o - 40), b = pt(h, s + n * 37 + 40, side, o + 40); mark({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) }); }
+                else if (r < 0.46) { const c = pt(h, s, side, off(800, 2600)); forest(c.x, c.y, off(600, 1500), rng); }
+                else if (r < 0.6) { const c = pt(h, s, side, off(1400, 2600)); farm(c.x, c.y, rng); }
+                else if (r < 0.66) { const c = pt(h, s, side, off(900, 2000)); orchard(c.x, c.y, rng); }
+                else if (r < 0.7) { const c = pt(h, s, side, off(700, 1600)); windfarm(c.x, c.y, rng, h.a === 'h'); }
+                else if (r < 0.725) { const c = pt(h, s, side, off(1800, 2600)); village(c.x, c.y, rng); }
+                else if (r < 0.75) { const c = pt(h, s, side, off(1500, 3000)); lake(c.x, c.y, rng); }
+                else if (r < 0.8) { const c = pt(h, s, side, off(600, 1800)); rocks(c.x, c.y, rng); }
+                else if (r < 0.85) { const c = pt(h, s, side, off(800, 1800)); meadow(c.x, c.y, rng); }
+                else if (r < 0.88) {
+                    const c = pt(h, s, side, 120), co = W_COMPANIES[Math.floor(rng() * W_COMPANIES.length)];
+                    const pr = h.a === 'h' ? { x: Math.round(c.x - 90), y: Math.round(c.y - 8), w: 180, h: 16 } : { x: Math.round(c.x - 8), y: Math.round(c.y - 90), w: 16, h: 180 };
+                    if (free(pr, 1500)) { mark(pr); L.props.push({ k: 'billboard', ...pr, txt: co.name, col: co.color }); L.colliders.push({ t: 0, ...pr }); }
+                }
             }
         }
     });
+    // ---- the open interior of the continent ----
+    const rng = wRng((seed ^ 0xc0ffee) >>> 0), CELL = 36000;
+    const distHw = (x, y) => { let m = Infinity; for (const h of L.highways) { const al = h.a === 'h' ? x : y, pe = h.a === 'h' ? y : x, c = Math.max(h.s0, Math.min(h.s1, al)); m = Math.min(m, Math.hypot(al - c, pe - h.p)); } return m; };
+    for (let x = W_LAND.x0 + CELL / 2; x < W_LAND.x1; x += CELL) for (let y = W_LAND.y0 + CELL / 2; y < W_LAND.y1; y += CELL) {
+        const cx = x + (rng() - 0.5) * CELL * 0.6, cy = y + (rng() - 0.5) * CELL * 0.6, r = rng();
+        if (distHw(cx, cy) < 4000 || nearCity(cx, cy, 5000)) continue;
+        if (r < 0.32) forest(cx, cy, 1800 + rng() * 2000, rng, 0.85);
+        else if (r < 0.52) { for (let q = 0; q < 2 + Math.floor(rng() * 2); q++) farm(cx + (rng() - 0.5) * 6000, cy + (rng() - 0.5) * 6000, rng); }
+        else if (r < 0.59) lake(cx, cy, rng);
+        else if (r < 0.66) village(cx, cy, rng);
+        else if (r < 0.71) windfarm(cx, cy, rng, rng() < 0.5);
+        else if (r < 0.77) orchard(cx, cy, rng);
+        else if (r < 0.82) rocks(cx, cy, rng);
+        else if (r < 0.88) meadow(cx, cy, rng);
+    }
+    L.countryStats = stats;
 }
+// Service area next to a highway: fuel station (canopy, pumps, shop), diner, motel and its car park.
+function addServiceArea(L, road, h, s, side, hi, i, nextId, mark, free) {
+    const rect = (u0, v0, w, hh) => {
+        const E = road.hw + 30;
+        if (h.a === 'h') return { x: Math.round(s + u0), y: Math.round(side > 0 ? h.p + E + v0 : h.p - E - v0 - hh), w: Math.round(w), h: Math.round(hh) };
+        return { x: Math.round(side > 0 ? h.p + E + v0 : h.p - E - v0 - hh), y: Math.round(s + u0), w: Math.round(hh), h: Math.round(w) };
+    };
+    const pt = (u, v) => { const E = road.hw + 30; return h.a === 'h' ? { x: s + u, y: h.p + side * (E + v) } : { x: h.p + side * (E + v), y: s + u }; };
+    const dd = h.a === 'h' ? (side > 0 ? 'N' : 'S') : (side > 0 ? 'W' : 'E');
+    const bld = (kind, r, extra) => {
+        const b = Object.assign({ id: nextId(), k: kind, x: r.x, y: r.y, w: r.w, h: r.h }, extra || {}), d = b.door;
+        d.x = Math.round(d.dir === 'E' ? b.x + b.w : d.dir === 'W' ? b.x : b.x + b.w / 2); d.y = Math.round(d.dir === 'S' ? b.y + b.h : d.dir === 'N' ? b.y : b.y + b.h / 2);
+        L.buildings.push(b); L.colliders.push({ t: 0, x: b.x, y: b.y, w: b.w, h: b.h }); return b;
+    };
+    const pave = rect(-780, 0, 1820, 900);
+    // must not touch any other highway (its own lies right next to it) or a town
+    for (const o of L.highways) { if (o === h) continue; const r = o.a === 'h' ? { x: o.s0, y: o.p - 400, w: o.s1 - o.s0, h: 800 } : { x: o.p - 400, y: o.s0, w: 800, h: o.s1 - o.s0 }; if (pave.x < r.x + r.w && pave.x + pave.w > r.x && pave.y < r.y + r.h && pave.y + pave.h > r.y) return false; }
+    if (W_CITIES.some(c => Math.hypot(pave.x + pave.w / 2 - c.cx, pave.y + pave.h / 2 - c.cy) < c.extR + 1500)) return false;
+    mark({ x: pave.x - 300, y: pave.y - 300, w: pave.w + 600, h: pave.h + 600 });
+    L.props.push({ k: 'pave', ...pave });
+    const can = rect(-740, 150, 460, 240);
+    L.props.push({ k: 'canopy', ...can, brand: FUEL_BRANDS[(hi + i) % FUEL_BRANDS.length] });
+    for (let q = 0; q < 3; q++) {
+        const c = pt(-740 + 460 * (q + 0.5) / 3, 270);
+        const pr = h.a === 'h' ? { x: Math.round(c.x - 10), y: Math.round(c.y - 34), w: 20, h: 68 } : { x: Math.round(c.x - 34), y: Math.round(c.y - 10), w: 68, h: 20 };
+        L.props.push({ k: 'pump', ...pr, id: nextId() }); L.colliders.push({ t: 0, ...pr });
+    }
+    bld('shop', rect(-760, 520, 300, 190), { s: 5, t: 1, aw: 3, shop: 'grocery', sn: 'Grocery', fuel: 1, door: { dir: dd } });
+    bld('shop', rect(-420, 520, 260, 190), { s: 9, t: 3, aw: 0, shop: 'cafe', sn: 'Diner', door: { dir: dd } });
+    bld('motel', rect(0, 500, 680, 230), { s: 3 + i, r: (hi + i) % 6, nm: ['Starlite Motel', 'Highway Rest', 'Sunset Motor Inn', 'Pine Lodge Motel'][(hi + i) % 4], door: { dir: dd } });
+    if (h.a === 'h') L.lots.push({ id: nextId(), ...rect(0, 130, 680, 300), dealer: false });
+    const c = pt(0, 400); L.services.push({ x: Math.round(c.x), y: Math.round(c.y), name: 'Service area' });
+    return true;
+}
+
 function buildWorldLayout(seed) {
     const L = { seed, roads: [], xroads: [], junctions: [], xjunctions: [], blocks: [], buildings: [], props: [], lots: [], fields: [], pcars: [], colliders: [], houses: [], works: [], highways: [], airports: [], cities: W_CITIES, rv: {}, rh: {} };
     const ends = new Map();
@@ -3760,17 +3908,31 @@ function buildWorldLayout(seed) {
         for (const k of ['blocks', 'buildings', 'props', 'lots', 'fields', 'pcars', 'colliders', 'houses', 'works']) { const src = C[k], dst = L[k]; for (let i = 0; i < src.length; i++) dst.push(src[i]); }
         if (C.airport) L.airports.push(C.airport);
         city.bp = cityBorderOutline(C, city); city.border = Math.max(...city.bp);
+        let ext = 0; for (const bl of C.blocks) ext = Math.max(ext, Math.hypot(Math.max(Math.abs(bl.x - city.cx), Math.abs(bl.x + bl.w - city.cx)), Math.max(Math.abs(bl.y - city.cy), Math.abs(bl.y + bl.h - city.cy))));
+        Object.defineProperty(city, 'extR', { value: ext + 400, writable: true, configurable: true, enumerable: false });
         const h0 = C.rh[0], v0 = C.rv[0];                         // the avenues through the centre carry the highways
         ends.set(city.id, { w: h0.o - h0.e, e: h0.o + h0.e, n: v0.o - v0.e, s: v0.o + v0.e });
     });
-    const at = (col, row) => W_CITIES.find(c => c.col === col && c.row === row);
+    // Highway grid: along each row of cities (north, middle, south) and down each time-zone column. The crossroads towns
+    // between the columns also link north and south with T-junctions onto the row highways. No road crosses the ocean.
     const add = (a, p, s0, s1) => {
         L.xroads.push({ a, k: 'hw' + L.highways.length, p, c: 'x', hw: 130, ln: 4, e: (s1 - s0) / 2, o: (s0 + s1) / 2, f: 1 }); L.highways.push({ a, p, s0, s1 });
     };
-    // highways between neighbours (none across the ocean at the date line: that crossing is by air only)
-    for (let row = 0; row < 2; row++) for (let col = 0; col + 1 < W_COLS; col++) { const A = at(col, row), B = at(col + 1, row); add('h', A.cy, ends.get(A.id).e, ends.get(B.id).w); }
-    for (let col = 0; col < W_COLS; col++) { const A = at(col, 0), B = at(col, 1); add('v', A.cx, ends.get(A.id).s, ends.get(B.id).n); }
-    addHighwayExtras(L, seed);
+    const rows = [...new Set(W_CITIES.map(c => c.row))].sort((p, q) => p - q);
+    for (const row of rows) {
+        const cs = W_CITIES.filter(c => c.row === row).sort((p, q) => p.cx - q.cx);
+        for (let i = 0; i + 1 < cs.length; i++) add('h', cs[i].cy, ends.get(cs[i].id).e, ends.get(cs[i + 1].id).w);
+    }
+    for (const col of [...new Set(W_CITIES.map(c => c.col))]) {
+        const cs = W_CITIES.filter(c => c.col === col).sort((p, q) => p.cy - q.cy);
+        if (Number.isInteger(col)) { for (let i = 0; i + 1 < cs.length; i++) add('v', cs[i].cx, ends.get(cs[i].id).s, ends.get(cs[i + 1].id).n); continue; }
+        for (const t of cs) {                                       // crossroads town: spurs up and down to the row highways
+            const north = W_CITIES.filter(c => c.row < t.row).reduce((m, c) => Math.max(m, c.cy), -Infinity), south = W_CITIES.filter(c => c.row > t.row).reduce((m, c) => Math.min(m, c.cy), Infinity);
+            if (isFinite(north)) { add('v', t.cx, north, ends.get(t.id).n); L.xjunctions.push({ id: 60000000 + L.xjunctions.length, x: t.cx, y: north, n: 0, s: 130, e: 130, w: 130, hv: 130, hh: 130, f: 1, tj: 1 }); }
+            if (isFinite(south)) { add('v', t.cx, ends.get(t.id).s, south); L.xjunctions.push({ id: 60000000 + L.xjunctions.length, x: t.cx, y: south, n: 130, s: 0, e: 130, w: 130, hv: 130, hh: 130, f: 1, tj: 1 }); }
+        }
+    }
+    addCountryside(L, seed);
     for (const b of L.buildings) if (b.shop && !b.sn) b.sn = SHOP_KINDS[b.shop].name;
     L.allRoads = L.roads.concat(L.xroads);
     indexLayout(L);
@@ -4003,6 +4165,182 @@ function buildHouseInterior(tier) {
     if (tier >= 2) { f.push({ k: 'bath', x: X0 + sx - 170, y: Y0 + 24, w: 140, h: 70, solid: 1 }, { k: 'plant', x: X0 + sx - 40, y: Y0 + 180, r: 18, solid: 1 }); }
     return D;
 }
+// ---- interactive interiors ----------------------------------------------------------------------------------------------
+// Furniture with a `use` gets a station in front of it. Toggles (TV, lamps, fireplace, radio, the lights) are shared by
+// everyone in the room (room.fstate, broadcast as world_furn); the rest give you something (snack, shower, banking…).
+function intUse(D, f, use, sx, sy, r = 80) { f.use = use; f.ui = D.furn.indexOf(f); D.stations.push({ id: 'u' + f.ui, use, fi: f.ui, x: Math.round(sx), y: Math.round(sy), r }); return f; }
+function intAdd(D, f) { D.furn.push(f); return f; }
+const INT_TOGGLES = { tv: ['TV', 'Turn on', 'Turn off'], lamp: ['Lamp', 'Switch on', 'Switch off'], fire: ['Fireplace', 'Light the fire', 'Put it out'], radio: ['Radio', 'Play music', 'Stop the music'], lights: ['Light switch', 'Lights on', 'Lights off'] };
+function furnishHouse(D, tier) {
+    const fl = D.floor, X0 = fl.x, Y0 = fl.y, W = fl.w, H = fl.h, f = D.furn;
+    const tv = f.find(q => q.k === 'tv'); if (tv) intUse(D, tv, 'tv', tv.x + tv.w / 2, tv.y + tv.h + 70);
+    const sofa = f.find(q => q.k === 'sofa');
+    if (sofa) intUse(D, intAdd(D, { k: 'lamp', x: sofa.x - 34, y: sofa.y + 20, r: 14, solid: 1 }), 'lamp', sofa.x - 34, sofa.y + 70, 70);
+    const dining = f.find(q => q.k === 'dining');
+    if (dining) intUse(D, intAdd(D, { k: 'radio', x: dining.x + dining.w / 2 - 20, y: dining.y + 10, w: 40, h: 22 }), 'radio', dining.x + dining.w / 2, dining.y + dining.h + 50, 70);
+    const counter = f.find(q => q.k === 'counter');
+    if (counter) {
+        intUse(D, intAdd(D, { k: 'fridge', x: counter.x + counter.w - 70, y: counter.y + counter.h + 6, w: 64, h: 56, solid: 1 }), 'fridge', counter.x + counter.w - 38, counter.y + counter.h + 110, 75);
+        intUse(D, intAdd(D, { k: 'coffee', x: counter.x + 14, y: counter.y + 10, w: 30, h: 28 }), 'coffee', counter.x + 30, counter.y + counter.h + 50, 70);
+    }
+    if (tier >= 1) intUse(D, intAdd(D, { k: 'fireplace', x: X0 + 6, y: Y0 + 150, w: 34, h: 120, solid: 1 }), 'fire', X0 + 90, Y0 + 210, 80);
+    if (tier >= 2) intAdd(D, { k: 'aquarium', x: X0 + 24, y: Y0 + H - 330, w: 150, h: 46, solid: 1 });
+    const bath = f.find(q => q.k === 'bath');
+    if (bath) intUse(D, bath, 'bath', bath.x + bath.w / 2, bath.y + bath.h + 50, 80);
+    else intUse(D, intAdd(D, { k: 'shower', x: X0 + W - 110, y: Y0 + Math.round(H * 0.42) + 30, w: 90, h: 90, solid: 1 }), 'bath', X0 + W - 170, Y0 + Math.round(H * 0.42) + 75, 70);
+    const desk = f.find(q => q.k === 'desk');
+    if (desk) { intAdd(D, { k: 'laptop', x: desk.x + desk.w / 2 - 18, y: desk.y + 8, w: 36, h: 24 }); intUse(D, desk, 'pc', desk.x + desk.w / 2, desk.y + desk.h + 60, 75); }
+    intUse(D, intAdd(D, { k: 'switch', x: D.door.px + 76, y: fl.y + fl.h - 10, w: 16, h: 10 }), 'lights', D.door.px + 84, fl.y + fl.h - 60, 55);
+}
+function furnishMall(D, b) {
+    const fl = D.floor, X0 = fl.x, Y0 = fl.y, W = fl.w, H = fl.h, doorX = D.door.px;
+    intUse(D, intAdd(D, { k: 'elevator', x: X0 + 20, y: Y0 + 880, w: 140, h: 140, solid: 1 }), 'elevator', X0 + 210, Y0 + 950, 80);
+    for (let i = 0; i < 3; i++) intUse(D, intAdd(D, { k: 'arcade', x: X0 + 250 + i * 80, y: Y0 + H - 70, w: 60, h: 56, solid: 1, col: i }), 'arcade', X0 + 280 + i * 80, Y0 + H - 120, 45);
+    intUse(D, intAdd(D, { k: 'directory', x: doorX - 190, y: Y0 + H - 290, w: 56, h: 64, solid: 1 }), 'directory', doorX - 162, Y0 + H - 190, 70);
+    intUse(D, intAdd(D, { k: 'fountain', x: doorX + 300, y: Y0 + H - 250, r: 62, solid: 1 }), 'fountain', doorX + 300, Y0 + H - 150, 70);
+    intUse(D, intAdd(D, { k: 'photobooth', x: X0 + W - 170, y: Y0 + H - 170, w: 140, h: 130, solid: 1 }), 'photo', X0 + W - 230, Y0 + H - 105, 70);
+    intUse(D, intAdd(D, { k: 'vending', x: X0 + W - 330, y: Y0 + H - 70, w: 64, h: 56, solid: 1 }), 'vending', X0 + W - 298, Y0 + H - 120, 50);
+    intUse(D, intAdd(D, { k: 'atmi', x: X0 + W - 410, y: Y0 + H - 64, w: 50, h: 50, solid: 1 }), 'atm', X0 + W - 385, Y0 + H - 115, 50);
+}
+// Airport terminal: check-in hall (buy a boarding pass), security, departure lounge with shops, and the gate.
+function buildTerminalInterior(ap) {
+    const X0 = 150, Y0 = 300, W = 1500, H = 1200, fl = { x: X0, y: Y0, w: W, h: H }, doorX = X0 + W / 2, secY = Y0 + 520, T = 22;
+    const city = W_CITIES.find(c => c.id === ap.city);
+    const D = {
+        kind: 'terminal', ext: INT_EXT, floor: fl, theme: { accent: '#1d4f7a', name: `${ap.name} (${ap.code})`, code: ap.code, city: ap.city },
+        walls: intWallsAround(fl, doorX, 180), furn: [], stations: [], rooms: [{ x: X0, y: secY, w: W, h: H - (secY - Y0), c: 'hall' }, { x: X0, y: Y0, w: W, h: secY - Y0, c: 'lounge' }],
+        door: { x: doorX - 90, y: Y0 + H, w: 180, h: INT_WALL, px: doorX, py: Y0 + H - 36, r: 120 },
+        spawn: { x: doorX, y: Y0 + H - 110 }, ap: ap.city
+    };
+    // security line: a wall with two scanner lanes
+    const lanes = [doorX - 260, doorX + 260];
+    D.walls.push({ x: X0, y: secY, w: lanes[0] - 70 - X0, h: T }, { x: lanes[0] + 70, y: secY, w: lanes[1] - 70 - (lanes[0] + 70), h: T }, { x: lanes[1] + 70, y: secY, w: X0 + W - (lanes[1] + 70), h: T });
+    for (const lx of lanes) { intAdd(D, { k: 'arch', x: lx - 60, y: secY - 14, w: 120, h: 50 }); intAdd(D, { k: 'scanner', x: lx + 74, y: secY + 30, w: 46, h: 170, solid: 1 }); }
+    // check-in desks (each sells boarding passes)
+    const cols = ['#1d6fa5', '#c0392b', '#2c7a5b', '#7a3f8f'];
+    for (let i = 0; i < 4; i++) {
+        const x = X0 + 130 + i * 330, y = Y0 + H - 420;
+        intUse(D, intAdd(D, { k: 'checkin', x, y, w: 220, h: 54, solid: 1, col: cols[i], n: i + 1 }), 'tickets', x + 110, y + 120, 95);
+        for (let q = 0; q < 4; q++) intAdd(D, { k: 'post', x: x + 20 + q * 60, y: y + 190, r: 6, solid: 1 });
+    }
+    intUse(D, intAdd(D, { k: 'board', x: doorX - 150, y: secY + 40, w: 300, h: 46, solid: 1 }), 'board', doorX, secY + 150, 110);   // between the two security lanes
+    for (const [x, y] of [[X0 + 50, Y0 + H - 60], [X0 + W - 50, Y0 + H - 60], [X0 + 50, secY + 70], [X0 + W - 50, secY + 70]]) intAdd(D, { k: 'plant', x, y, r: 22, solid: 1 });
+    // departure lounge: seats, café, duty free, panoramic window onto the apron, gate desk
+    intAdd(D, { k: 'window', x: X0 + 40, y: Y0 + 6, w: W - 80, h: 26, solid: 1 });
+    for (let r = 0; r < 2; r++) for (let c = 0; c < 4; c++) intAdd(D, { k: 'seats', x: X0 + 140 + c * 330, y: Y0 + 230 + r * 130, w: 230, h: 40, solid: 1 });
+    intUse(D, intAdd(D, { k: 'kiosk', x: X0 + 20, y: Y0 + 80, w: 200, h: 110, solid: 1, shop: 'cafe', label: 'Café', col: 3 }), 'shop:cafe', X0 + 120, Y0 + 230, 80);
+    intUse(D, intAdd(D, { k: 'kiosk', x: X0 + W - 220, y: Y0 + 80, w: 200, h: 110, solid: 1, shop: 'souvenir', label: 'Duty Free', col: 4 }), 'shop:souvenir', X0 + W - 120, Y0 + 230, 80);
+    intUse(D, intAdd(D, { k: 'gatedesk', x: doorX - 110, y: Y0 + 60, w: 220, h: 50, solid: 1 }), 'gate', doorX, Y0 + 170, 100);
+    intAdd(D, { k: 'jetway', x: doorX - 60, y: Y0 - 22, w: 120, h: 30 });
+    return D;
+}
+function worldFurnPush(room) { for (const c of room.clients) sendWorld(c, 'world_furn', { key: room.scene, s: room.fstate || {} }); }
+function worldUsePrompt(client, def, s) {
+    const w = client.world, p = client.player, room = client.room, st = room.fstate || {}, f = def.furn[s.fi], d = Math.hypot(s.x - p.x, s.y - p.y);
+    const cash = Math.floor(w.sessionCoins || 0), bank = w.bankCoins || 0, base = { id: s.id, kind: 'use', ctx: s, ax: s.x, ay: s.y - 80 };
+    const T = INT_TOGGLES[s.use];
+    if (T) { const on = s.use === 'lights' ? !st.off : !!st[s.fi]; return [d, { ...base, title: T[0], lines: [s.use === 'lights' ? (on ? 'The lights are on' : 'The lights are off') : on ? 'On' : 'Off'], actions: [{ a: 'toggle', label: on ? T[2] : T[1], on: true }], mini: true }]; }
+    switch (s.use) {
+        case 'fridge': return [d, { ...base, title: 'Fridge', lines: ['Grab a snack: +30% health'], actions: [{ a: 'go', label: 'Have a snack', on: true }], mini: true }];
+        case 'coffee': return [d, { ...base, title: 'Coffee machine', lines: ['+25% speed for 30 s'], actions: [{ a: 'go', label: 'Make a coffee', on: true }], mini: true }];
+        case 'bath': return [d, { ...base, title: f.k === 'bath' ? 'Bath' : 'Shower', lines: ['Freshen up: +20% health, +25% speed for 45 s'], actions: [{ a: 'go', label: f.k === 'bath' ? 'Take a bath' : 'Take a shower', on: true }], mini: true }];
+        case 'pc': case 'atm': return [d, { ...base, title: s.use === 'pc' ? 'Laptop · online banking' : 'ATM', lines: [`Unbanked cash: ${fmtMoney(cash)}`, `Account balance: ${fmtMoney(bank)}`], actions: [{ a: 'deposit', label: cash > 0 ? `Deposit ${fmtMoney(cash)}` : 'Nothing to deposit', on: cash > 0 }], mini: true }];
+        case 'arcade': return [d, { ...base, title: ['Neon Racer', 'Tank Blaster', 'Pixel Claw'][f.col % 3] + ' arcade', lines: ['5 coins a game · win up to 120'], actions: [{ a: 'go', label: 'Play (5)', on: cash + bank >= 5 }], mini: true }];
+        case 'photo': return [d, { ...base, title: 'Photo booth', lines: ['A strip of 4 photos: +150 score'], actions: [{ a: 'go', label: 'Take photos (8)', on: cash + bank >= 8 }], mini: true }];
+        case 'fountain': return [d, { ...base, title: 'Wishing fountain', lines: ['Toss a coin for luck'], actions: [{ a: 'go', label: 'Toss a coin (1)', on: cash + bank >= 1 }], mini: true }];
+        case 'vending': { const b = WL.buildingById.get(def.bid), city = b && W_CITIES.find(c => c.id === b.city); return [d, { ...base, title: 'Vending machine', lines: [def.theme.name], actions: worldShopActions(client, ['drink', 'lemonade'], city), mini: true }]; }
+        case 'directory': {
+            const b = WL.buildingById.get(def.bid), lines = [];
+            for (let lv = 1; lv <= def.levels; lv++) { const L2 = worldInteriorDef('mall:' + def.bid + ':' + lv); lines.push(`Level ${lv}: ` + [...new Set(L2.stations.filter(q => q.shop).map(q => SHOP_KINDS[q.shop].name))].join(', ')); }
+            return [d, { ...base, title: (b && b.nm || 'Mall') + ' directory', lines, actions: [] }];
+        }
+        case 'elevator': return [d, { ...base, title: 'Glass elevator', lines: [`You are on level ${def.lv}`], actions: Array.from({ length: def.levels }, (_, i) => ({ a: 'lv' + (i + 1), label: i + 1 === def.lv ? `Level ${i + 1} (here)` : `Level ${i + 1}`, on: i + 1 !== def.lv })) }];
+        case 'board': {
+            const A = WL.airportByCity.get(def.ap), lines = worldFlightOptions(A).slice(0, 7).map(o => `${o.to.code}  ${o.toCity.name.padEnd(18)} ${worldTzLabel(o.toCity.tz).padEnd(6)} ~${o.mins} min · ${fmtMoney(o.fare)}`);
+            return [d, { ...base, title: '✈ Departures', lines: [...lines, 'Buy a boarding pass at any check-in desk'], actions: [] }];
+        }
+        case 'tickets': {
+            const A = WL.airportByCity.get(def.ap), t = worldTicketValid(w, A) ? w.ticket : null;
+            return [d, { ...base, kind: 'tickets', title: `✈ ${A.code} check-in · desk ${f.n}`, cards: true, pick: true,
+                lines: [t ? `Your boarding pass: ${A.code} → ${WL.airportByCity.get(t.to).code}. Go through security to the gate.` : 'Choose your destination. You can pay with cash or from the bank.'],
+                actions: worldFlightOptions(A).map(o => ({ a: 'tix:' + o.to.city, label: `${o.to.code} · ${o.toCity.name}`, on: cash + bank >= o.fare, city: o.to.city, code: o.to.code, name: o.toCity.name, fare: o.fare, mins: o.mins, head: o.head, tz: o.toCity.tz, km: Math.round(o.dist / 1000) })) }];
+        }
+        case 'gate': {
+            const A = WL.airportByCity.get(def.ap), t = worldTicketValid(w, A) ? w.ticket : null, B = t && WL.airportByCity.get(t.to), cB = B && W_CITIES.find(c => c.id === B.city);
+            return [d, { ...base, title: `Gate 2 · ${A.code}`, lines: t ? [`${A.code} → ${B.code} ${cB.name} · boarding now`] : ['No boarding pass – buy one at check-in'], actions: t ? [{ a: 'board', label: `Board to ${cB.name}`, on: true }] : [] }];
+        }
+    }
+    if (s.use.startsWith('shop:')) {
+        const kind = s.use.slice(5), A = def.ap && WL.airportByCity.get(def.ap), city = W_CITIES.find(c => c.id === def.ap) || null;
+        return [d, { ...base, kind: 'shop', ctx: { city, items: SHOP_KINDS[kind].items }, title: (kind === 'souvenir' ? 'Duty Free' : SHOP_KINDS[kind].name) + (A ? ' · ' + A.code : ''), lines: ['Airport prices'], actions: worldShopActions(client, SHOP_KINDS[kind].items, city), pick: true }];
+    }
+    return null;
+}
+function worldTicketValid(w, A) { return w.ticket && w.ticket.until > Date.now() && (!A || w.ticket.from === A.city); }
+function worldUse(client, s, a) {
+    const w = client.world, p = client.player, room = client.room, def = room.def, now = Date.now(), max = p.getEffectiveMaxHp();
+    w.useCd = w.useCd || {};
+    const cd = (k, ms) => { if (now - (w.useCd[k] || 0) < ms) { worldNotice(client, `Not yet – try again in ${Math.ceil((ms - (now - w.useCd[k])) / 1000)} s.`); return false; } w.useCd[k] = now; return true; };
+    if (INT_TOGGLES[s.use]) {
+        room.fstate = room.fstate || {};
+        if (s.use === 'lights') room.fstate.off = room.fstate.off ? 0 : 1; else room.fstate[s.fi] = room.fstate[s.fi] ? 0 : 1;
+        worldFurnPush(room); return;
+    }
+    switch (s.use) {
+        case 'fridge': if (cd('fridge', 45000)) { p.hp = Math.min(max, p.hp + max * 0.3); worldNotice(client, '🥪 You grab a snack from the fridge: +30% health.', { level: 'good' }); } break;
+        case 'coffee': if (cd('coffee', 60000)) { p.worldSpeedUntil = Math.max(now, p.worldSpeedUntil || 0) + 30000; worldNotice(client, '☕ Fresh coffee: +25% speed for 30 s.', { level: 'good' }); } break;
+        case 'bath': if (cd('bath', 90000)) { p.hp = Math.min(max, p.hp + max * 0.2); p.worldSpeedUntil = Math.max(now, p.worldSpeedUntil || 0) + 45000; worldNotice(client, '🚿 Refreshed: +20% health, +25% speed for 45 s.', { level: 'good' }); } break;
+        case 'pc': case 'atm': worldDeposit(client); break;
+        case 'arcade': {
+            if (!worldPayToll(client, 5)) return;
+            const r = Math.random(), win = r < 0.05 ? 120 : r < 0.2 ? 25 + Math.floor(Math.random() * 16) : r < 0.5 ? 5 + Math.floor(Math.random() * 11) : 0;
+            p.addXP(30); if (win) { w.sessionCoins += win; worldNotice(client, win >= 120 ? `🎰 JACKPOT! +${win} coins!` : `🕹 You win ${win} coins!`, { level: 'good', sessionCoins: w.sessionCoins }); } else worldNotice(client, '🕹 GAME OVER. Insert coin to continue…');
+            worldPushState(client); break;
+        }
+        case 'photo': if (worldPayToll(client, 8)) { p.addXP(150); worldNotice(client, '📸 Flash! Flash! Flash! Flash! A photo strip to remember: +150 score.', { level: 'good' }); } break;
+        case 'fountain': if (worldPayToll(client, 1)) { p.worldSpeedUntil = Math.max(now, p.worldSpeedUntil || 0) + 30000; worldNotice(client, ['🪙 Plop. You feel lucky: +25% speed for 30 s.', '🪙 Your wish is safe with the fountain (+25% speed for 30 s).'][Math.floor(Math.random() * 2)], { level: 'good' }); } break;
+        case 'vending': if (a.startsWith('buy:')) { const b = WL.buildingById.get(def.bid); worldBuyItem(client, a.slice(4), b && W_CITIES.find(c => c.id === b.city)); } break;
+        case 'elevator': { const lv = Number(a.slice(2)); if (lv >= 1 && lv <= def.levels && lv !== def.lv) { const key = 'mall:' + def.bid + ':' + lv, nd = worldInteriorDef(key), st = nd.stations.find(q => q.use === 'elevator'); worldGoto(client, key, st.x, st.y); } break; }
+        case 'tickets': if (a.startsWith('tix:')) worldBuyTicket(client, WL.airportByCity.get(def.ap), a.slice(4)); break;
+        case 'gate': if (a === 'board') worldBoardWithTicket(client, WL.airportByCity.get(def.ap)); break;
+        default: if (s.use.startsWith('shop:') && a.startsWith('buy:')) worldBuyItem(client, a.slice(4), W_CITIES.find(c => c.id === def.ap) || null);
+    }
+}
+function worldBuyTicket(client, A, toId) {
+    const w = client.world, opt = A && worldFlightOptions(A).find(o => o.to.city === toId); if (!opt) return;
+    if (!worldPayToll(client, opt.fare)) { worldNotice(client, `The fare to ${opt.toCity.name} is ${fmtMoney(opt.fare)} coins.`, { level: 'bad' }); return; }
+    w.ticket = { from: A.city, to: toId, until: Date.now() + 20 * 60000, fare: opt.fare };
+    worldNotice(client, `🎫 Boarding pass ${A.code} → ${opt.to.code} (${opt.toCity.name}, ${worldTzLabel(opt.toCity.tz)}). Go through security to Gate 2.`, { level: 'good' });
+    w.promptKey = '\u0000';
+}
+function worldBoardWithTicket(client, A) {
+    const w = client.world; if (!worldTicketValid(w, A)) return;
+    const to = w.ticket.to; w.ticket = null;
+    worldGoto(client, 'ext', A.sb.x, A.sb.y + 60);
+    worldBoardFlight(client, A, to, true);
+}
+// ---- in-flight service (long-haul screen menu) ----
+const INFLIGHT_MENU = {
+    meal:      { name: 'In-flight meal', price: 28, heal: 100 },
+    snack:     { name: 'Snack box', price: 9, heal: 30 },
+    coffee:    { name: 'Coffee', price: 6, heal: 15, speed: 30 },
+    champagne: { name: 'Glass of champagne', price: 35, xp: 300 },
+    souvenir:  { name: 'Duty-free souvenir (destination)', price: 70, souvenir: true }
+};
+function worldInflightOrder(client, id) {
+    const w = client.world, p = client.player, f = p && p.flight, it = INFLIGHT_MENU[id]; if (!f || !it) return;
+    const city = W_CITIES.find(c => c.id === f.to);
+    if (it.souvenir && w.souv.has(city.id)) { worldNotice(client, `You already have a ${city.name} souvenir.`); return; }
+    if (!worldPayToll(client, it.price)) { worldNotice(client, `That costs ${it.price} coins.`, { level: 'bad' }); return; }
+    const max = p.getEffectiveMaxHp(), msg = [];
+    if (it.heal) { p.hp = Math.min(max, p.hp + max * it.heal / 100); msg.push(`+${it.heal}% health`); }
+    if (it.speed) { p.worldSpeedUntil = Math.max(Date.now(), p.worldSpeedUntil || 0) + it.speed * 1000; msg.push('+25% speed after landing'); }
+    if (it.xp) { p.addXP(it.xp); msg.push(`+${it.xp} score`); }
+    if (it.souvenir) { w.souv.add(city.id); msg.push(`souvenir ${w.souv.size}/${W_CITIES.length}`); }
+    worldNotice(client, `🛎 ${it.name} served (-${it.price})${msg.length ? ': ' + msg.join(', ') : ''}`, { level: 'good' });
+    worldPushState(client);
+}
+
 function interiorColliders(def) {
     const out = [];
     for (const w of def.walls) out.push({ t: 0, x: w.x, y: w.y, w: w.w, h: w.h });
@@ -4014,7 +4352,7 @@ function interiorColliders(def) {
 // ===================== PERSISTENT WORLD MODE =====================
 // The exterior (WORLD room) is the city + suburbs + farmland built by buildWorldLayout().
 // Houses and workplaces are separate interior Rooms players are teleported into.
-const WORLD_LAYOUT_VERSION = 4;              // v4: city styles (cyberpunk capital, old town, rural), service areas
+const WORLD_LAYOUT_VERSION = 5;              // v4: city styles; v5: 1.5x larger continent, interior towns, highway grid, countryside
 const WORLD_CARS = [
     { id: 'compact', name: 'Compact', price: 2500,  speed: 6.2,  accel: 0.15, turn: 0.052, color: '#e4e7eb' },
     { id: 'sedan',   name: 'Sedan',   price: 6500,  speed: 8.0,  accel: 0.19, turn: 0.046, color: '#2684d9' },
@@ -4114,7 +4452,11 @@ function worldRoadFor(axis, k, s) {
 function worldMigrateLayout(fromVersion) {
     const OLD_C = 25200, OLD = { central: [25200, 25200], port: [475200, 25200], highmoor: [25200, 475200], solana: [475200, 475200] };
     const mapOld = (x, y) => {
-        if (fromVersion >= 3) return { x, y };                         // v3 -> v4: same coordinates, only the buildings changed
+        if (fromVersion >= 3) {                                        // v3/v4 continent (450 000-unit spacing): keep the offset from the nearest city
+            let best = null, bd = Infinity;
+            for (const c of W_CITIES) { if (!Number.isInteger(c.col) || !Number.isInteger(c.row)) continue; const ox = 225000 + c.col * 450000, oy = 50400 + c.row * 450000, d = Math.hypot(x - ox, y - oy); if (d < bd) { bd = d; best = [c, ox, oy]; } }
+            const [c, ox, oy] = best; return { x: c.cx + (x - ox), y: c.cy + (y - oy) };
+        }
         let best = 'central', bd = Infinity;
         for (const [id, [ox, oy]] of Object.entries(OLD)) { const d = Math.hypot(x - ox, y - oy); if (d < bd) { bd = d; best = id; } }
         const c = W_CITIES.find(q => q.id === best), o = OLD[best], k = c.size / 18000;
@@ -4127,8 +4469,8 @@ function worldMigrateLayout(fromVersion) {
     const upd = db.prepare('UPDATE world_players SET x=?, y=? WHERE user_id=?');
     db.transaction(() => {
         for (const p of players) {
-            if (p.x == null || p.y == null || fromVersion >= 3) continue;
-            const n = mapOld(OLD_C + p.x, OLD_C + p.y);
+            if (p.x == null || p.y == null) continue;
+            const n = fromVersion >= 3 ? mapOld(450000 / 2 + 450000 + p.x, 50400 + p.y) : mapOld(OLD_C + p.x, OLD_C + p.y);   // v3/v4 stored positions relative to the old Central City
             upd.run(Math.round(n.x - W_CX), Math.round(n.y - W_CY), p.user_id);
         }
         db.prepare('UPDATE world_players SET car_x=NULL, car_y=NULL, car_a=NULL').run();
@@ -4319,9 +4661,10 @@ function worldInteriorDef(scene) {
     let d = interiorDefs.get(scene); if (d) return d;
     const [kind, key, lvs] = scene.split(':');
     if (kind === 'work') { const b = WL.buildingById.get(Number(key)); const co = W_COMPANIES.find(c => c.id === (b && worldWorkOf(b))) || W_COMPANIES[0]; d = buildOfficeInterior(co); d.coId = co.id; d.bid = b ? b.id : 0; }
-    else if (kind === 'mall') { const b = WL.buildingById.get(Number(key)); d = buildMallInterior(b || { id: 0, lv: 3 }, Math.max(1, Math.min(b?.lv || 3, Number(lvs) || 1))); }
-    else if (kind === 'stay') { const b = WL.buildingById.get(Number(key)); d = buildHouseInterior(b?.k === 'hotel' ? 2 : b?.k === 'inn' ? 1 : 0); d.bid = b ? b.id : 0; d.stay = 1; d.theme.name = b?.nm || 'Room'; }
-    else { const h = WL.houseById.get(key); d = buildHouseInterior(h ? h.tier : 0); d.hid = key; }
+    else if (kind === 'mall') { const b = WL.buildingById.get(Number(key)); d = buildMallInterior(b || { id: 0, lv: 3 }, Math.max(1, Math.min(b?.lv || 3, Number(lvs) || 1))); furnishMall(d, b); }
+    else if (kind === 'stay') { const b = WL.buildingById.get(Number(key)); const tier = b?.k === 'hotel' ? 2 : b?.k === 'inn' ? 1 : 0; d = buildHouseInterior(tier); furnishHouse(d, tier); d.bid = b ? b.id : 0; d.stay = 1; d.theme.name = b?.nm || 'Room'; }
+    else if (kind === 'term') { const ap = WL.airportByCity.get(key) || WL.airports[0]; d = buildTerminalInterior(ap); d.bid = ap.term.id; }
+    else { const h = WL.houseById.get(key); const tier = h ? h.tier : 0; d = buildHouseInterior(tier); furnishHouse(d, tier); d.hid = key; }
     d.colliders = interiorColliders(d);
     interiorDefs.set(scene, d); return d;
 }
@@ -4357,7 +4700,7 @@ function worldGoto(client, scene, x, y) {
     client.room = room; client.player = ent; client.spectatingId = null;
     w.scene = scene; w.dead = false; w.task = null; w.promptKey = null; w.invulnerableUntil = Date.now() + 2500;
     if (scene === 'ext') w.ext = { x: ent.x, y: ent.y };
-    sendWorld(client, 'world_scene', { scene: scene === 'ext' ? 'ext' : 'int', key: scene, interior: scene === 'ext' ? null : worldPublicInterior(room.def), x: ent.x, y: ent.y });
+    sendWorld(client, 'world_scene', { scene: scene === 'ext' ? 'ext' : 'int', key: scene, interior: scene === 'ext' ? null : worldPublicInterior(room.def), fs: room.fstate || {}, x: ent.x, y: ent.y });
     wsSendObj(client.ws, ({ type: 'init', id: ent.id, team: 0, nc: ent.nameColor, name1: ent.name }));
     w.bankCoins = worldBankCoins(client);
     worldPushState(client);
@@ -4398,10 +4741,10 @@ function worldSendStatic(client) {
     const bld = b => b && { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h, door: b.door };
     sendWorld(client, 'world_static', {
         center: W_CX, centerY: W_CY, extent: W_CIRC, extentY: W_EXTY, circ: W_CIRC, gap: W_GAP, land: W_LAND, chunk: W_CHUNK, nch: W_NCH, roads: WL.allRoads,
-        cities: W_CITIES.map(c => ({ id: c.id, name: c.name, code: c.code, cx: c.cx, cy: c.cy, tz: c.tz, theme: c.theme, toll: c.toll, home: !!c.home, size: c.size, border: c.border, bp: c.bp })),
+        cities: W_CITIES.map(c => ({ id: c.id, name: c.name, code: c.code, cx: c.cx, cy: c.cy, tz: c.tz, theme: c.theme, style: c.style, toll: c.toll, home: !!c.home, size: c.size, border: c.border, bp: c.bp })),
         airports: WL.airports.map(a => ({ city: a.city, name: a.name, code: a.code, x0: a.x0, x1: a.x1, ry: a.ry, sb: a.sb, door: a.door })),
         cars: WORLD_CARS, carColors: WORLD_CAR_COLORS,
-        companies: W_COMPANIES, spawn: WL.spawn, bank: bld(WL.bank), dealer: bld(WL.dealer), fireMs: WORLD_FIRE_MS, taskMs: WORLD_TASK_MS, items: WORLD_ITEMS, shopKinds: SHOP_KINDS, stallKinds: STALL_KINDS, ranks: WORLD_RANKS
+        companies: W_COMPANIES, spawn: WL.spawn, bank: bld(WL.bank), dealer: bld(WL.dealer), fireMs: WORLD_FIRE_MS, taskMs: WORLD_TASK_MS, items: WORLD_ITEMS, shopKinds: SHOP_KINDS, stallKinds: STALL_KINDS, ranks: WORLD_RANKS, inflight: INFLIGHT_MENU
     });
     sendWorld(client, 'world_houses', { list: [...houseOwner].map(([hid, o]) => [hid, o.name, o.owner_id === client.dbId ? 1 : 0]) });
     sendWorld(client, 'world_branches', { list: [...(WL.branch || [])] });
@@ -4521,11 +4864,11 @@ function worldFlightOptions(A) {
     out.sort((p, q) => p.dist - q.dist);
     return (A._opts = out);
 }
-function worldBoardFlight(client, A, toId) {
+function worldBoardFlight(client, A, toId, prepaid) {
     const w = client.world, p = client.player, B = WL.airportByCity.get(toId);
     if (!w || !p || !B || B === A || p.vehicle || p.flight || w.scene !== 'ext') return;
     const opt = worldFlightOptions(A).find(o => o.to === B); if (!opt) return;
-    if (!worldPayToll(client, opt.fare)) { worldNotice(client, `The fare to ${opt.toCity.name} is ${fmtMoney(opt.fare)} coins (cash or bank).`, { level: 'bad' }); return; }
+    if (!prepaid && !worldPayToll(client, opt.fare)) { worldNotice(client, `The fare to ${opt.toCity.name} is ${fmtMoney(opt.fare)} coins (cash or bank).`, { level: 'bad' }); return; }
     const f = flightCreate(A, B, PLANE_CRUISE); f.liv = 0;
     // drones stay on the ground
     if (client.room) client.room.drones = client.room.drones.filter(d => d.owner !== p);
@@ -4534,8 +4877,8 @@ function worldBoardFlight(client, A, toId) {
     p.flight = f; p.ghost = true; p.x = f.x; p.y = f.y; p.vx = p.vy = 0;
     p.inputs = { up: false, down: false, left: false, right: false, shooting: false, angle: p.inputs?.angle || 0, repel: false };
     const fromCity = W_CITIES.find(c => c.id === A.city);
-    worldNotice(client, `Boarded ${A.code} → ${B.code}: ${opt.head}bound to ${opt.toCity.name} (${worldTzLabel(opt.toCity.tz)}). Fare -${fmtMoney(opt.fare)}. Sit back – taxiing to the runway.`, { level: 'good' });
-    w.flightInfo = { from: A.city, to: B.city, fromName: fromCity.name, toName: opt.toCity.name, fromCode: A.code, toCode: B.code, dir: opt.head, tz: opt.toCity.tz, total: flightRemaining(f) };
+    worldNotice(client, `${prepaid ? 'Boarding pass scanned. ' : ''}Boarded ${A.code} → ${B.code}: ${opt.head}bound to ${opt.toCity.name} (${worldTzLabel(opt.toCity.tz)}). Fare -${fmtMoney(opt.fare)}. Sit back – taxiing to the runway.`, { level: 'good' });
+    w.flightInfo = { from: A.city, to: B.city, fromName: fromCity.name, toName: opt.toCity.name, fromCode: A.code, toCode: B.code, dir: opt.head, tz: opt.toCity.tz, fromTz: fromCity.tz, total: flightRemaining(f), dist: Math.round(opt.dist), long: opt.dist > W_GAP * 1.2 ? 1 : 0, east: f.dir === 'east' ? 1 : 0 };
     worldPushFlight(client);
     worldPushState(client);
 }
@@ -4599,15 +4942,12 @@ function worldComputePrompt(client) {
         if (Math.abs(ap.sb.x - p.x) > 2500 || Math.abs(ap.sb.y - p.y) > 2500) continue;
         const dg = Math.hypot(ap.sb.x - p.x, ap.sb.y - p.y), dd = dist(ap.door), city = W_CITIES.find(c => c.id === ap.city);
         if (dg < 210) {
-            const fl = worldFlightOptions(ap);
-            consider(dg - 60, { id: 'gate:' + ap.city, kind: 'gate', ctx: ap, ax: ap.sb.x, ay: ap.sb.y - 130, title: `✈ ${ap.code} · Gate 2 departures`, pick: true,
-                lines: [`${city.name} · ${worldTzLabel(city.tz)} · cash ${fmtMoney(cash)} · bank ${fmtMoney(coins)}`, 'Choose a destination – the plane carries you and your tank there'],
-                actions: fl.map(o => ({ a: 'fly:' + o.to.city, label: `${o.to.code} ${o.toCity.name} · ${worldTzLabel(o.toCity.tz)} · ${WORLD_HEAD_LABEL[o.head]} · ~${o.mins} min · ${fmtMoney(o.fare)}`, on: cash + coins >= o.fare })) });
+            const t = worldTicketValid(w, ap) ? w.ticket : null, B = t && WL.airportByCity.get(t.to), cB = B && W_CITIES.find(c => c.id === B.city);
+            consider(dg - 60, { id: 'gate:' + ap.city, kind: 'gate', ctx: ap, ax: ap.sb.x, ay: ap.sb.y - 130, title: `✈ ${ap.code} · Gate 2`,
+                lines: t ? [`Boarding pass ${ap.code} → ${B.code} ${cB.name}`, `${city.name} · ${worldTzLabel(city.tz)}`] : ['Check in and buy a boarding pass inside the terminal', `${city.name} · ${worldTzLabel(city.tz)}`],
+                actions: t ? [{ a: 'board', label: `Board to ${cB.name}`, on: true }] : [{ a: 'enter', label: 'Go to the terminal', on: true }] });
         } else if (dd < 160) {
-            const fl = worldFlightOptions(ap);
-            consider(dd, { id: 'terminal:' + ap.city, kind: 'terminal', ctx: ap, ax: ap.term.x + ap.term.w / 2, ay: ap.term.y + ap.term.h / 2, title: ap.name,
-                lines: ['Departures: walk through to the plane at Gate 2 on the apron', ...fl.slice(0, 4).map(o => `${o.to.code} ${o.toCity.name} · ${o.head}bound · ${fmtMoney(o.fare)}`), fl.length > 4 ? `…and ${fl.length - 4} more` : ''].filter(Boolean),
-                actions: [] });
+            consider(dd, { id: 'terminal:' + ap.city, kind: 'terminal', ctx: ap, ax: ap.term.x + ap.term.w / 2, ay: ap.term.y + ap.term.h / 2, title: ap.name, lines: ['Check-in · security · departure lounge · Gate 2', `${worldFlightOptions(ap).length} destinations`], actions: [{ a: 'enter', label: 'Enter the terminal', on: true }] });
         }
     }
     const cx = clamp(Math.floor(p.x / W_CHUNK), 0, W_NCH - 1), cy = clamp(Math.floor(p.y / W_CHUNK), 0, W_NCH - 1);
@@ -4668,6 +5008,7 @@ function worldInteriorPrompt(client) {
     const exitD = Math.hypot(def.door.px - p.x, def.door.py - p.y);
     let best = null, bd = Infinity;
     const consider = (d, pr) => { if (d < bd) { bd = d; best = pr; } };
+    for (const s of def.stations) if (s.use && near(s)) { const r = worldUsePrompt(client, def, s); if (r) consider(r[0] - 10, r[1]); }
     if (exitD < def.door.r) consider(exitD, { id: 'exit', kind: 'exit', ax: def.door.px, ay: def.door.py - 40, title: def.stay ? 'Leave your room' : def.kind === 'house' ? 'Front door' : 'Exit building', lines: ['Back to the street'], actions: [{ a: 'exit', label: 'Go outside', on: true }], mini: true });
     if (def.kind === 'office') {
         const co = W_COMPANIES.find(c => c.id === def.coId), emp = worldEmployer(w), mine = emp && emp.id === co.id, now = Date.now();
@@ -4682,14 +5023,14 @@ function worldInteriorPrompt(client) {
             else { lines.push(`Work at least every ${Math.round(worldFireMs(co) / 60000)} min of play or you will be fired`); actions.push({ a: 'apply', label: 'Apply for the job', on: true }); }
             consider(Math.hypot(def.reception.x - p.x, def.reception.y - p.y) - 60, { id: 'reception', kind: 'reception', ax: def.reception.x, ay: def.reception.y - 90, title: 'Reception', lines, actions });
         }
-        for (const s of def.stations) if (near(s)) {
+        for (const s of def.stations) if (!s.use && near(s)) {
             const t = w.task && w.task.desk === s.id;
             const desk = co.kind === 'desk', lines = !mine ? ['You need a job here – apply at reception'] : !desk ? ['Your work is out in the city – press J for the next job'] : (t ? ['Working…'] : [`Earn ~${Math.round(worldPayFor(co, w.ext) * (1 + 0.15 * worldRank(w)))} coins · takes ${co.task}s`, 'Stay at your desk until finished']);
             consider(Math.hypot(s.x - p.x, s.y - p.y) - 30, { id: s.id, kind: 'desk', ctx: s, ax: s.x, ay: s.y - 70, title: 'Work station', lines, actions: mine && desk ? [t ? { a: 'cancel', label: 'Stop', on: true } : { a: 'work', label: 'Start work', on: true }] : [] });
         }
     } else if (def.kind === 'mall') {
         const b = WL.buildingById.get(def.bid), city = b && W_CITIES.find(c => c.id === b.city);
-        for (const s of def.stations) if (near(s)) {
+        for (const s of def.stations) if (!s.use && near(s)) {
             if (s.shop) consider(Math.hypot(s.x - p.x, s.y - p.y), { id: s.id, kind: 'shop', ctx: { city, items: SHOP_KINDS[s.shop].items }, ax: s.x, ay: s.y - 80, title: SHOP_KINDS[s.shop].name, lines: [def.theme.name], actions: worldShopActions(client, SHOP_KINDS[s.shop].items, city), pick: true });
             else consider(Math.hypot(s.x - p.x, s.y - p.y), { id: s.id, kind: 'escalator', ax: s.x, ay: s.y - 70, title: 'Escalator', lines: [s.id === 'up' ? `Up to level ${def.lv + 1}` : `Down to level ${def.lv - 1}`], actions: [{ a: s.id, label: s.id === 'up' ? '⬆ Go up' : '⬇ Go down', on: true }], mini: true });
         }
@@ -4730,7 +5071,9 @@ function worldInteract(client, d) {
             else w.task = null;
             break;
         case 'bed': worldDoRest(client); break;
-        case 'gate': if (act.a.startsWith('fly:')) worldBoardFlight(client, pr.ctx, act.a.slice(4)); break;
+        case 'gate': if (act.a === 'board') worldBoardWithTicket(client, pr.ctx); else if (act.a === 'enter') { const def = worldInteriorDef('term:' + pr.ctx.city); worldGoto(client, 'term:' + pr.ctx.city, def.spawn.x, def.spawn.y); } break;
+        case 'terminal': if (act.a === 'enter') { const def = worldInteriorDef('term:' + pr.ctx.city); worldGoto(client, 'term:' + pr.ctx.city, def.spawn.x, def.spawn.y); } break;
+        case 'use': case 'tickets': worldUse(client, pr.ctx, act.a); break;
         case 'shop': case 'stall': if (act.a.startsWith('buy:')) worldBuyItem(client, act.a.slice(4), pr.ctx.city); break;
         case 'attraction': if (act.a === 'visit') worldVisit(client, pr.ctx); else if (act.a === 'enter') { const def = worldInteriorDef('work:' + pr.ctx.id); worldGoto(client, 'work:' + pr.ctx.id, def.spawn.x, def.spawn.y); } break;
         case 'hotel':
@@ -5059,7 +5402,7 @@ function buildMallInterior(b, lv) {
     });
     if (lv < levels) { f.push({ k: 'escalator', x: cx - 330, y: cy - 60, w: 90, h: 200, dir: 1 }); D.stations.push({ id: 'up', x: cx - 285, y: cy + 160, r: 90 }); }
     if (lv > 1) { f.push({ k: 'escalator', x: cx + 240, y: cy - 60, w: 90, h: 200, dir: -1 }); D.stations.push({ id: 'down', x: cx + 285, y: cy + 160, r: 90 }); }
-    for (const [x, y] of [[cx - 360, cy + 260], [cx + 260, cy + 260], [cx - 50, cy + 300]]) f.push({ k: 'sofa', x, y, w: 120, h: 40, solid: 1 });
+    for (const x of [cx - 130, cx + 10]) f.push({ k: 'sofa', x, y: cy + 152, w: 120, h: 40, solid: 1 });   // against the atrium railing, out of the walkways
     for (const [x, y] of [[cx - 250, cy - 200], [cx + 250, cy - 200], [cx - 250, cy + 200], [cx + 250, cy + 200]]) f.push({ k: 'plant', x, y, r: 20, solid: 1 });
     return D;
 }
@@ -5110,6 +5453,7 @@ function worldHandle(client, d) {
     if (d.type === 'world_interact') worldInteract(client, { id: String(d.id), a: String(d.a) });
     else if (d.type === 'world_leave') { worldOnDisconnect(client); }
     else if (d.type === 'world_nav') worldNav(client, String(d.t), d);
+    else if (d.type === 'world_inflight') worldInflightOrder(client, String(d.item || ''));
     else if (d.type === 'world_gig') { if (d.act === 'cancel') { if (w.mission) { w.mission = null; worldNotice(client, 'Job cancelled.'); worldPushMission(client); } } else worldStartGig(client); }
     else if (d.type === 'world_taxi') { if (d.act === 'cancel') { if (client.player?.taxiRide) worldEndTaxi(client, false); else { taxiRides.delete(client); worldPushTaxi(client); } } else worldHailTaxi(client, worldResolveTarget(client, String(d.t || 'pin'), d)); }
     else if (d.type === 'world_map' && WL) sendWorld(client, 'world_map', { p: worldMapPlaces() });
