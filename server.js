@@ -2306,7 +2306,7 @@ const rooms = {
 const WORLD_TILE = 420, WORLD_GRID = 120, WORLD_EXTENT = WORLD_TILE * WORLD_GRID;
 const worldRoom = new Room('WORLD', 'WORLD', { shapeCount: 0, botCount: 0, shapeRespawn: false });
 worldRoom.worldExtent = WORLD_EXTENT;      // replaced by the real (wrapping) size once the layout constants exist; see W_CIRC / W_EXTY
-worldRoom.grid = new HashGrid(500); worldRoom.grid.wrap = 2700000;   // = W_CIRC (declared further down)
+worldRoom.grid = new HashGrid(500); worldRoom.grid.wrap = 4 * 1011600;   // = W_CIRC (declared further down)
 rooms.WORLD = worldRoom;
 worldRoom.worldKind = 'exterior';
 // Interiors (houses / workplaces) are private Rooms created on demand; they are kept out of `rooms`
@@ -2944,10 +2944,11 @@ setInterval(() => {
 // a flight from a CT+12 city to a CT-6 city is shorter – and operated – eastbound.
 // Every city centre is a multiple of W_S from every other, so all cities share one global road grid.
 const W_S = 600;
-const W_GAP = 675000;                       // distance between neighbouring city centres = one 6-hour time zone
+const W_SCALE = 1.5;                        // v6: the whole world and every city 1.5x larger than v5
+const W_GAP = 1011600;                      // distance between neighbouring city centres = one 6-hour time zone (≈675 000 × 1.5; a multiple of the chunk size)
 const W_COLS = 4;                           // CT-6, CT, CT+6, CT+12
 const W_CIRC = W_COLS * W_GAP;              // east-west circumference of the world
-const W_MARGIN = 75600;                     // land between the outermost city centres and the coast
+const W_MARGIN = 113400;                    // land between the outermost city centres and the coast
 const W_SHORE = 1800;                       // width of the beach strip that ends the land
 const W_EXTY = 2 * W_MARGIN + W_GAP;        // north-south size of the world
 const W_EXT = Math.max(W_CIRC, W_EXTY);     // index size (chunks / collision buckets)
@@ -2968,7 +2969,7 @@ function wrapX(x) { return ((x % W_CIRC) + W_CIRC) % W_CIRC; }
 // the sphere with a tangent heading h, so there is no seam anywhere: not at the date line and not at the poles.
 // Ground entities stay inside the land zone (which never touches the date line), so chart physics never meets a seam.
 const W_R = W_CIRC / (2 * Math.PI), W_YEQ = W_EXTY / 2, W_LATMAX = 85 * Math.PI / 180;
-const FL_SPH = 0.82;                                     // cruise speed on the sphere relative to the chart cruise number
+const FL_SPH = 1.0;                                      // cruise speed on the sphere relative to the chart cruise number
 function wLat(y) { return 2 * Math.atan(Math.exp((W_YEQ - y) / W_R)) - Math.PI / 2; }
 function wLon(x) { return x / W_CIRC * Math.PI * 2; }
 function wYofLat(lat) { lat = Math.max(-W_LATMAX, Math.min(W_LATMAX, lat)); return W_YEQ - W_R * Math.log(Math.tan(Math.PI / 4 + lat / 2)); }
@@ -3015,23 +3016,23 @@ const W_CULTURES = {
     isles:   { name: 'Kaimana Isles',      greet: "Ma'ora!",              lang: 'Kaimanan',   lht: 1, open: 6, close: 24, fest: 'Blossom Moon',   spec: ['coconutfish', 'ricecake'],   idx: 3 }
 };
 const W_CITIES = [
-    { id: 'central',  name: 'Central City', code: 'CTC', col: 1, row: 0, home: true, style: 'cyber', theme: 'cyber', size: 30600, wageMul: 1.9,  priceMul: 2.2,  toll: 30 },
-    { id: 'port',     name: 'Port Aldren',  code: 'PAL', col: 2, row: 0, seedAdd: 101, style: 'generic', theme: 'port',    size: 25800, wageMul: 1.2,  priceMul: 1.1,  toll: 25 },
-    { id: 'highmoor', name: 'Highmoor',     code: 'HMR', col: 1, row: 1, seedAdd: 202, style: 'oldtown', theme: 'old',     size: 22800, wageMul: 1.15, priceMul: 1.35, toll: 15 },
-    { id: 'solana',   name: 'Solana',       code: 'SOL', col: 2, row: 1, seedAdd: 303, style: 'generic', theme: 'sun',     size: 27000, wageMul: 1.3,  priceMul: 1.3,  toll: 30 },
-    { id: 'redmesa',  name: 'Redmesa',      code: 'RMS', col: 0, row: 0, seedAdd: 404, style: 'generic', theme: 'mesa',    size: 25200, wageMul: 1.0,  priceMul: 0.9,  toll: 20 },
-    { id: 'cedar',    name: 'Cedar Hollow', code: 'CDH', col: 0, row: 1, seedAdd: 505, style: 'rural',   theme: 'pine',    size: 15600, wageMul: 0.55, priceMul: 0.4,  toll: 5 },
-    { id: 'kaimana',  name: 'Kaimana Bay',  code: 'KMB', col: 3, row: 0, seedAdd: 606, style: 'generic', theme: 'tropic',  size: 26400, wageMul: 1.25, priceMul: 1.2,  toll: 25 },
-    { id: 'hanami',   name: 'Hanami Ridge', code: 'HNR', col: 3, row: 1, seedAdd: 707, style: 'generic', theme: 'blossom', size: 24600, wageMul: 1.35, priceMul: 1.45, toll: 30 },
+    { id: 'central',  name: 'Central City', code: 'CTC', col: 1, row: 0, home: true, style: 'cyber', theme: 'cyber', size: 45600, wageMul: 1.9,  priceMul: 2.2,  toll: 30 },
+    { id: 'port',     name: 'Port Aldren',  code: 'PAL', col: 2, row: 0, seedAdd: 101, style: 'generic', theme: 'port',    size: 38400, wageMul: 1.2,  priceMul: 1.1,  toll: 25 },
+    { id: 'highmoor', name: 'Highmoor',     code: 'HMR', col: 1, row: 1, seedAdd: 202, style: 'oldtown', theme: 'old',     size: 34200, wageMul: 1.15, priceMul: 1.35, toll: 15 },
+    { id: 'solana',   name: 'Solana',       code: 'SOL', col: 2, row: 1, seedAdd: 303, style: 'generic', theme: 'sun',     size: 40800, wageMul: 1.3,  priceMul: 1.3,  toll: 30 },
+    { id: 'redmesa',  name: 'Redmesa',      code: 'RMS', col: 0, row: 0, seedAdd: 404, style: 'generic', theme: 'mesa',    size: 37800, wageMul: 1.0,  priceMul: 0.9,  toll: 20 },
+    { id: 'cedar',    name: 'Cedar Hollow', code: 'CDH', col: 0, row: 1, seedAdd: 505, style: 'rural',   theme: 'pine',    size: 23400, wageMul: 0.55, priceMul: 0.4,  toll: 5 },
+    { id: 'kaimana',  name: 'Kaimana Bay',  code: 'KMB', col: 3, row: 0, seedAdd: 606, style: 'generic', theme: 'tropic',  size: 39600, wageMul: 1.25, priceMul: 1.2,  toll: 25 },
+    { id: 'hanami',   name: 'Hanami Ridge', code: 'HNR', col: 3, row: 1, seedAdd: 707, style: 'generic', theme: 'blossom', size: 37200, wageMul: 1.35, priceMul: 1.45, toll: 30 },
     // the interior of the continent: four towns half-way between the northern and southern cities, and three crossroads
     // towns between the time-zone columns (those keep their local solar offset: CT-3, CT+3, CT+9)
-    { id: 'dustwater', name: 'Dustwater',   code: 'DSW', col: 0,   row: 0.5, seedAdd: 808,  style: 'rural',   theme: 'mesa',   size: 14400, wageMul: 0.6,  priceMul: 0.45, toll: 5 },
-    { id: 'lakemont',  name: 'Lakemont',    code: 'LKM', col: 1,   row: 0.5, seedAdd: 909,  style: 'generic', theme: 'port',   size: 17400, wageMul: 1.05, priceMul: 1.0,  toll: 15 },
-    { id: 'amberfield', name: 'Amberfield', code: 'AMB', col: 2,   row: 0.5, seedAdd: 1010, style: 'rural',   theme: 'sun',    size: 15000, wageMul: 0.65, priceMul: 0.5,  toll: 5 },
-    { id: 'palmhaven', name: 'Palmhaven',   code: 'PLH', col: 3,   row: 0.5, seedAdd: 1111, style: 'generic', theme: 'tropic', size: 16800, wageMul: 1.1,  priceMul: 1.05, toll: 15 },
-    { id: 'junction',  name: 'Junction Falls', code: 'JNF', col: 0.5, row: 0.5, seedAdd: 1212, tz: -3, style: 'generic', theme: 'pine', size: 13800, wageMul: 0.9, priceMul: 0.8, toll: 10 },
-    { id: 'meridian',  name: 'Meridian Crossing', code: 'MRX', col: 1.5, row: 0.5, seedAdd: 1313, tz: 3, style: 'generic', theme: 'hill', size: 15600, wageMul: 1.0, priceMul: 0.95, toll: 10 },
-    { id: 'saffron',   name: 'Saffron Vale', code: 'SFV', col: 2.5, row: 0.5, seedAdd: 1414, tz: 9, style: 'oldtown', theme: 'old', size: 14400, wageMul: 1.0, priceMul: 1.1, toll: 10 }
+    { id: 'dustwater', name: 'Dustwater',   code: 'DSW', col: 0,   row: 0.5, seedAdd: 808,  style: 'rural',   theme: 'mesa',   size: 21600, wageMul: 0.6,  priceMul: 0.45, toll: 5 },
+    { id: 'lakemont',  name: 'Lakemont',    code: 'LKM', col: 1,   row: 0.5, seedAdd: 909,  style: 'generic', theme: 'port',   size: 26400, wageMul: 1.05, priceMul: 1.0,  toll: 15 },
+    { id: 'amberfield', name: 'Amberfield', code: 'AMB', col: 2,   row: 0.5, seedAdd: 1010, style: 'rural',   theme: 'sun',    size: 22800, wageMul: 0.65, priceMul: 0.5,  toll: 5 },
+    { id: 'palmhaven', name: 'Palmhaven',   code: 'PLH', col: 3,   row: 0.5, seedAdd: 1111, style: 'generic', theme: 'tropic', size: 25200, wageMul: 1.1,  priceMul: 1.05, toll: 15 },
+    { id: 'junction',  name: 'Junction Falls', code: 'JNF', col: 0.5, row: 0.5, seedAdd: 1212, tz: -3, style: 'generic', theme: 'pine', size: 20400, wageMul: 0.9, priceMul: 0.8, toll: 10 },
+    { id: 'meridian',  name: 'Meridian Crossing', code: 'MRX', col: 1.5, row: 0.5, seedAdd: 1313, tz: 3, style: 'generic', theme: 'hill', size: 23400, wageMul: 1.0, priceMul: 0.95, toll: 10 },
+    { id: 'saffron',   name: 'Saffron Vale', code: 'SFV', col: 2.5, row: 0.5, seedAdd: 1414, tz: 9, style: 'oldtown', theme: 'old', size: 21600, wageMul: 1.0, priceMul: 1.1, toll: 10 }
 ];
 // Centres snap to the shared 600-unit road grid (relative to Central City), so every town's roads line up with the highways.
 for (const c of W_CITIES) {
@@ -3058,6 +3059,24 @@ function worldOnHighway(x, y) {
     for (const h of WL.highways) { const along = h.a === 'h' ? x : y, perp = h.a === 'h' ? y : x; if (Math.abs(perp - h.p) < 125 && along > h.s0 - 50 && along < h.s1 + 50) return true; }
     return false;
 }
+// Every airport has its own design: name, terminal plan, colours, control tower, runway surface, second runway.
+const AP_DESIGNS = {
+    central:    { nm: 'Central City International',  kind: 'satellite', rw2: 'par',   surf: 'asphalt',  tower: 'needle',  roof: '#dfe6ee', wall: '#4f6b88', acc: '#00a8d6', glass: '#5fb7e0' },
+    port:       { nm: 'Port Aldren Harbour Airport', kind: 'piers',     rw2: 'cross', surf: 'asphalt',  tower: 'square',  roof: '#b9c3ca', wall: '#55687a', acc: '#1d4f7a', glass: '#7aa7c4' },
+    highmoor:   { nm: 'Highmoor Moorside Airport',   kind: 'linear',    rw2: null,    surf: 'asphalt',  tower: 'stone',   roof: '#5f9a86', wall: '#a9805f', acc: '#2f5d50', glass: '#8fb5a8' },
+    solana:     { nm: 'Solana Sunport',              kind: 'curve',     rw2: 'par',   surf: 'concrete', tower: 'cyl',     roof: '#f3e7c9', wall: '#d39a5c', acc: '#e67e22', glass: '#64b5d9' },
+    redmesa:    { nm: 'Redmesa Canyon Field',        kind: 'linear',    rw2: 'cross', surf: 'concrete', tower: 'adobe',   roof: '#c8693b', wall: '#9c4a2b', acc: '#7a2e14', glass: '#d9a066' },
+    kaimana:    { nm: 'Kaimana Bay International',   kind: 'piers',     rw2: 'par',   surf: 'asphalt',  tower: 'cyl',     roof: '#f6f1e4', wall: '#2a9d8f', acc: '#b3202c', glass: '#6fd0c5' },
+    hanami:     { nm: 'Hanami Ridge Airport',        kind: 'curve',     rw2: null,    surf: 'asphalt',  tower: 'pagoda',  roof: '#f7eef2', wall: '#b35f7d', acc: '#d4567f', glass: '#e3b6c8' },
+    lakemont:   { nm: 'Lakemont Regional',           kind: 'linear',    rw2: null,    surf: 'asphalt',  tower: 'lattice', roof: '#cfe0ec', wall: '#3f6e8c', acc: '#2980b9', glass: '#86c1e3' },
+    palmhaven:  { nm: 'Palmhaven Airport',           kind: 'satellite', rw2: null,    surf: 'concrete', tower: 'cyl',     roof: '#fff7e0', wall: '#3aa17e', acc: '#f39c12', glass: '#9be0c9' },
+    cedar:      { nm: 'Cedar Hollow Airstrip',       kind: 'lodge',     rw2: null,    surf: 'turf',     tower: 'beacon',  roof: '#6d4c33', wall: '#8b5e3c', acc: '#2e5d34', glass: '#c9b48a' },
+    dustwater:  { nm: 'Dustwater Field',             kind: 'lodge',     rw2: null,    surf: 'gravel',   tower: 'adobe',   roof: '#c99a6b', wall: '#a7744a', acc: '#8e3b1f', glass: '#e0c08f' },
+    amberfield: { nm: 'Amberfield Airfield',         kind: 'lodge',     rw2: null,    surf: 'turf',     tower: 'beacon',  roof: '#a63d33', wall: '#e3d2b0', acc: '#a63d33', glass: '#f2e2b8' },
+    junction:   { nm: 'Junction Falls Regional',     kind: 'box',       rw2: null,    surf: 'asphalt',  tower: 'lattice', roof: '#d9dee2', wall: '#4d7a5a', acc: '#2e8b57', glass: '#9ccfb0' },
+    meridian:   { nm: 'Meridian Crossing Airport',   kind: 'box',       rw2: null,    surf: 'asphalt',  tower: 'cyl',     roof: '#e9e3f0', wall: '#6b5b8c', acc: '#8e44ad', glass: '#b9a6d9' },
+    saffron:    { nm: 'Saffron Vale Airport',        kind: 'box',       rw2: null,    surf: 'concrete', tower: 'stone',   roof: '#c0873b', wall: '#d8b27a', acc: '#b9770e', glass: '#e8c98a' }
+};
 const W_CHUNK = 1800;                  // streaming chunk size
 const W_NCH = Math.ceil(W_EXT / W_CHUNK);
 const ROAD_CLASSES = { avenue: { hw: 105, lanes: 4 }, street: { hw: 60, lanes: 2 }, lane: { hw: 46, lanes: 2 } };
@@ -3277,7 +3296,7 @@ function buildCityLayout(seed, city, idx) {
     };
     const nid = () => L.nid++;
     const style = city.style || 'generic';
-    const RURAL = style === 'rural' ? (R0 > 15000 ? 1.9 : 1.45) : home ? 1.3 : 1.24, CORE = { cyber: 0.34, oldtown: 0.28, rural: 0.12 }[style] || 0.2;
+    const RURAL = style === 'rural' ? (R0 > 15000 * W_SCALE ? 1.9 : 1.45) : home ? 1.3 : 1.24, CORE = { cyber: 0.34, oldtown: 0.28, rural: 0.12 }[style] || 0.2;
 
     // ---- 1. macro cells -----------------------------------------------------------------------------
     const M = Math.ceil(R0 * 1.36 * RURAL / 3600) + 1, MN = 2 * M;         // macro index I in [-M, M)
@@ -3294,17 +3313,24 @@ function buildCityLayout(seed, city, idx) {
     orthoConvex(all, MN); orthoConvex(dev, MN);
     for (let i = 0; i < dev.length; i++) if (dev[i]) all[i] = 1;
     orthoConvex(all, MN);
-    // airport: the rural cell next to the developed area that lies closest to a seeded bearing
-    const prefA = wHash(seed, 4242, 17) * Math.PI * 2;
+    // ---- airport: a 2x2 block of macro cells (2x1 for small towns) next to the developed area, closest to a seeded bearing
+    const prefA = wHash(seed, 4242, 17) * Math.PI * 2, apBig = !(city.style === 'rural' || city.size < 24000);
     let air = null, airScore = Infinity;
-    for (let I = -M + 1; I < M - 1; I++) for (let J = -M + 1; J < M - 1; J++) {
-        const k = mIdx(I, J); if (!all[k] || dev[k]) continue;
-        if (!(dev[mIdx(I - 1, J)] || dev[mIdx(I + 1, J)] || dev[mIdx(I, J - 1)] || dev[mIdx(I, J + 1)])) continue;
-        const mx = (I + 0.5) * 3600, my = (J + 0.5) * 3600;
-        let da = Math.abs(Math.atan2(my, mx) - prefA) % (Math.PI * 2); if (da > Math.PI) da = Math.PI * 2 - da;
-        const sc = ndRel(mx, my) + da * 0.45;
-        if (sc < airScore) { airScore = sc; air = { I, J }; }
+    for (const [fw, fh] of apBig ? [[2, 2], [2, 1], [1, 1]] : [[2, 1], [1, 1]]) {
+        for (let I = -M + 1; I < M - fw; I++) for (let J = -M + 1; J < M - fh; J++) {
+            let ok = true, touch = false;
+            for (let a = 0; a < fw && ok; a++) for (let b = 0; b < fh; b++) { const k = mIdx(I + a, J + b); if (!all[k] || dev[k]) { ok = false; break; } }
+            if (!ok) continue;
+            for (let a = -1; a <= fw && !touch; a++) for (let b = -1; b <= fh; b++) { if ((a < 0 || a >= fw) === (b < 0 || b >= fh)) continue; if (dev[mIdx(I + a, J + b)]) { touch = true; break; } }
+            if (!touch) continue;
+            const mx = (I + fw / 2) * 3600, my = (J + fh / 2) * 3600;
+            let da = Math.abs(Math.atan2(my, mx) - prefA) % (Math.PI * 2); if (da > Math.PI) da = Math.PI * 2 - da;
+            const sc = ndRel(mx, my) + da * 0.45;
+            if (sc < airScore) { airScore = sc; air = { I, J, fw, fh }; }
+        }
+        if (air) break;
     }
+    const inAir = (I, J) => air && I >= air.I && I < air.I + air.fw && J >= air.J && J < air.J + air.fh;
     // ---- 2. cell list ---------------------------------------------------------------------------------
     // core 1200-cells (index i2 = 3I + a): nd < CORE, plus the landmark cells around the centre
     const N2 = MN * 3, c2 = (i, j) => (i + 3 * M) + (j + 3 * M) * N2, core = new Uint8Array(N2 * N2);
@@ -3317,7 +3343,7 @@ function buildCityLayout(seed, city, idx) {
     const cells = [];                                                        // [k0, m0, k1, m1, kind, zone]
     for (let I = -M; I < M; I++) for (let J = -M; J < M; J++) {
         const k = mIdx(I, J); if (!all[k]) continue;
-        if (air && I === air.I && J === air.J) { cells.push([6 * I, 6 * J, 6 * I + 6, 6 * J + 6, 'airport', 3]); continue; }
+        if (inAir(I, J)) { if (I === air.I && J === air.J) cells.push([6 * I, 6 * J, 6 * (I + air.fw), 6 * (J + air.fh), 'airport', 3]); continue; }
         if (!dev[k]) { cells.push([6 * I, 6 * J, 6 * I + 6, 6 * J + 6, 'rural', 3]); continue; }
         for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) {
             const i2 = 3 * I + a, j2 = 3 * J + b;
@@ -3327,13 +3353,15 @@ function buildCityLayout(seed, city, idx) {
     }
     // ---- 3. roads: each line spans exactly the cells it borders ----------------------------------------
     const ext = { v: new Map(), h: new Map() };
-    const grow = (ax, k, a, b) => { const m = ext[ax], e = m.get(k); if (!e) m.set(k, [a, b]); else { if (a < e[0]) e[0] = a; if (b > e[1]) e[1] = b; } };
+    // a line can be split into several stretches (the airport's big block leaves a hole in the lines that cross it)
+    const grow = (ax, k, a, b) => { const m = ext[ax]; let e = m.get(k); if (!e) m.set(k, e = []); e.push([a, b]); };
     for (const [k0, m0, k1, m1] of cells) { grow('v', k0, m0, m1); grow('v', k1, m0, m1); grow('h', m0, k0, k1); grow('h', m1, k0, k1); }
-    for (const axis of ['v', 'h']) for (const [k, [lo, hi]] of [...ext[axis]].sort((p, q) => p[0] - q[0])) {
+    const spans = list => { list.sort((p, q) => p[0] - q[0]); const out = []; for (const [a, b] of list) { const t = out[out.length - 1]; if (t && a <= t[1]) t[1] = Math.max(t[1], b); else out.push([a, b]); } return out; };
+    for (const axis of ['v', 'h']) for (const [k, lo, hi] of [...ext[axis]].sort((p, q) => p[0] - q[0]).flatMap(([k, list]) => spans(list).map(([a, b]) => [k, a, b]))) {
         const cls = lineClass(k), rc = ROAD_CLASSES[cls];
         const road = { a: axis, k, p: (axis === 'v' ? CX : CY) + k * S, c: cls[0], hw: rc.hw, ln: rc.lanes, e: (hi - lo) * S / 2, o: (axis === 'v' ? CY : CX) + (lo + hi) * S / 2 };
         if (style === 'cyber') road.st = 'neon'; else if (style === 'oldtown' && cls !== 'avenue') road.st = 'cobble'; else if (style === 'rural' && cls !== 'avenue') road.st = 'dirt';
-        L.roads.push(road); (axis === 'v' ? L.rv : L.rh)[k] = road;
+        L.roads.push(road); const map = axis === 'v' ? L.rv : L.rh; if (!map[k]) map[k] = road;
     }
     for (const v of L.roads) {
         if (v.a !== 'v') continue;
@@ -3702,37 +3730,93 @@ function buildCityLayout(seed, city, idx) {
         cornerLamps(B);
     }
 
-    // ---- airport: one macro cell with runway, taxiway, apron, terminal, tower, hangar and car parks ---------------
-    // Laid out in a local frame with the terminal on the south side, mirrored when the airport lies south of the
-    // centre so the terminal always faces the city. Two stands on the apron: A keeps a parked airliner, B is the
-    // boarding gate where your flight waits and where arriving flights park.
+    // ---- airport: runway(s), taxiways, apron with numbered stands, terminal, tower, hangars, car parks, hotel ---------
+    // Laid out in a local frame (y grows from the runway towards the city), mirrored when the airport lies south of
+    // the centre so the terminal always faces the city. Every airport has its own design (AP_DESIGNS): terminal plan
+    // (linear, piers, satellite, curved, lodge, box), colours, tower, runway surface and a second runway or not.
+    // Stands carry the parking heading and the push-back point, which the flight code uses for taxiing.
     function airportBlock(B, rng, termTop) {
-        const X0 = B.x + 20, W = B.w - 40, Y0 = B.y + 20, H = B.h - 40, cx = W / 2;
+        const D = AP_DESIGNS[city.id] || AP_DESIGNS.lakemont, X0 = B.x + 20, W = B.w - 40, Y0 = B.y + 20, H = B.h - 40, cx = W / 2, big = H > 5000;
         const ry = (y, h = 0) => termTop ? Y0 + H - y - h : Y0 + y;
         const R = (x, y, w, h) => ({ x: Math.round(X0 + x), y: Math.round(ry(y, h)), w: Math.round(w), h: Math.round(h) });
         const P = (x, y) => ({ x: Math.round(X0 + x), y: Math.round(ry(y)) });
         const deco = (k, r, extra) => addDeco(k, r.x, r.y, r.w, r.h, extra);
-        const rw = R(160, 1185, W - 320, 130);
-        deco('runway', rw, { code: city.code });
-        deco('taxiway', R(230, 1520, W - 460, 80));
-        for (const x of [270, W - 270]) deco('taxiway', R(x - 40, 1250, 80, 350));
-        for (const x of [cx - 380, cx + 380]) deco('taxiway', R(x - 40, 1560, 80, 520));
-        deco('apron', R(cx - 820, 2050, 1640, 570), { flip: termTop ? 1 : 0 });
-        deco('path', R(cx - 70, 2960, 140, H - 2960));
-        const term = addBuilding('terminal', X0 + cx - 560, ry(2700, 260), 1120, 260, { door: { dir: termTop ? 'N' : 'S' }, s: Math.floor(rng() * 9999), code: city.code, nm: city.name, flip: termTop ? 1 : 0 });
-        addBuilding('ctower', X0 + cx + 680, ry(2720, 120), 120, 120, { s: 3 });
-        addBuilding('hangar', X0 + cx + 980, ry(2080, 400), 520, 400, { door: { dir: termTop ? 'S' : 'N' }, s: Math.floor(rng() * 9999) });
-        for (const lx of [cx - 560, cx + 90]) { const r = R(lx, 3010, 470, 300); const lot = addLot(r.x, r.y, r.w, r.h, false); fillLotWithCars(lot, rng, 0.45); }
-        const sa = P(cx - 380, 2330), sb = P(cx + 380, 2330);
-        for (const [st, gate] of [[sa, 0], [sb, 1]]) {
-            addDeco('plane', st.x - 125, st.y - 115, 250, 230, { a: 0, liv: gate ? 0 : 1 + idx % 5, gate, cx: st.x, cy: st.y });
-            for (let o = -100; o <= 100; o += 50) circCol(st.x + o, st.y, 18);
+        const UP = termTop ? -Math.PI / 2 : Math.PI / 2;               // world heading of local +y (towards the terminal)
+        const pal = { rc: D.roof, wc: D.wall, acc: D.acc, gl: D.glass, dk: D.kind, ap: city.id };
+        const G = big ? { rwY: 1150, rwH: 230, tyY: 1760, tyH: 130, apY: 2020, termY: 4380, termH: 620 }
+                      : { rwY: 560, rwH: 180, tyY: 1020, tyH: 110, apY: 1220, termY: 2320, termH: 420 };
+        const rwX = 300, rwW = W - 600, endW = 560, endE = W - 560;
+        if (D.rw2 === 'par' && big) { deco('runway', R(rwX + 400, 420, rwW - 800, 190), { code: city.code, surf: D.surf, nr: 'L', flip: termTop ? 1 : 0 }); for (const x of [rwX + 700, W - rwX - 700]) deco('taxiway', R(x - 60, 610, 120, G.rwY - 610)); }
+        const rw = R(rwX, G.rwY, rwW, G.rwH);
+        deco('runway', rw, { code: city.code, surf: D.surf, nr: D.rw2 === 'par' && big ? 'R' : '', flip: termTop ? 1 : 0 });
+        if (D.rw2 === 'cross') deco('runway', R(W - 1250, 120, 200, G.tyY + G.tyH - 60), { code: '', surf: D.surf, vert: 1, flip: termTop ? 1 : 0 });
+        deco('taxiway', R(endW - 60, G.tyY, endE - endW + 120, G.tyH), { surf: D.surf });
+        for (const x of [endW, endE, W * 0.36, W * 0.64]) deco('taxiway', R(x - 60, G.rwY + G.rwH, 120, G.tyY - G.rwY - G.rwH), { surf: D.surf });
+        // ---- terminal plan and stands ----
+        const twoRemote = big && (D.kind === 'linear' || D.kind === 'satellite'), stands = [], apX0 = big ? (D.kind === 'curve' ? 1250 : 1700) : 300, apX1 = twoRemote ? W - 1700 : W - 300;
+        const standRow = (x0, x1, y, sp, skip) => { for (let x = x0; x <= x1 + 1; x += sp) { if ((skip && skip(x)) || x < apX0 + 300 || x > apX1 - 300) continue; stands.push({ lx: x, ly: y - 360, a: UP, ox: x, oy: y - 900, ex: x, bridge: D.kind !== 'lodge' ? { lx: x - 170, ly: y, len: 230 } : null }); } };
+        const termB = (x, w, y = G.termY, h = G.termH, k = 'terminal', extra = {}) => addBuilding(k, X0 + x, ry(y, h), w, h, Object.assign({ s: Math.floor(rng() * 9999), code: city.code, nm: D.nm, flip: termTop ? 1 : 0, bh: big ? 64 : 36 }, pal, extra));
+        let term;
+        const mainDoor = { door: { dir: termTop ? 'N' : 'S' } };
+        if (D.kind === 'linear') {
+            const tw = Math.min(W - 2400, 4600); term = termB(cx - tw / 2, tw, G.termY, G.termH, 'terminal', mainDoor);
+            standRow(cx - tw / 2 + 330, cx + tw / 2 - 330, G.termY, 660);
+        } else if (D.kind === 'piers') {
+            const tw = 3900; term = termB(cx - tw / 2, tw, G.termY, G.termH, 'terminal', mainDoor);
+            for (const px of [cx - 1800, cx, cx + 1800]) {
+                termB(px - 90, 180, G.termY - 1500, 1500, 'pier', { bh: 30 });
+                for (let j = 0; j < 2; j++) for (const sd of [-1, 1]) { const y = G.termY - 380 - j * 700; stands.push({ lx: px + sd * 430, ly: y, a: sd < 0 ? 0 : Math.PI, ox: px + sd * 760, oy: y, ex: px + sd * 760, bridge: { lx: px + sd * 90, ly: y - 120, len: 200, side: sd } }); }
+            }
+            standRow(cx + 2950, apX1 - 400, G.termY, 660); standRow(apX0 + 400, cx - 2950, G.termY, 660);
+        } else if (D.kind === 'satellite') {
+            const tw = Math.min(W - 2600, 4400), sx = cx + 150; term = termB(cx - tw / 2, tw, G.termY, G.termH, 'terminal', mainDoor);
+            termB(sx - 800, 1600, 2780, 460, 'satellite', { bh: 40 });
+            addDeco('tunnel', X0 + sx - 40, ry(3240, G.termY - 3240), 80, G.termY - 3240);
+            standRow(cx - tw / 2 + 330, cx + tw / 2 - 330, G.termY, 660, x => Math.abs(x - sx) < 1150);
+            standRow(sx - 660, sx + 660, 2780, 660);
+        } else if (D.kind === 'curve') {
+            const segW = 1200; let first = null;
+            for (let i = -1.5; i <= 1.5; i++) {
+                const dy = -Math.round(i * i * 110), x = cx + 150 + i * (segW + 20) - segW / 2, b = termB(x, segW, G.termY + dy, G.termH, 'terminal', i === -0.5 ? mainDoor : { door: { dir: termTop ? 'N' : 'S' }, part: 1 });
+                if (i === -0.5) first = b;
+                standRow(x + 300, x + segW - 300, G.termY + dy, 600);
+            }
+            term = first;
+        } else {                                                          // small towns: a lodge or a glass box, stairs instead of bridges
+            const tw = D.kind === 'lodge' ? 1100 : 1500; term = termB(cx - tw / 2, tw, G.termY, G.termH, 'terminal', mainDoor);
+            standRow(cx - 930, cx + 930, G.termY, 620);
         }
-        for (let i = 0; i < 14; i++) { const p = P(120 + rng() * (W - 240), 120 + rng() * 820); addTree(p.x, p.y, Math.floor(rng() * 8), 9); }
-        for (let i = 0; i < 8; i++) { const p = P(rng() < 0.5 ? 60 + rng() * 300 : W - 360 + rng() * 300, 1800 + rng() * 1100); addTree(p.x, p.y, Math.floor(rng() * 8), 9); }
+        if (big) for (const y of [2560, 3220, 3880]) stands.push({ lx: 800, ly: y, a: Math.PI, ox: 1330, oy: y, ex: 1330, bridge: null, remote: 1 });   // remote stands, by bus
+        if (twoRemote) for (const y of [2560, 3220, 3880]) stands.push({ lx: W - 800, ly: y, a: 0, ox: W - 1330, oy: y, ex: W - 1330, bridge: null, remote: 1 });
+        stands.sort((p, q) => p.lx - q.lx || p.ly - q.ly);
+        if (big) deco('apron', R(250, 2150, 1250, 2100), { flip: termTop ? 1 : 0, surf: 'concrete', stands: [] });
+        if (twoRemote) deco('apron', R(W - 1500, 2150, 1250, 2100), { flip: termTop ? 1 : 0, surf: 'concrete', stands: [] });
+        deco('apron', R(apX0, G.apY, apX1 - apX0, G.termY - G.apY), { flip: termTop ? 1 : 0, surf: D.surf === 'turf' || D.surf === 'gravel' ? 'concrete' : D.surf,
+            stands: stands.map((s, i) => { const p = P(s.lx, s.ly); return [p.x, p.y, +s.a.toFixed(3), i + 1]; }) });
+        for (const s of stands) if (s.bridge) { const b = s.bridge, p = P(b.lx, b.ly); addDeco('jetbridge', p.x - 40, p.y - 40, 80, 80, { a: s.bridge.side ? (s.bridge.side < 0 ? Math.PI : 0) : -UP, len: b.len }); }
+        // ---- landside ----
+        const ly = G.termY + G.termH;
+        addDeco('curb', X0 + cx - Math.min(W * 0.36, 2600), ry(ly + 30, 170), Math.min(W * 0.72, 5200), 170);
+        deco('path', R(cx - 70, ly + 200, 140, H - ly - 200));
+        if (big) {
+            for (const lx of [cx - 2200, cx - 1450, cx + 650, cx + 1400]) { const r = R(lx, ly + 300, 640, 760); const lot = addLot(r.x, r.y, r.w, r.h, false); fillLotWithCars(lot, rng, 0.5); }
+            addBuilding('hotel', X0 + Math.min(W - 900, cx + 2300), ry(ly + 260, 700), 640, 700, { s: Math.floor(rng() * 9999), f: 14 + Math.floor(rng() * 10), stars: 4, nm: D.nm.split(' ')[0] + ' Airport Hotel' });
+            addBuilding('hangar', X0 + 200, ry(ly + 260, 700), 950, 700, { door: { dir: termTop ? 'S' : 'N' }, s: Math.floor(rng() * 9999), lbl: 'MAINTENANCE' });
+            if (H - ly > 1950) addBuilding('hangar', X0 + 200, ry(ly + 1060, 760), 950, 760, { door: { dir: termTop ? 'S' : 'N' }, s: Math.floor(rng() * 9999), lbl: 'CARGO' });
+            for (let i = 0; i < 4; i++) addDeco('fueltank', X0 + W - 520 + (i % 2) * 240, ry(ly + 1400 + Math.floor(i / 2) * 240), 0, 0, { r: 95 });
+        } else {
+            for (const lx of [cx - 1000, cx + 200]) { const r = R(lx, ly + 250, 800, Math.min(480, H - ly - 320)); if (r.h > 200) { const lot = addLot(r.x, r.y, r.w, r.h, false); fillLotWithCars(lot, rng, 0.35); } }
+            addBuilding('hangar', X0 + (W > 5000 ? 400 : 120), ry(G.apY + 80, 520), 700, 520, { door: { dir: termTop ? 'N' : 'S' }, s: Math.floor(rng() * 9999), lbl: 'HANGAR' });
+        }
+        const tw = D.tower, tH = { needle: 260, cyl: 170, square: 150, stone: 120, adobe: 110, pagoda: 160, lattice: 140, beacon: 70 }[tw] || 150, tS = tw === 'beacon' ? 70 : 130;
+        addBuilding('ctower', X0 + Math.max(120, cx - Math.min(W * 0.36, 2600) - 300), ry(ly + 40, tS), tS, tS, { s: 3, ts: tw, bh: tH, wc: D.wall, acc: D.acc });
+        for (let i = 0; i < 26; i++) { const p = P(80 + rng() * (W - 160), 40 + rng() * (G.rwY - 120)); addTree(p.x, p.y, Math.floor(rng() * 8), 9); }
+        for (let i = 0; i < 10; i++) { const p = P(rng() < 0.5 ? 60 + rng() * 200 : W - 260 + rng() * 200, ly + 150 + rng() * Math.max(100, H - ly - 300)); addTree(p.x, p.y, Math.floor(rng() * 8), 9); }
+        const st = stands.map((s, i) => { const p = P(s.lx, s.ly), o = P(s.ox, s.oy); return { x: p.x, y: p.y, a: +s.a.toFixed(4), ox: o.x, oy: o.y, ex: Math.round(X0 + (s.ex ?? s.ox)), g: i + 1, remote: s.remote || 0 }; });
+        const off = P(cx + 260, ly + 110);
         L.airport = {
-            city: city.id, name: city.name + ' Airport', code: city.code, x0: rw.x, x1: rw.x + rw.w, ry: P(0, 1250).y, ty: P(0, 1560).y,
-            endW: Math.round(X0 + 270), endE: Math.round(X0 + W - 270), cb: sb.x, sa, sb, off: P(cx + 380, 2480),
+            city: city.id, name: D.nm, code: city.code, x0: rw.x, x1: rw.x + rw.w, ry: P(0, G.rwY + G.rwH / 2).y, ty: P(0, G.tyY + G.tyH / 2).y,
+            endW: Math.round(X0 + endW), endE: Math.round(X0 + endE), stands: st, sb: { x: st[0].x, y: st[0].y }, off, big: big ? 1 : 0, design: D.kind,
             door: { x: term.door.x, y: term.door.y }, term: { id: term.id, x: term.x, y: term.y, w: term.w, h: term.h, dir: term.door.dir }, flip: termTop ? 1 : 0
         };
     }
@@ -3814,7 +3898,7 @@ function buildCityLayout(seed, city, idx) {
     if (style === 'cyber') L.buildings.filter(b => b.k === 'megamall').sort((p, q) => Math.hypot(p.x - CX, p.y - CY) - Math.hypot(q.x - CX, q.y - CY)).slice(0, 4).forEach(b => { b.lv = 6; });   // downtown always has casinos
     for (const p of L.props) if (p.k === 'stall') p.city = city.id;
     // used for the city-limit outline: developed cells and the airport count as "inside"
-    L.devAt = (x, y) => { const I = Math.floor((x - CX) / 3600), J = Math.floor((y - CY) / 3600); if (I < -M || J < -M || I >= M || J >= M) return false; return !!dev[mIdx(I, J)] || (air && I === air.I && J === air.J); };
+    L.devAt = (x, y) => { const I = Math.floor((x - CX) / 3600), J = Math.floor((y - CY) / 3600); if (I < -M || J < -M || I >= M || J >= M) return false; return !!dev[mIdx(I, J)] || inAir(I, J); };
     return L;
 }
 function indexLayout(L) {
@@ -4102,7 +4186,9 @@ function buildWorldLayout(seed) {
 const FL_TAXI = 5, FL_VR = 26, FL_FINAL = 22000, FL_CLIMB = 14000, FL_DESC = 42000;
 function flAng(a) { a = ((a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI; return a; }
 function flTurn(a, b, rate) { const d = flAng(b - a); return flAng(a + Math.max(-rate, Math.min(rate, d))); }
-function flightCreate(A, B, cruise) {
+// sDep / sArr: the stands (index into A.stands / B.stands) the flight leaves from and parks at.
+function flightCreate(A, B, cruise, sDep = 0, sArr = 0) {
+    const S = A.stands[sDep % A.stands.length], T = B.stands[sArr % B.stands.length];
     const g = wGC(A.sb.x, A.sb.y, B.sb.x, B.sb.y), gB = wGC(B.sb.x, B.sb.y, A.sb.x, A.sb.y), dx = wrapDx(B.sb.x - A.sb.x);
     const east = Math.abs(Math.sin(g.brg)) > 0.2 ? Math.sin(g.brg) > 0 : dx >= 0;
     const arrE = -Math.sin(gB.brg), landDir = Math.abs(arrE) > 0.25 ? (arrE > 0 ? 1 : -1) : (dx >= 0 ? 1 : -1);   // land in the direction we arrive from
@@ -4110,10 +4196,10 @@ function flightCreate(A, B, cruise) {
     const cb = Math.cos(g.brg), head = cb > 0.7 ? 'north' : cb < -0.7 ? 'south' : east ? 'east' : 'west';
     return {
         from: A.city, to: B.city, dir: east ? 'east' : 'west', head, cruise, cs: cruise * FL_SPH, dist: Math.round(g.d), poles: 0, viaPole: wGCPole(A.sb.x, A.sb.y, B.sb.x, B.sb.y) || null,
-        x: A.sb.x, y: A.sb.y, a: 0, v: 0, vs: 0, q: null, h: null, pz: 0, polar: false, alt: 0, ph: 'taxi', t: 0, climb: 0, wraps: 0, prevDI: Infinity, kA: wSec(A.ry),
-        wp: [[A.cb, A.ty], [startX, A.ty], [startX, A.ry]],
+        x: S.x, y: S.y, a: S.a, v: 0, vs: 0, gate: S.g, agate: T.g, q: null, h: null, pz: 0, polar: false, alt: 0, ph: 'taxi', t: 0, climb: 0, wraps: 0, prevDI: Infinity, kA: wSec(A.ry),
+        wp: [[S.ox, S.oy, 1], [S.ex ?? S.ox, S.oy], [S.ex ?? S.ox, A.ty], [startX, A.ty], [startX, A.ry]],        // push back, along the apron lane, out to the taxiway and the runway end
         roll: { a: east ? 0 : Math.PI, y: A.ry },
-        land: { tx: tdx, ty: B.ry, dir: landDir, ifx, exitX: landDir > 0 ? B.endE : B.endW, taxiY: B.ty, cb: B.cb, sb: B.sb, T: wVec(ifx, B.ry), kT: wSec(B.ry) }
+        land: { tx: tdx, ty: B.ry, dir: landDir, ifx, exitX: landDir > 0 ? B.endE : B.endW, taxiY: B.ty, st: T, sb: B.sb, T: wVec(ifx, B.ry), kT: wSec(B.ry) }
     };
 }
 // Distance still to fly in true (sphere) units: great circle to the approach fix + final + landing roll, for the HUD / ETA.
@@ -4131,13 +4217,14 @@ function flightStep(f) {
     const L = f.land; let ev = null;
     const move = () => { f.x = wrapX(f.x + Math.cos(f.a) * f.v); f.y += Math.sin(f.a) * f.v; };   // on the ground / near the runways: the chart is exact
     switch (f.ph) {
+        case 'board': f.v = 0; if (Date.now() >= f.dep) { f.ph = 'taxi'; ev = 'push'; } break;     // doors open at the stand; push back on the minute
         case 'taxi': case 'taxiin': {
             const w = f.wp[0];
             if (!w) { f.ph = f.ph === 'taxi' ? 'lineup' : 'park'; break; }
-            const dx = w[0] - f.x, dy = w[1] - f.y, d = Math.hypot(dx, dy), last = f.wp.length === 1 && f.ph === 'taxiin';
-            const want = last ? Math.min(FL_TAXI, Math.max(0.8, d * 0.03)) : FL_TAXI;
-            f.v += Math.max(-0.25, Math.min(0.12, want - f.v));
-            if (d > 2) f.a = flTurn(f.a, Math.atan2(dy, dx), 0.1);
+            const dx = w[0] - f.x, dy = w[1] - f.y, d = Math.hypot(dx, dy), last = f.wp.length === 1 && f.ph === 'taxiin', push = !!w[2];
+            const want = push ? Math.min(1.6, Math.max(0.5, d * 0.02)) : last ? Math.min(FL_TAXI, Math.max(0.8, d * 0.03)) : FL_TAXI;
+            f.v += Math.max(-0.25, Math.min(push ? 0.04 : 0.12, want - f.v));
+            if (d > 2 && !push) f.a = flTurn(f.a, Math.atan2(dy, dx), 0.1);    // pushing back: the tug moves us, the nose stays put
             if (d <= Math.max(3, f.v)) { f.x = w[0]; f.y = w[1]; f.wp.shift(); }
             else { f.x += dx / d * f.v; f.y += dy / d * f.v; }        // the wheels follow the taxi line exactly; the nose turns smoothly
             break;
@@ -4203,11 +4290,11 @@ function flightStep(f) {
         }
         case 'rollout':
             f.v = Math.max(FL_TAXI, f.v - 0.15); f.a = L.dir > 0 ? 0 : Math.PI; f.y = L.ty; move();
-            if ((f.x - L.exitX) * L.dir >= 0) { f.x = L.exitX; f.ph = 'taxiin'; f.wp = [[L.exitX, L.taxiY], [L.cb, L.taxiY], [L.sb.x, L.sb.y]]; }
+            if ((f.x - L.exitX) * L.dir >= 0) { f.x = L.exitX; f.ph = 'taxiin'; f.wp = [[L.exitX, L.taxiY], [L.st.ex ?? L.st.ox, L.taxiY], [L.st.ex ?? L.st.ox, L.st.oy], [L.st.ox, L.st.oy], [L.st.x, L.st.y]]; }
             break;
         case 'park':
-            f.v = 0; f.a = flTurn(f.a, 0, 0.04);
-            if (Math.abs(f.a) < 0.002) { f.a = 0; f.ph = 'done'; ev = 'done'; }
+            f.v = 0; f.a = flTurn(f.a, L.st.a, 0.04);
+            if (Math.abs(flAng(f.a - L.st.a)) < 0.002) { f.a = L.st.a; f.ph = 'done'; ev = 'done'; }
             break;
     }
     return ev;
@@ -4415,9 +4502,10 @@ function furnishMall(D, b) {
 // Airport terminal: check-in hall (buy a boarding pass), security, departure lounge with shops, and the gate.
 function buildTerminalInterior(ap) {
     const X0 = 150, Y0 = 300, W = 1500, H = 1200, fl = { x: X0, y: Y0, w: W, h: H }, doorX = X0 + W / 2, secY = Y0 + 520, T = 22;
-    const city = W_CITIES.find(c => c.id === ap.city);
+    const city = W_CITIES.find(c => c.id === ap.city), AD = AP_DESIGNS[ap.city] || AP_DESIGNS.lakemont;
+    const floor = { satellite: 'tech', piers: 'marble', curve: 'marble', linear: city.style === 'oldtown' || city.theme === 'mesa' ? 'market' : 'marble', lodge: 'wood', box: city.style === 'oldtown' ? 'market' : 'food' }[AD.kind] || 'marble';
     const D = {
-        kind: 'terminal', ext: INT_EXT, floor: fl, theme: { accent: '#1d4f7a', name: `${ap.name} (${ap.code})`, code: ap.code, city: ap.city },
+        kind: 'terminal', ext: INT_EXT, floor: fl, theme: { accent: AD.acc, name: `${ap.name} (${ap.code})`, code: ap.code, city: ap.city, floor, wall: AD.wall },
         walls: intWallsAround(fl, doorX, 180), furn: [], stations: [], rooms: [{ x: X0, y: secY, w: W, h: H - (secY - Y0), c: 'hall' }, { x: X0, y: Y0, w: W, h: secY - Y0, c: 'lounge' }],
         door: { x: doorX - 90, y: Y0 + H, w: 180, h: INT_WALL, px: doorX, py: Y0 + H - 36, r: 120 },
         spawn: { x: doorX, y: Y0 + H - 110 }, ap: ap.city
@@ -4441,6 +4529,11 @@ function buildTerminalInterior(ap) {
     intUse(D, intAdd(D, { k: 'kiosk', x: X0 + 20, y: Y0 + 80, w: 200, h: 110, solid: 1, shop: 'cafe', label: 'Café', col: 3 }), 'shop:cafe', X0 + 120, Y0 + 230, 80);
     intUse(D, intAdd(D, { k: 'kiosk', x: X0 + W - 220, y: Y0 + 80, w: 200, h: 110, solid: 1, shop: 'souvenir', label: 'Duty Free', col: 4 }), 'shop:souvenir', X0 + W - 120, Y0 + 230, 80);
     intUse(D, intAdd(D, { k: 'gatedesk', x: doorX - 110, y: Y0 + 60, w: 220, h: 50, solid: 1 }), 'gate', doorX, Y0 + 170, 100);
+    if (ap.big) {                                                       // big airports: more shops airside, picked per airport
+        const pool = ['books', 'perfume', 'electronics', 'fashion', 'jewelry', 'toys', 'sushi', 'bubbletea', 'icecream', 'candy', 'music'], h = airHash(ap.city);
+        const picks = [pool[h % pool.length], pool[(h >>> 5) % pool.length] === pool[h % pool.length] ? pool[((h >>> 5) + 1) % pool.length] : pool[(h >>> 5) % pool.length]];
+        picks.forEach((k, i) => { const x = i ? X0 + W - 470 : X0 + 270; intUse(D, intAdd(D, { k: 'kiosk', x, y: Y0 + 80, w: 200, h: 110, solid: 1, shop: k, label: SHOP_KINDS[k].name, col: 5 + i }), 'shop:' + k, x + 100, Y0 + 230, 80); });
+    }
     intAdd(D, { k: 'jetway', x: doorX - 60, y: Y0 - 22, w: 120, h: 30 });
     return D;
 }
@@ -4471,7 +4564,11 @@ function worldUsePrompt(client, def, s) {
         case 'petpen': return [d, { ...base, title: 'Puppy pen', lines: ['Cuddle the puppies: +20% health'], actions: [{ a: 'go', label: 'Pet the puppies', on: true }], mini: true }];
         case 'elevator': return [d, { ...base, title: 'Glass elevator', lines: [`You are on level ${def.lv}`], actions: Array.from({ length: def.levels }, (_, i) => ({ a: 'lv' + (i + 1), label: i + 1 === def.lv ? `Level ${i + 1} (here)` : `Level ${i + 1}`, on: i + 1 !== def.lv })) }];
         case 'board': {
-            const A = WL.airportByCity.get(def.ap), lines = [...airItins(A)].slice(0, 7).map(([dest, list]) => { const o = list[0], B = WL.airportByCity.get(dest); return `${o.legs[0].fn.padEnd(6)} ${B.code} ${W_CITIES.find(c => c.id === dest).name.padEnd(18)} ${o.stops ? o.stops + ' stop' : 'nonstop'} · ~${o.mins} min · ${fmtMoney(o.fare)}`; });
+            const A = WL.airportByCity.get(def.ap), now = Date.now(), deps = [];
+            for (const l of airNet().from.get(A.city) || []) for (let k = Math.ceil((now - 60000 - l.off) / l.per), n = 0; n < 2; k++, n++) deps.push({ l, k, dep: k * l.per + l.off });
+            deps.sort((p, q) => p.dep - q.dep);
+            const lines = deps.slice(0, 8).map(({ l, k, dep }) => { const B = WL.airportByCity.get(l.to), g = A.stands[airStands(l, k).sd].g, left = dep - now;
+                return `${worldLocalClockAt(A, dep)}  ${l.fn.padEnd(6)} ${B.code} ${W_CITIES.find(c => c.id === l.to).name.padEnd(17)} Gate ${String(g).padEnd(3)} ${left <= 0 ? 'Departed' : left < 40000 ? 'Final call' : left < AIR_BOARD ? 'Boarding' : 'in ' + worldMinSec(left)}`; });
             return [d, { ...base, title: '✈ Departures', lines: [...lines, 'Buy a boarding pass at any check-in desk'], actions: [] }];
         }
         case 'tickets': {
@@ -4482,7 +4579,11 @@ function worldUsePrompt(client, def, s) {
         }
         case 'gate': {
             const A = WL.airportByCity.get(def.ap), l = worldTicketLeg(w, A), B = l && WL.airportByCity.get(l.to), cB = B && W_CITIES.find(c => c.id === B.city);
-            return [d, { ...base, title: `Gate 2 · ${A.code}`, lines: l ? [`${AIRLINES[l.al].name} ${l.fn} · ${A.code} → ${B.code} ${cB.name}`, `${AIRCRAFT[l.ac].name} · ${w.itin.cls === 'J' ? 'Business' : 'Economy'} · boarding now`] : ['No boarding pass – buy one at check-in or on your phone'], actions: l ? [{ a: 'board', label: `Board ${l.fn} to ${cB.name}`, on: true }] : [] }];
+            if (!l) return [d, { ...base, title: `Gates · ${A.code}`, lines: ['No boarding pass – buy one at check-in or on your phone'], actions: [] }];
+            const now = Date.now(), open = now >= l.dep - AIR_BOARD, left = l.dep - now;
+            return [d, { ...base, title: `Gate ${l.gate} · ${A.code}`, dep: l.dep, lines: [`${AIRLINES[l.al].name} ${l.fn} · ${A.code} → ${B.code} ${cB.name}`, `${AIRCRAFT[l.ac].name} · ${w.itin.cls === 'J' ? 'Business' : 'Economy'} · departs ${worldLocalClockAt(A, l.dep)} local`,
+                open ? (left < 40000 ? `🔴 Final call – doors close in ${worldMinSec(left)}` : `🟢 Boarding now – doors close in ${worldMinSec(left)}`) : `Boarding opens in ${worldMinSec(left - AIR_BOARD)} · have a coffee or browse the duty free`],
+                actions: [{ a: 'board', label: open ? `Board ${l.fn} to ${cB.name}` : `Boarding opens in ${worldMinSec(left - AIR_BOARD)}`, on: open }] }];
         }
     }
     if (s.use.startsWith('shop:')) {
@@ -4628,30 +4729,40 @@ function worldUse(client, s, a, extra) {
     }
 }
 function worldBoardWithTicket(client, A) {
-    const w = client.world, leg = worldTicketLeg(w, A); if (!leg) return;
-    if (w.scene !== 'ext') worldGoto(client, 'ext', A.sb.x, A.sb.y + 60);
+    const w = client.world; worldTicketCheck(client); const leg = worldTicketLeg(w, A); if (!leg) return;
+    const now = Date.now(); if (leg.dep != null && now < leg.dep - AIR_BOARD) { worldNotice(client, `Boarding for ${leg.fn} opens in ${worldMinSec(leg.dep - AIR_BOARD - now)}.`); return; }
+    const S = A.stands[(leg.sd || 0) % A.stands.length];
+    if (w.scene !== 'ext') worldGoto(client, 'ext', S.x, S.y);
     worldBoardFlight(client, A, leg);
 }
 // ---- in-flight service (long-haul screen menu) ----
 const INFLIGHT_MENU = {
-    meal:      { name: 'In-flight meal', price: 28, heal: 100 },
-    snack:     { name: 'Snack box', price: 9, heal: 30 },
-    coffee:    { name: 'Coffee', price: 6, heal: 15, speed: 30 },
-    champagne: { name: 'Glass of champagne', price: 35, xp: 300 },
-    souvenir:  { name: 'Duty-free souvenir (destination)', price: 70, souvenir: true }
+    meal:      { name: 'In-flight meal', cat: 'dine', price: 28, heal: 100, ic: '🍱' },
+    snack:     { name: 'Snack box', cat: 'dine', price: 9, heal: 30, ic: '🥨' },
+    noodles:   { name: 'Cup noodles', cat: 'dine', price: 7, heal: 25, ic: '🍜' },
+    coffee:    { name: 'Coffee', cat: 'dine', price: 6, heal: 15, speed: 30, ic: '☕' },
+    juice:     { name: 'Tropical juice', cat: 'dine', price: 5, heal: 12, ic: '🧃' },
+    champagne: { name: 'Glass of champagne', cat: 'dine', price: 35, xp: 300, ic: '🥂' },
+    souvenir:  { name: 'Duty-free souvenir (destination)', cat: 'shop', price: 70, souvenir: true, ic: '🎁' },
+    perfume:   { name: 'Eau de Nuage perfume', cat: 'shop', price: 60, xp: 500, ic: '🌸' },
+    plush:     { name: 'Plush airliner', cat: 'shop', price: 25, xp: 150, ic: '🧸' },
+    headset:   { name: 'Noise-cancelling headset', cat: 'shop', price: 45, speed: 60, ic: '🎧' },
+    watch:     { name: 'World-time watch', cat: 'shop', price: 120, xp: 1100, ic: '⌚' },
+    movie:     { name: 'Movie rental', cat: 'pay', price: 3, xp: 40, ic: '🎬' }
 };
 function worldInflightOrder(client, id) {
     const w = client.world, p = client.player, f = p && p.flight, it = INFLIGHT_MENU[id]; if (!f || !it) return;
     const city = W_CITIES.find(c => c.id === f.to);
     if (it.souvenir && w.souv.has(city.id)) { worldNotice(client, `You already have a ${city.name} souvenir.`); return; }
-    const biz = f.cls === 'J', price = biz ? 0 : it.price;
+    const biz = f.cls === 'J', price = biz && it.cat === 'dine' ? 0 : it.cat === 'pay' && (biz || f.al !== 'HP') ? 0 : it.price;
     if (price && !worldPayToll(client, price)) { worldNotice(client, `That costs ${it.price} coins.`, { level: 'bad' }); return; }
     const max = p.getEffectiveMaxHp(), msg = [];
     if (it.heal) { p.hp = Math.min(max, p.hp + max * it.heal / 100); msg.push(`+${it.heal}% health`); }
     if (it.speed) { p.worldSpeedUntil = Math.max(Date.now(), p.worldSpeedUntil || 0) + it.speed * 1000; msg.push('+25% speed after landing'); }
     if (it.xp) { p.addXP(it.xp); msg.push(`+${it.xp} score`); }
     if (it.souvenir) { w.souv.add(city.id); msg.push(`souvenir ${w.souv.size}/${W_CITIES.length}`); }
-    worldNotice(client, `🛎 ${it.name} served (${price ? '-' + price : 'complimentary in Business'})${msg.length ? ': ' + msg.join(', ') : ''}`, { level: 'good' });
+    if (it.cat !== 'pay') worldNotice(client, `${it.ic || '🛎'} ${it.name} ${it.cat === 'shop' ? 'is yours' : 'served'} (${price ? '-' + price : biz ? 'complimentary in Business' : 'free'})${msg.length ? ': ' + msg.join(', ') : ''}`, { level: 'good' });
+    else if (price) worldNotice(client, `🎬 Enjoy the film (-${price})`, { level: 'good' });
     worldPushState(client);
 }
 
@@ -4666,7 +4777,7 @@ function interiorColliders(def) {
 // ===================== PERSISTENT WORLD MODE =====================
 // The exterior (WORLD room) is the city + suburbs + farmland built by buildWorldLayout().
 // Houses and workplaces are separate interior Rooms players are teleported into.
-const WORLD_LAYOUT_VERSION = 5;              // v4: city styles; v5: 1.5x larger continent, interior towns, highway grid, countryside
+const WORLD_LAYOUT_VERSION = 6;              // v4: city styles; v5: 1.5x larger continent, interior towns, highway grid, countryside; v6: world and cities 1.5x again, new airports
 const WORLD_CARS = [
     { id: 'compact', name: 'Compact', price: 2500,  speed: 6.2,  accel: 0.15, turn: 0.052, color: '#e4e7eb' },
     { id: 'sedan',   name: 'Sedan',   price: 6500,  speed: 8.0,  accel: 0.19, turn: 0.046, color: '#2684d9' },
@@ -4725,6 +4836,7 @@ function ensureWorld() {
     console.log(`[World] Built ${W_CITIES.length} cities, ${WL.airports.length} airports, ${WL.buildings.length} buildings in ${Date.now() - t0} ms.`);
     WL.dealerLots = WL.lots.filter(l => l.dealer);
     WL.airportByCity = new Map(WL.airports.map(a => [a.city, a]));
+    { const t1 = Date.now(); AIR_NET = null; AIR_DUR.clear(); for (const l of airNet().legs) { l.dur = airDur(l); l.mins = Math.round(l.dur / 6000) / 10; } for (const A of WL.airports) A._itins = null; console.log(`[World] Timetable: ${airNet().legs.length} legs, block times flown in ${Date.now() - t1} ms.`); }
     // Road network for NPC traffic, in every city: junctions keyed by their global grid position, roads found by line + position.
     junctionMap.clear(); roadNodes.clear(); pcarKeys.clear(); lineRoads.clear();
     for (const r of WL.allRoads) {
@@ -4765,7 +4877,13 @@ function worldRoadFor(axis, k, s) {
 // cars back to the dealership car park (they could otherwise end up inside a new building).
 function worldMigrateLayout(fromVersion) {
     const OLD_C = 25200, OLD = { central: [25200, 25200], port: [475200, 25200], highmoor: [25200, 475200], solana: [475200, 475200] };
+    const V5 = { gap: 675000, cx: 1012500, cy: 75600 };
     const mapOld = (x, y) => {
+        if (fromVersion >= 5) {                                        // v5 (675 000-unit spacing): same spot relative to the nearest city, 1.5x further out
+            let best = null, bd = Infinity;
+            for (const c of W_CITIES) { const ox = V5.cx + Math.round((c.col - 1) * V5.gap / W_S) * W_S, oy = V5.cy + Math.round(c.row * V5.gap / W_S) * W_S, d = Math.hypot(x - ox, y - oy); if (d < bd) { bd = d; best = [c, ox, oy]; } }
+            const [c, ox, oy] = best; return { x: c.cx + (x - ox) * W_SCALE, y: c.cy + (y - oy) * W_SCALE };
+        }
         if (fromVersion >= 3) {                                        // v3/v4 continent (450 000-unit spacing): keep the offset from the nearest city
             let best = null, bd = Infinity;
             for (const c of W_CITIES) { if (!Number.isInteger(c.col) || !Number.isInteger(c.row)) continue; const ox = 225000 + c.col * 450000, oy = 50400 + c.row * 450000, d = Math.hypot(x - ox, y - oy); if (d < bd) { bd = d; best = [c, ox, oy]; } }
@@ -4784,10 +4902,11 @@ function worldMigrateLayout(fromVersion) {
     db.transaction(() => {
         for (const p of players) {
             if (p.x == null || p.y == null) continue;
-            const n = fromVersion >= 3 ? mapOld(450000 / 2 + 450000 + p.x, 50400 + p.y) : mapOld(OLD_C + p.x, OLD_C + p.y);   // v3/v4 stored positions relative to the old Central City
+            const n = fromVersion >= 5 ? mapOld(V5.cx + p.x, V5.cy + p.y) : fromVersion >= 3 ? mapOld(450000 / 2 + 450000 + p.x, 50400 + p.y) : mapOld(OLD_C + p.x, OLD_C + p.y);   // v3/v4 stored positions relative to the old Central City
             upd.run(Math.round(n.x - W_CX), Math.round(n.y - W_CY), p.user_id);
         }
         db.prepare('UPDATE world_players SET car_x=NULL, car_y=NULL, car_a=NULL').run();
+        try { db.prepare('UPDATE world_players SET stay_bid=NULL, stay_until=NULL').run(); } catch (e) { }   // hotel stays point at buildings that no longer exist
         db.prepare('DELETE FROM world_houses').run();
         for (const h of oldHouses) {
             const t = fromVersion < 2 ? mapOld(OLD_C + h.x, OLD_C + h.y) : mapOld(h.x, h.y);   // v2+ store absolute positions
@@ -4940,7 +5059,7 @@ function worldSave(client) {
     worldSnapshot(client);
     const now = Date.now(), p = client.player;
     let ex = w.ext; if (p && w.scene === 'ext' && !p.vehicle) ex = { x: p.x, y: p.y };
-    if (p && p.flight) { const B = WL.airportByCity.get(p.flight.to); if (B) ex = { x: B.off.x, y: B.off.y }; }   // leaving mid-flight: you arrive
+    if (p && p.flight) { const B = WL.airportByCity.get(p.flight.ph === 'board' ? p.flight.from : p.flight.to); if (B) ex = { x: B.off.x, y: B.off.y }; }   // leaving mid-flight: you arrive (still at the gate: you stay)
     const pc = parkedCars.get(client.dbId); let cx = pc?.x ?? null, cy = pc?.y ?? null, ca = pc?.a ?? null;
     if (p?.vehicle) { cx = p.x; cy = p.y; ca = p.vehicle.a; if (w.scene === 'ext') ex = { x: p.x, y: p.y }; }
     w.ext = ex;
@@ -5071,11 +5190,11 @@ function worldStreamChunks(client, force) {
 function worldSendStatic(client) {
     const bld = b => b && { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h, door: b.door };
     sendWorld(client, 'world_static', {
-        globe: { R: W_R, yEq: W_YEQ, latMax: W_LATMAX, sph: FL_SPH }, cultures: W_CULTURES, dayMs: WORLD_DAY_MS,
-        air: { airlines: AIRLINES, aircraft: AIRCRAFT, legs: airNet().legs.map(l => ({ al: l.al, ac: l.ac, fn: l.fn, from: l.from, to: l.to, mins: l.mins, per: l.per, off: l.off })) },
+        now: Date.now(), globe: { R: W_R, yEq: W_YEQ, latMax: W_LATMAX, sph: FL_SPH }, cultures: W_CULTURES, dayMs: WORLD_DAY_MS,
+        air: { airlines: AIRLINES, aircraft: AIRCRAFT, legs: airNet().legs.map(l => ({ al: l.al, ac: l.ac, fn: l.fn, from: l.from, to: l.to, mins: l.mins, dur: l.dur, per: l.per, off: l.off })), board: AIR_BOARD, slots: (airAlloc(Date.now() + 40 * 60000), airSlotsNow()), holdDep: AIR_HOLD_DEP, holdArr: AIR_HOLD_ARR },
         center: W_CX, centerY: W_CY, extent: W_CIRC, extentY: W_EXTY, circ: W_CIRC, gap: W_GAP, land: W_LAND, chunk: W_CHUNK, nch: W_NCH, roads: WL.allRoads,
         cities: W_CITIES.map(c => ({ id: c.id, name: c.name, code: c.code, cx: c.cx, cy: c.cy, tz: c.tz, theme: c.theme, style: c.style, culture: c.culture, toll: c.toll, home: !!c.home, size: c.size, border: c.border, bp: c.bp })),
-        airports: WL.airports.map(a => ({ city: a.city, name: a.name, code: a.code, x0: a.x0, x1: a.x1, ry: a.ry, sb: a.sb, door: a.door })),
+        airports: WL.airports.map(a => ({ city: a.city, name: a.name, code: a.code, x0: a.x0, x1: a.x1, ry: a.ry, ty: a.ty, endW: a.endW, endE: a.endE, sb: a.sb, door: a.door, design: a.design, stands: a.stands.map(q => [q.x, q.y, q.a, q.g, q.ox, q.oy, q.ex, q.remote]) })),
         cars: WORLD_CARS, carColors: WORLD_CAR_COLORS,
         companies: W_COMPANIES, spawn: WL.spawn, bank: bld(WL.bank), dealer: bld(WL.dealer), fireMs: WORLD_FIRE_MS, taskMs: WORLD_TASK_MS, items: WORLD_ITEMS, shopKinds: SHOP_KINDS, stallKinds: STALL_KINDS, ranks: WORLD_RANKS, inflight: INFLIGHT_MENU
     });
@@ -5184,6 +5303,7 @@ const PLANE_CRUISE = 3 * WORLD_CARS.find(c => c.id === 'sport').speed * 2;
 const WORLD_DAY_MS = 12 * 60 * 1000;                     // same shared day as the client's day/night cycle
 const WORLD_HEAD_LABEL = { east: 'Eastbound ➜', west: '⬅ Westbound', north: '⬆ Northbound', south: '⬇ Southbound' };
 function worldTzLabel(tz) { return tz === 0 ? 'CT' : 'CT' + (tz > 0 ? '+' : '') + tz; }
+function worldLocalClockAt(A, t) { const c = W_CITIES.find(q => q.id === (A.city || A)), h = ((6 + (t % WORLD_DAY_MS) / WORLD_DAY_MS * 24 + (c ? c.tz : 0)) % 24 + 24) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); }
 function worldLocalClock(tz) { const h = ((6 + (Date.now() % WORLD_DAY_MS) / WORLD_DAY_MS * 24 + tz) % 24 + 24) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); }
 // ---- airlines -------------------------------------------------------------------------------------------------------
 // Four flag carriers fly from their region's hub to the other hubs (wide-bodies on the long trunks) and out to every town
@@ -5198,10 +5318,10 @@ const AIRLINES = {
     HP: { name: 'Hopper',            kind: 'budget',   c1: '#ff6f00', c2: '#ffd54f', tail: '#ff6f00' },
     PL: { name: 'Prairie Link',      kind: 'regional', c1: '#2e8b57', c2: '#f1f1f1', tail: '#1e5631' }
 };
-const AIRCRAFT = { prop: { name: 'Turboprop', speed: 0.62 }, narrow: { name: 'Narrow-body jet', speed: 1 }, wide: { name: 'Wide-body jet', speed: 1.12 } };
+const AIRCRAFT = { prop: { name: 'Turboprop', speed: 0.66, seats: 70 }, narrow: { name: 'Narrow-body jet', speed: 1, seats: 180 }, wide: { name: 'Wide-body jet', speed: 1.12, seats: 320 }, quad: { name: 'Four-engine jumbo', speed: 1.16, seats: 480 } };
 const AIR_HUB = { west: 'redmesa', central: 'central', sun: 'solana', isles: 'kaimana' }, AIR_FLAG = { west: 'WR', central: 'CA', sun: 'SJ', isles: 'KW' };
 let AIR_NET = null;
-function airSmall(c) { return c.style === 'rural' || c.size < 16000; }
+function airSmall(c) { return c.style === 'rural' || c.size < 24000; }
 function airHash(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 function airNet() {
     if (AIR_NET) return AIR_NET;
@@ -5211,7 +5331,7 @@ function airNet() {
         for (const [x, y] of [[a, b], [b, a]]) {
             const k = al + x + '>' + y; if (x === y || seen.has(k) || !ap(x) || !ap(y)) continue; seen.add(k);
             const L0 = len(x, y), AL = AIRLINES[al], h = airHash(k), mul = AL.kind === 'budget' ? 0.62 : AL.kind === 'regional' ? 0.85 : 1;
-            const fare = Math.round((30 + L0 / 6000) * mul), per = (ac === 'wide' ? 9 : ac === 'prop' ? 7 : 6) * 60000;
+            const fare = Math.round((30 + L0 / 9000) * mul), per = (ac === 'quad' ? 18 : ac === 'wide' ? 16 : ac === 'prop' ? 10 : al === 'HP' ? 14 : 12) * 60000;
             const A = ap(x), B = ap(y), pole = wGCPole(A.sb.x, A.sb.y, B.sb.x, B.sb.y);
             const leg = { al, ac, pole, fn: al + (100 + h % 880), from: x, to: y, len: Math.round(L0), mins: Math.max(1, Math.round((L0 / (PLANE_CRUISE * FL_SPH * AIRCRAFT[ac].speed) + 2500) / 360) / 10), fare, fareJ: Math.round(fare * 2.8 + 60), per, off: h % per };
             legs.push(leg); (from.get(x) || from.set(x, []).get(x)).push(leg);
@@ -5220,17 +5340,83 @@ function airNet() {
     const hubs = Object.values(AIR_HUB);
     for (const [cu, hub] of Object.entries(AIR_HUB)) {
         const al = AIR_FLAG[cu];
-        for (const h2 of hubs) if (h2 !== hub) add(al, hub, h2, len(hub, h2) > 600000 ? 'wide' : 'narrow');
+        for (const h2 of hubs) if (h2 !== hub) add(al, hub, h2, len(hub, h2) > 900000 ? (len(hub, h2) > 1700000 && AIRLINES[al].kind === 'flag' ? 'quad' : 'wide') : 'narrow');
         for (const c of W_CITIES) if (c.culture === cu && c.id !== hub) add(al, hub, c.id, airSmall(c) ? 'prop' : 'narrow');
     }
     for (const c of W_CITIES) if (airSmall(c)) {                 // Prairie Link: each small town to its nearest airport in another region
         const o = W_CITIES.filter(q => q.culture !== c.culture).sort((p, q) => len(c.id, p.id) - len(c.id, q.id))[0]; if (o) add('PL', c.id, o.id, 'prop');
     }
     const big = W_CITIES.filter(c => !airSmall(c) && !hubs.includes(c.id));
-    for (const c of big) for (const o of big.filter(q => q.culture !== c.culture).sort((p, q) => len(c.id, p.id) - len(c.id, q.id)).slice(0, 2)) add('HP', c.id, o.id, len(c.id, o.id) > 700000 ? 'wide' : 'narrow');
+    for (const c of big) for (const o of big.filter(q => q.culture !== c.culture).sort((p, q) => len(c.id, p.id) - len(c.id, q.id)).slice(0, 2)) add('HP', c.id, o.id, len(c.id, o.id) > 1050000 ? 'wide' : 'narrow');
     AIR_NET = { legs, from };
     return AIR_NET;
 }
+// ---- the timetable: every leg departs every `per` ms; a departure is (leg, k) and leaves at k·per + off ------------
+// Block times are measured once by flying each route in the simulator, so the timetable, the departures boards, the
+// AI traffic and your own flight all agree. Boarding opens AIR_BOARD before departure; the doors close on time.
+const AIR_BOARD = 150000, AIR_CONNECT = 45000, AIR_LEAD_DESK = 45000, AIR_LEAD_REMOTE = 150000;
+const AIR_DUR = new Map();
+function airDur(l) {
+    const key = l.from + '>' + l.to + ':' + l.ac; let d = AIR_DUR.get(key); if (d) return d;
+    const A = WL.airportByCity.get(l.from), B = WL.airportByCity.get(l.to), f = flightCreate(A, B, PLANE_CRUISE * AIRCRAFT[l.ac].speed, 0, 0);
+    let t = 0; while (t < 400000 && flightStep(f) !== 'done') t++;
+    d = Math.round(t / 60 * 1000); AIR_DUR.set(key, d); return d;
+}
+// Stand allocation: departures are given stands in time order, so a stand is never promised to two aircraft at once.
+// A departure holds its stand from AIR_HOLD_DEP before push-back; an arrival from just before it parks until AIR_HOLD_ARR
+// after. The server is the authority; clients get the allocations (world_air_slots) and draw the same thing.
+const AIR_HOLD_DEP = 170000, AIR_HOLD_ARR = 110000, AIR_SLOTS = new Map(), AIR_OCC = new Map();
+let AIR_HORIZON = 0, AIR_SLOT_LOG = [];
+function airOcc(city) { let o = AIR_OCC.get(city); if (!o) { o = WL.airportByCity.get(city).stands.map(() => []); AIR_OCC.set(city, o); } return o; }
+function airPickStand(city, t0, t1, pref) {
+    const occ = airOcc(city), n = occ.length; let best = pref % n, bestC = Infinity;
+    for (let j = 0; j < n; j++) {
+        const i = (pref + j) % n; let c = 0;
+        for (const [a, b] of occ[i]) if (a < t1 && t0 < b) c += Math.min(b, t1) - Math.max(a, t0);
+        if (c === 0) return i; if (c < bestC) { bestC = c; best = i; }
+    }
+    return best;
+}
+function airAlloc(until) {
+    if (until <= AIR_HORIZON) return;
+    const from = AIR_HORIZON || Date.now() - 3600000, list = [];
+    for (const l of airNet().legs) for (let k = Math.ceil((from - l.off) / l.per); k * l.per + l.off <= until; k++) { const dep = k * l.per + l.off; if (dep > from) list.push([dep, l, k]); }
+    list.sort((p, q) => p[0] - q[0] || (p[1].fn < q[1].fn ? -1 : 1));
+    for (const [dep, l, k] of list) {
+        const key = l.fn + '@' + k; if (AIR_SLOTS.has(key)) continue;
+        const arr = dep + airDur(l), h = airHash(l.fn + ':' + k);
+        const sd = airPickStand(l.from, dep - AIR_HOLD_DEP, dep + 60000, h), sa = airPickStand(l.to, arr - 40000, arr + AIR_HOLD_ARR, h >>> 8);
+        airOcc(l.from)[sd].push([dep - AIR_HOLD_DEP, dep + 60000]); airOcc(l.to)[sa].push([arr - 40000, arr + AIR_HOLD_ARR]);
+        AIR_SLOTS.set(key, { sd, sa, t: dep }); AIR_SLOT_LOG.push([key, sd, sa]);
+    }
+    AIR_HORIZON = until;
+    const cut = Date.now() - 2 * 3600000;                              // forget the past
+    if (AIR_SLOTS.size > 4000) { for (const [k2, v] of AIR_SLOTS) if (v.t < cut) AIR_SLOTS.delete(k2); for (const o of AIR_OCC.values()) for (const st of o) { let i = 0; while (i < st.length && st[i][1] < cut) i++; if (i) st.splice(0, i); } }
+}
+function airStands(l, k) { const dep = k * l.per + l.off; if (dep > AIR_HORIZON) airAlloc(dep + 600000); return AIR_SLOTS.get(l.fn + '@' + k) || { sd: 0, sa: 0 }; }
+// What a client needs to draw the airports right now: every allocation from an hour ago to the horizon.
+function airSlotsNow() { const out = [], now = Date.now(); for (const [k, v] of AIR_SLOTS) if (v.t > now - 3600000) out.push([k, v.sd, v.sa]); return out; }
+// Assign real departures to an itinerary's legs from time `start` on (connections need AIR_CONNECT after arrival).
+function airPlan(legs, start) {
+    let t = start;
+    return legs.map(l => {
+        const k = Math.ceil((t - l.off) / l.per), dep = k * l.per + l.off, arr = dep + airDur(l), st = airStands(l, k);
+        t = arr + AIR_CONNECT;
+        return { from: l.from, to: l.to, al: l.al, fn: l.fn, ac: l.ac, k, dep, arr, sd: st.sd, sa: st.sa, gate: WL.airportByCity.get(l.from).stands[st.sd].g, agate: WL.airportByCity.get(l.to).stands[st.sa].g };
+    });
+}
+function airLegDef(fn, from) { return airNet().legs.find(l => l.fn === fn && l.from === from); }
+// Missed a departure (or a connection ran late): rebook the rest of the trip onto the next departures, free of charge.
+function worldTicketCheck(client) {
+    const w = client.world, it = w && w.itin, p = client.player; if (!it || (p && p.flight)) return;
+    const l = it.legs[it.i]; if (!l || l.dep == null || Date.now() < l.dep) return;
+    const rest = it.legs.slice(it.i).map(q => airLegDef(q.fn, q.from)).filter(Boolean); if (rest.length !== it.legs.length - it.i) return;
+    const plan = airPlan(rest, Date.now() + AIR_CONNECT);
+    it.legs.splice(it.i, plan.length, ...plan); it.until = Math.max(it.until, plan[plan.length - 1].arr + 30 * 60000);
+    worldNotice(client, `⌛ You missed ${AIRLINES[l.al].name} ${l.fn}. You're rebooked on the next departure at no charge: ${plan[0].fn} leaves in ${worldMinSec(plan[0].dep - Date.now())} from Gate ${plan[0].gate}.`, { level: 'warn' });
+    worldPushState(client); if (w.phoneTrip) worldPhoneTrip(client);
+}
+function worldMinSec(ms) { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
 // Every way to fly from airport A: direct, one stop, or (only where needed) two stops. Up to three choices per destination.
 function airItins(A) {
     if (A._itins) return A._itins;
@@ -5259,14 +5445,14 @@ function airItins(A) {
 }
 function airFindItin(A, key) { for (const list of airItins(A).values()) for (const o of list) if (o.key === key) return o; return null; }
 // The check-in / phone list: one entry per option, grouped by destination on the client.
-function airItinActions(client, A) {
+function airItinActions(client, A, remote) {
     const w = client.world, money = Math.floor(w.sessionCoins || 0) + (w.bankCoins || 0), out = [];
     const dests = [...airItins(A)].sort((p, q) => p[1][0].mins - q[1][0].mins);
     for (const [dest, list] of dests) {
         const B = WL.airportByCity.get(dest), cB = W_CITIES.find(c => c.id === dest), g = wGC(A.sb.x, A.sb.y, B.sb.x, B.sb.y), cb = Math.cos(g.brg);
         const head = cb > 0.7 ? 'north' : cb < -0.7 ? 'south' : Math.sin(g.brg) > 0 ? 'east' : 'west';
-        for (const o of list) out.push({ a: 'tix:' + o.key, on: money >= o.fare, onJ: money >= o.fareJ, city: dest, code: B.code, name: cB.name, tz: cB.tz, head, km: Math.round(o.legs.reduce((t, l) => t + l.len, 0) / 1000),
-            mins: o.mins, fare: o.fare, fareJ: o.fareJ, stops: o.stops, pole: (o.legs.find(l => l.pole) || {}).pole || '', via: o.legs.slice(0, -1).map(l => WL.airportByCity.get(l.to).code), legs: o.legs.map(l => ({ al: l.al, fn: l.fn, ac: l.ac, from: WL.airportByCity.get(l.from).code, to: WL.airportByCity.get(l.to).code })), label: `${B.code} · ${cB.name}` });
+        for (const o of list) { const plan = airPlan(o.legs, Date.now() + (remote ? AIR_LEAD_REMOTE : AIR_LEAD_DESK)), dep = plan[0].dep, arr = plan[plan.length - 1].arr; out.push({ a: 'tix:' + o.key, dep, arr, gate: plan[0].gate, mins: Math.round((arr - dep) / 6000) / 10, tz0: W_CITIES.find(c => c.id === A.city).tz, on: money >= o.fare, onJ: money >= o.fareJ, city: dest, code: B.code, name: cB.name, tz: cB.tz, head, km: Math.round(o.legs.reduce((t, l) => t + l.len, 0) / 1000),
+            fare: o.fare, fareJ: o.fareJ, stops: o.stops, pole: (o.legs.find(l => l.pole) || {}).pole || '', via: o.legs.slice(0, -1).map(l => WL.airportByCity.get(l.to).code), legs: plan.map(l => ({ al: l.al, fn: l.fn, ac: l.ac, from: WL.airportByCity.get(l.from).code, to: WL.airportByCity.get(l.to).code, dep: l.dep, arr: l.arr, gate: l.gate })), label: `${B.code} · ${cB.name}` }); }
     }
     return out;
 }
@@ -5274,9 +5460,10 @@ function worldBuyItin(client, A, key, cls, remote) {
     const w = client.world, o = A && airFindItin(A, key); if (!o) return false;
     const price = cls === 'J' ? o.fareJ : o.fare, l0 = o.legs[0], B = WL.airportByCity.get(o.legs[o.legs.length - 1].to), cB = W_CITIES.find(c => c.id === B.city);
     if (!worldPayToll(client, price)) { worldNotice(client, `That ticket costs ${fmtMoney(price)} coins.`, { level: 'bad' }); return false; }
-    w.itin = { key, legs: o.legs.map(l => ({ from: l.from, to: l.to, al: l.al, fn: l.fn, ac: l.ac })), i: 0, cls, fare: price, until: Date.now() + (remote ? 60 : 30) * 60000 };
+    const plan = airPlan(o.legs, Date.now() + (remote ? AIR_LEAD_REMOTE : AIR_LEAD_DESK));
+    w.itin = { key, legs: plan, i: 0, cls, fare: price, until: plan[plan.length - 1].arr + 30 * 60000 };
     const via = o.stops ? ` via ${o.legs.slice(0, -1).map(l => WL.airportByCity.get(l.to).code).join(', ')}` : ' nonstop';
-    worldNotice(client, `🎫 ${cls === 'J' ? 'Business' : 'Economy'} ticket ${A.code} → ${B.code} (${cB.name})${via}. First flight: ${AIRLINES[l0.al].name} ${l0.fn}. ${remote ? `Head to ${A.name} – your mobile boarding pass works at the gate.` : 'Go through security to the gate.'}`, { level: 'good' });
+    worldNotice(client, `🎫 ${cls === 'J' ? 'Business' : 'Economy'} ticket ${A.code} → ${B.code} (${cB.name})${via}. ${AIRLINES[l0.al].name} ${l0.fn} departs in ${worldMinSec(plan[0].dep - Date.now())} from Gate ${plan[0].gate}; boarding opens ${Math.round(AIR_BOARD / 60000 * 10) / 10} min before. ${remote ? `Head to ${A.name} – your mobile boarding pass works at the gate.` : 'Go through security to the gate.'}`, { level: 'good' });
     w.promptKey = '\u0000'; worldPushState(client);
     return true;
 }
@@ -5284,16 +5471,18 @@ function worldTicketLeg(w, A) { const it = w.itin; if (!it || it.until < Date.no
 function worldBoardFlight(client, A, leg) {
     const w = client.world, p = client.player, B = leg && WL.airportByCity.get(leg.to);
     if (!w || !p || !B || B === A || p.vehicle || p.flight || w.scene !== 'ext') return;
-    const ac = AIRCRAFT[leg.ac] || AIRCRAFT.narrow, AL = AIRLINES[leg.al], f = flightCreate(A, B, PLANE_CRUISE * ac.speed);
-    f.al = leg.al; f.ac = leg.ac; f.fn = leg.fn; f.cls = w.itin ? w.itin.cls : 'Y'; f.liv = 0;
+    const ac = AIRCRAFT[leg.ac] || AIRCRAFT.narrow, AL = AIRLINES[leg.al], f = flightCreate(A, B, PLANE_CRUISE * ac.speed, leg.sd || 0, leg.sa || 0);
+    f.al = leg.al; f.ac = leg.ac; f.fn = leg.fn; f.cls = w.itin ? w.itin.cls : 'Y'; f.liv = 0; f.svc = leg.fn + '@' + (leg.k ?? 0);
+    if (leg.dep != null && Date.now() < leg.dep) { f.ph = 'board'; f.dep = leg.dep; }   // sit at the stand until the scheduled departure
     if (client.room) client.room.drones = client.room.drones.filter(d => d.owner !== p);
     p.activeDrones = 0; w.task = null;
     p.flight = f; p.ghost = true; p.x = f.x; p.y = f.y; p.vx = p.vy = 0;
     p.inputs = { up: false, down: false, left: false, right: false, shooting: false, angle: p.inputs?.angle || 0, repel: false };
     const fromCity = W_CITIES.find(c => c.id === A.city), toCity = W_CITIES.find(c => c.id === B.city), it = w.itin, last = !it || it.i >= it.legs.length - 1;
-    worldNotice(client, `${AL.name} ${leg.fn} · ${A.code} → ${B.code} (${toCity.name}) · ${ac.name}${f.viaPole ? ` · over the ${f.viaPole === 'N' ? 'North' : 'South'} Pole` : ''}. ${f.cls === 'J' ? 'Welcome to Business – the menu is on us. ' : ''}Taxiing to the runway.`, { level: 'good' });
+    worldNotice(client, `${AL.name} ${leg.fn} · ${A.code} → ${B.code} (${toCity.name}) · ${ac.name}${f.viaPole ? ` · over the ${f.viaPole === 'N' ? 'North' : 'South'} Pole` : ''}. ${f.cls === 'J' ? 'Welcome to Business – the menu is on us. ' : ''}${f.ph === 'board' ? `Find your seat – we push back from Gate ${leg.gate} in ${worldMinSec(f.dep - Date.now())}.` : 'Taxiing to the runway.'}`, { level: 'good' });
     w.flightInfo = { from: A.city, to: B.city, fromName: fromCity.name, toName: toCity.name, fromCode: A.code, toCode: B.code, dir: f.head, tz: toCity.tz, fromTz: fromCity.tz, total: flightRemaining(f), dist: f.dist,
-        long: leg.ac === 'wide' || f.dist > W_GAP * 0.9 ? 1 : 0, east: f.dir === 'east' ? 1 : 0, al: leg.al, alName: AL.name, fn: leg.fn, ac: leg.ac, acName: ac.name, cls: f.cls, pole: f.viaPole || '',
+        dep: f.dep || 0, gate: leg.gate || 0, agate: leg.agate || 0, svc: f.svc,
+        long: leg.ac === 'wide' || leg.ac === 'quad' || f.dist > W_GAP * 0.9 ? 1 : 0, east: f.dir === 'east' ? 1 : 0, al: leg.al, alName: AL.name, fn: leg.fn, ac: leg.ac, acName: ac.name, cls: f.cls, pole: f.viaPole || '',
         next: !last ? (() => { const n = it.legs[it.i + 1]; return `${AIRLINES[n.al].name} ${n.fn} to ${WL.airportByCity.get(n.to).code}`; })() : '' };
     worldPushFlight(client);
     worldPushState(client);
@@ -5302,7 +5491,7 @@ function worldPushFlight(client) {
     const w = client.world, f = client.player?.flight;
     if (!w || !f || !w.flightInfo) { sendWorld(client, 'world_flight', { f: null }); return; }
     const rem = flightRemaining(f), gs = flightSpeed(f), sp = Math.max(FL_VR / f.land.kT, f.ph === 'air' ? gs : 0) * 60;
-    sendWorld(client, 'world_flight', { f: { ...w.flightInfo, ph: f.ph, rem: Math.round(rem), eta: Math.round(rem / sp + 25), alt: Math.round(f.alt * 100) / 100, kmh: Math.round(gs * 60 * 3.6 / 10) } });
+    sendWorld(client, 'world_flight', { f: { ...w.flightInfo, ph: f.ph, wait: f.ph === 'board' ? Math.max(0, Math.round((f.dep - Date.now()) / 1000)) : 0, rem: Math.round(rem), eta: Math.round(rem / sp + 25 + (f.ph === 'board' ? Math.max(0, f.dep - Date.now()) / 1000 : 0)), alt: Math.round(f.alt * 100) / 100, kmh: Math.round(gs * 60 * 3.6 / 10) } });
 }
 function worldStepFlight(e) {
     const f = e.flight, ev = flightStep(f);
@@ -5312,6 +5501,7 @@ function worldStepFlight(e) {
     if (ev === 'pole' && c && c.world && c.world.flightInfo) { c.world.flightInfo.dir = north ? 'south' : 'north'; worldPushFlight(c); }
     if (ev === 'pole' && c) worldNotice(c, `🧭 ${f.poleKm < 25 ? `Over the ${north ? 'North' : 'South'} Pole` : `Passing the ${north ? 'North' : 'South'} Pole, ${f.poleKm} km off the wing`} – every time zone meets there. You're heading ${north ? 'south' : 'north'} now, down the far side of the world.`, { level: 'warn' });
     if (ev === 'wrap' && c) worldNotice(c, f.wrapEast ? '✈ Crossing the International Date Line eastbound – calendars go back one day.' : '✈ Crossing the International Date Line westbound – calendars jump forward one day.', { level: 'warn' });
+    if (ev === 'push' && c) { worldNotice(c, `🚪 Doors closed. ${AIRLINES[f.al] ? AIRLINES[f.al].name + ' ' : ''}${f.fn || ''} is pushing back from Gate ${f.gate} – right on time.`, { level: 'good' }); worldPushFlight(c); }
     if (ev === 'done') worldEndFlight(e, c);
 }
 function worldEndFlight(e, client) {
@@ -5328,7 +5518,9 @@ function worldEndFlight(e, client) {
             const n = it.legs[it.i], key = 'term:' + B.city, def = worldInteriorDef(key), gs = def.stations.find(q => q.use === 'gate');
             it.until = Math.max(it.until, Date.now() + 30 * 60000);
             worldGoto(client, key, gs.x, gs.y + 70);
-            worldNotice(client, `🔁 Welcome to ${city.name} (${worldTzLabel(city.tz)}). Your connection ${AIRLINES[n.al].name} ${n.fn} to ${WL.airportByCity.get(n.to).code} boards at Gate 2 – it's right here.`, { level: 'good' });
+            if (n.dep != null && Date.now() > n.dep - 20000) { worldTicketCheck(client); worldPushState(client); return; }   // ran late: rebooked onto the next one
+            const n2 = it.legs[it.i];
+            worldNotice(client, `🔁 Welcome to ${city.name} (${worldTzLabel(city.tz)}). Your connection ${AIRLINES[n2.al].name} ${n2.fn} to ${WL.airportByCity.get(n2.to).code} leaves from Gate ${n2.gate || 1} in ${worldMinSec((n2.dep || Date.now()) - Date.now())}${Date.now() >= (n2.dep || 0) - AIR_BOARD ? ' – boarding now' : ''}.`, { level: 'good' });
             worldPushState(client); return;
         }
         client.world.itin = null;
@@ -5345,6 +5537,7 @@ function worldDoRest(client) {
 // A prompt is what the player can currently interact with. The client anchors the bubble to
 // (ax, ay) – e.g. on top of the bank building – and F triggers the first enabled action.
 function worldComputePrompt(client) {
+    if (client.world && client.world.itin && (worldTickN % 20 === 0)) worldTicketCheck(client);
     const w = client.world, p = client.player; if (!w || !p || !WL) return null;
     if (w.scene !== 'ext') return worldInteriorPrompt(client);
     if (p.flight) return null;
@@ -5369,16 +5562,16 @@ function worldComputePrompt(client) {
         consider(dist(dlr.door), { id: 'dealer', kind: 'dealer', ax: dlr.x + dlr.w / 2, ay: dlr.y + dlr.h / 2, title: 'Car Dealership', lines: [`Account balance: ${fmtMoney(coins)}`, old ? `Trade-in: ${old.name} for ${fmtMoney(old.price * 0.5)}` : 'Cars are parked in the car park next door'],
             actions: WORLD_CARS.map(c => { const cost = c.price - (old ? Math.floor(old.price * 0.5) : 0); return { a: 'buy:' + c.id, label: c.id === w.car ? c.name + ' (owned)' : `${c.name} – ${fmtMoney(cost)}`, on: c.id !== w.car && coins >= cost }; }) });
     }
-    for (const ap of WL.airports) {                                  // airport: departures board at the terminal, boarding at gate 2
-        if (Math.abs(ap.sb.x - p.x) > 2500 || Math.abs(ap.sb.y - p.y) > 2500) continue;
-        const dg = Math.hypot(ap.sb.x - p.x, ap.sb.y - p.y), dd = dist(ap.door), city = W_CITIES.find(c => c.id === ap.city);
-        if (dg < 210) {
-            const t = worldTicketLeg(w, ap), B = t && WL.airportByCity.get(t.to), cB = B && W_CITIES.find(c => c.id === B.city);
-            consider(dg - 60, { id: 'gate:' + ap.city, kind: 'gate', ctx: ap, ax: ap.sb.x, ay: ap.sb.y - 130, title: `✈ ${ap.code} · Gate 2`,
-                lines: t ? [`${AIRLINES[t.al].name} ${t.fn} · ${ap.code} → ${B.code} ${cB.name}`, `${city.name} · ${worldTzLabel(city.tz)}`] : ['Check in inside the terminal, or book on your phone', `${city.name} · ${worldTzLabel(city.tz)}`],
-                actions: t ? [{ a: 'board', label: `Board ${t.fn} to ${cB.name}`, on: true }] : [{ a: 'enter', label: 'Go to the terminal', on: true }] });
+    for (const ap of WL.airports) {                                  // airport: the terminal door, and your own gate's stand out on the apron
+        if (Math.abs(ap.door.x - p.x) > 7000 || Math.abs(ap.door.y - p.y) > 7000) continue;
+        const dd = dist(ap.door), city = W_CITIES.find(c => c.id === ap.city), t = worldTicketLeg(w, ap), S = t && t.sd != null ? ap.stands[t.sd % ap.stands.length] : null, dg = S ? Math.hypot(S.x - p.x, S.y - p.y) : Infinity;
+        if (dg < 340) {
+            const B = WL.airportByCity.get(t.to), cB = W_CITIES.find(c => c.id === B.city), now = Date.now(), open = now >= t.dep - AIR_BOARD, left = t.dep - now;
+            consider(dg - 60, { id: 'gate:' + ap.city, kind: 'gate', ctx: ap, ax: S.x, ay: S.y - 160, title: `✈ ${ap.code} · Gate ${S.g}`,
+                lines: [`${AIRLINES[t.al].name} ${t.fn} · ${ap.code} → ${B.code} ${cB.name}`, open ? `Boarding now – doors close in ${worldMinSec(left)}` : `Boarding opens in ${worldMinSec(left - AIR_BOARD)}`],
+                actions: [{ a: 'board', label: open ? `Board ${t.fn} to ${cB.name}` : `Boarding opens in ${worldMinSec(left - AIR_BOARD)}`, on: open }] });
         } else if (dd < 160) {
-            consider(dd, { id: 'terminal:' + ap.city, kind: 'terminal', ctx: ap, ax: ap.term.x + ap.term.w / 2, ay: ap.term.y + ap.term.h / 2, title: ap.name, lines: ['Check-in · security · departure lounge · Gate 2', `${airItins(ap).size} destinations`], actions: [{ a: 'enter', label: 'Enter the terminal', on: true }] });
+            consider(dd, { id: 'terminal:' + ap.city, kind: 'terminal', ctx: ap, ax: ap.term.x + ap.term.w / 2, ay: ap.term.y + ap.term.h / 2, title: ap.name, lines: [`Check-in · security · departure lounge · gates 1–${ap.stands.length}`, t ? `Your flight ${t.fn} leaves from Gate ${t.gate} in ${worldMinSec(t.dep - Date.now())}` : `${airItins(ap).size} destinations`], actions: [{ a: 'enter', label: 'Enter the terminal', on: true }] });
         }
     }
     const cx = clamp(Math.floor(p.x / W_CHUNK), 0, W_NCH - 1), cy = clamp(Math.floor(p.y / W_CHUNK), 0, W_NCH - 1);
@@ -5739,8 +5932,9 @@ function worldBookStay(client, b) {
 // possible in person; the phone just saves the walk.
 function worldWhere(client) { const w = client.world, p = client.player; return w.scene === 'ext' && p ? { x: p.x, y: p.y } : (w.ext || WL.spawn); }
 function worldPhoneTrip(client) {
+    client.world.phoneTrip = 1;
     const it = client.world.itin, ok = it && it.until > Date.now();
-    sendWorld(client, 'phone', { act: 'trip', trip: ok ? { cls: it.cls, i: it.i, left: it.until - Date.now(), legs: it.legs.map(l => ({ fn: l.fn, al: l.al, alName: AIRLINES[l.al].name, ac: AIRCRAFT[l.ac].name, from: WL.airportByCity.get(l.from).code, to: WL.airportByCity.get(l.to).code, fromName: W_CITIES.find(c => c.id === l.from).name, toName: W_CITIES.find(c => c.id === l.to).name })) } : null });
+    sendWorld(client, 'phone', { act: 'trip', trip: ok ? { cls: it.cls, i: it.i, left: it.until - Date.now(), legs: it.legs.map(l => ({ fn: l.fn, al: l.al, alName: AIRLINES[l.al].name, ac: AIRCRAFT[l.ac].name, from: WL.airportByCity.get(l.from).code, to: WL.airportByCity.get(l.to).code, fromName: W_CITIES.find(c => c.id === l.from).name, toName: W_CITIES.find(c => c.id === l.to).name, dep: l.dep, arr: l.arr, gate: l.gate, agate: l.agate, tzFrom: W_CITIES.find(c => c.id === l.from).tz, tzTo: W_CITIES.find(c => c.id === l.to).tz })), now: Date.now(), board: AIR_BOARD } : null });
 }
 function worldPhone(client, d) {
     const w = client.world, p = client.player; if (!w || !p || !WL) return;
@@ -5750,7 +5944,7 @@ function worldPhone(client, d) {
         case 'flights': {
             let A = d.from && WL.airportByCity.get(String(d.from));
             if (!A) { let bd = Infinity; for (const a of WL.airports) { const dd = Math.hypot(wrapDx(a.door.x - at.x), a.door.y - at.y); if (dd < bd) { bd = dd; A = a; } } }
-            sendWorld(client, 'phone', { act: 'flights', from: A.city, fromCode: A.code, fromName: A.name, list: airItinActions(client, A), airports: WL.airports.map(a => ({ city: a.city, code: a.code })) });
+            sendWorld(client, 'phone', { act: 'flights', from: A.city, fromCode: A.code, fromName: A.name, list: airItinActions(client, A, true), airports: WL.airports.map(a => ({ city: a.city, code: a.code })) });
             break;
         }
         case 'buy': { const A = WL.airportByCity.get(String(d.from)); if (A && worldBuyItin(client, A, String(d.key), d.cls === 'J' ? 'J' : 'Y', true)) worldPhoneTrip(client); break; }
@@ -6332,6 +6526,10 @@ setInterval(() => {
     worldTaxiStep();
     if (worldTickN % 2 === 0) worldBroadcastDyn();
     if (worldTickN % 20 === 0) { worldFarmTick(); }
+    if (worldTickN % 200 === 1) {                                         // stand allocations for the next 40 minutes, sent as they are made
+        airAlloc(now + 40 * 60000);
+        if (AIR_SLOT_LOG.length) { const s = AIR_SLOT_LOG; AIR_SLOT_LOG = []; for (const c of worldClients) if (c.world) sendWorld(c, 'world_air_slots', { s }); }
+    }
     if (worldTickN % 1200 === 0) worldExpireHouses();
     if (worldTickN % 100 === 0) for (const [k, r] of Object.entries(interiorRooms)) if (!r.clients.length && r.emptySince && now - r.emptySince > 20000) delete interiorRooms[k];
     for (const c of [...worldClients]) {
@@ -6648,7 +6846,7 @@ setInterval(() => {
                             opacity: (e.opacity !== undefined) ? Math.round(e.opacity * 100) / 100 : 1,
                             powerups: getActivePowerups(e),
                             veh: e.vehicle ? { a: Math.round(e.vehicle.a * 100) / 100, v: Math.round(e.vehicle.v * 10) / 10, m: e.vehicle.model } : e.taxiRide ? { a: Math.round(e.taxiRide.a * 100) / 100, v: Math.round(e.taxiRide.v * 10) / 10, m: 'taxi' } : undefined,
-                            fl: e.flight ? { a: Math.round(e.flight.a * 1000) / 1000, alt: Math.round(e.flight.alt * 1000) / 1000, v: Math.round(e.flight.v * 10) / 10, liv: e.flight.liv, al: e.flight.al, ac: e.flight.ac, vs: e.flight.q ? Math.round(e.flight.vs * 10) / 10 : undefined, q: e.flight.q ? e.flight.q.map(v => Math.round(v * 1e6) / 1e6) : undefined, h: e.flight.h ? e.flight.h.map(v => Math.round(v * 1e6) / 1e6) : undefined } : undefined
+                            fl: e.flight ? { a: Math.round(e.flight.a * 1000) / 1000, alt: Math.round(e.flight.alt * 1000) / 1000, v: Math.round(e.flight.v * 10) / 10, liv: e.flight.liv, al: e.flight.al, ac: e.flight.ac, svc: e.flight.svc, ph: e.flight.ph === 'board' ? 'board' : undefined, vs: e.flight.q ? Math.round(e.flight.vs * 10) / 10 : undefined, q: e.flight.q ? e.flight.q.map(v => Math.round(v * 1e6) / 1e6) : undefined, h: e.flight.h ? e.flight.h.map(v => Math.round(v * 1e6) / 1e6) : undefined } : undefined
                         });
                     }
                 }
