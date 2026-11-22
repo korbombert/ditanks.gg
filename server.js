@@ -69,6 +69,7 @@ const WebSocket = require('ws');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { Worker } = require('worker_threads');
 const Database = require('better-sqlite3');
 const AdmZip = require('adm-zip');
 const os = require('os');
@@ -5054,6 +5055,43 @@ function worldSnapshot(client) {
     w.prog = { score: p.score, level: p.level, statPoints: p.statPoints, stats: [...p.stats], tankType: p.tankType };
     const { maxHealth, ...pu } = p.powerups || {}; w.buff = { su: p.worldSpeedUntil || 0, pu, hpf: Math.max(0.05, Math.min(1, p.hp / Math.max(1, p.getEffectiveMaxHp()))) };
 }
+// Persistent-world autosaves run on a dedicated worker so synchronous SQLite
+// work cannot pause the 20 Hz world loop. The worker owns its own SQLite handle.
+const worldSaveWorker = new Worker(`
+    const { parentPort, workerData } = require('worker_threads');
+    const Database = require('better-sqlite3');
+    const db = new Database(workerData.dbPath);
+    db.pragma('busy_timeout = 5000');
+
+    const savePlayer = db.prepare(\`INSERT INTO world_players(user_id,x,y,upgrades,updated_at,last_seen,owned_car,session_coins,score,level,tank_type,stat_points,car_x,car_y,car_a,job,job_last,play_ms,job_cd)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(user_id) DO UPDATE SET x=excluded.x,y=excluded.y,upgrades=excluded.upgrades,updated_at=excluded.updated_at,last_seen=excluded.last_seen,owned_car=excluded.owned_car,
+        session_coins=excluded.session_coins,score=excluded.score,level=excluded.level,tank_type=excluded.tank_type,stat_points=excluded.stat_points,car_x=excluded.car_x,car_y=excluded.car_y,car_a=excluded.car_a,
+        job=excluded.job,job_last=excluded.job_last,play_ms=excluded.play_ms,job_cd=excluded.job_cd\`);
+    const saveExtras = db.prepare('UPDATE world_players SET car_fuel=?, souv=?, stay_bid=?, stay_until=?, job_tasks=? WHERE user_id=?');
+    const saveHouses = db.prepare('UPDATE world_houses SET last_seen=? WHERE owner_id=?');
+    const saveTransaction = db.transaction(data => {
+        savePlayer.run(data.userId, data.x, data.y, data.upgrades, data.now, data.now, data.car, data.sessionCoins,
+            data.score, data.level, data.tankType, data.statPoints, data.carX, data.carY, data.carA, data.job,
+            data.jobLast, data.playMs, data.jobCd);
+        saveExtras.run(data.fuel, data.souv, data.stayBid, data.stayUntil, data.jobTasks, data.userId);
+        saveHouses.run(data.now, data.userId);
+    });
+
+    parentPort.on('message', data => {
+        try {
+            saveTransaction(data);
+        } catch (err) {
+            console.error('[WorldSaveWorker] Save failed for', data.userId, err);
+        }
+    });
+`, { eval: true, workerData: { dbPath } });
+
+worldSaveWorker.on('error', err => console.error('[WorldSaveWorker] Worker error:', err));
+worldSaveWorker.on('exit', code => {
+    if (code !== 0) console.error('[WorldSaveWorker] Worker stopped with exit code', code);
+});
+
 function worldSave(client) {
     const w = client.world; if (!client.dbId || !w) return;
     worldSnapshot(client);
@@ -5063,17 +5101,31 @@ function worldSave(client) {
     const pc = parkedCars.get(client.dbId); let cx = pc?.x ?? null, cy = pc?.y ?? null, ca = pc?.a ?? null;
     if (p?.vehicle) { cx = p.x; cy = p.y; ca = p.vehicle.a; if (w.scene === 'ext') ex = { x: p.x, y: p.y }; }
     w.ext = ex;
-    db.prepare(`INSERT INTO world_players(user_id,x,y,upgrades,updated_at,last_seen,owned_car,session_coins,score,level,tank_type,stat_points,car_x,car_y,car_a,job,job_last,play_ms,job_cd)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(user_id) DO UPDATE SET x=excluded.x,y=excluded.y,upgrades=excluded.upgrades,updated_at=excluded.updated_at,last_seen=excluded.last_seen,owned_car=excluded.owned_car,
-        session_coins=excluded.session_coins,score=excluded.score,level=excluded.level,tank_type=excluded.tank_type,stat_points=excluded.stat_points,car_x=excluded.car_x,car_y=excluded.car_y,car_a=excluded.car_a,
-        job=excluded.job,job_last=excluded.job_last,play_ms=excluded.play_ms,job_cd=excluded.job_cd`)
-        .run(client.dbId, ex.x - W_CX, ex.y - W_CY, JSON.stringify({ stats: w.prog.stats }), now, now, w.car || null, Math.max(0, Math.floor(w.sessionCoins || 0)),
-            w.prog.score, w.prog.level, w.prog.tankType, w.prog.statPoints, cx, cy, ca, w.job?.co || null, Math.floor(w.jobLast || 0), Math.floor(w.playMs || 0), Math.floor(w.jobCd || 0));
-    db.prepare('UPDATE world_players SET car_fuel=?, souv=?, stay_bid=?, stay_until=?, job_tasks=? WHERE user_id=?')
-        .run(w.fuel ?? 100, JSON.stringify([...(w.souv || [])]), w.stay?.bid ?? null, w.stay?.until ?? null, w.jobTasks || 0, client.dbId);
-    db.prepare('UPDATE world_houses SET last_seen=? WHERE owner_id=?').run(now, client.dbId);
-    w.lastSave = now;
+
+    // Capture a plain-data snapshot on the main thread; all SQLite work happens
+    // in the worker. Message ordering preserves save order for each player.
+    const saveData = {
+        userId: client.dbId,
+        x: ex.x - W_CX, y: ex.y - W_CY,
+        upgrades: JSON.stringify({ stats: w.prog.stats }),
+        now, car: w.car || null,
+        sessionCoins: Math.max(0, Math.floor(w.sessionCoins || 0)),
+        score: w.prog.score, level: w.prog.level, tankType: w.prog.tankType,
+        statPoints: w.prog.statPoints, carX: cx, carY: cy, carA: ca,
+        job: w.job?.co || null, jobLast: Math.floor(w.jobLast || 0),
+        playMs: Math.floor(w.playMs || 0), jobCd: Math.floor(w.jobCd || 0),
+        fuel: w.fuel ?? 100, souv: JSON.stringify([...(w.souv || [])]),
+        stayBid: w.stay?.bid ?? null, stayUntil: w.stay?.until ?? null,
+        jobTasks: w.jobTasks || 0
+    };
+    try {
+        worldSaveWorker.postMessage(saveData);
+        // Mark queued, not completed: prevents enqueueing another save every
+        // 50 ms while the worker is processing this one.
+        w.lastSave = now;
+    } catch (err) {
+        console.error('[WorldSaveWorker] Could not queue save for', client.dbId, err);
+    }
 }
 function worldBankCoins(client) { return db.prepare('SELECT coins FROM users WHERE id=?').get(client.dbId)?.coins || 0; }
 function worldPushProfile(client) { sendWorld(client, 'profile_update', { profile: db.prepare('SELECT * FROM users WHERE id=?').get(client.dbId) }); }
