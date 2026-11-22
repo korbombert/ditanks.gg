@@ -1,3 +1,126 @@
+// ===================== DATABASE WORKER =====================
+// This same file is started a second time as a worker thread (role 'db'). That worker owns the only SQLite connection;
+// the game thread never touches the database (see the DATABASE section below for the main-thread side).
+const __wt = require('worker_threads');
+if (!__wt.isMainThread && __wt.workerData && __wt.workerData.role === 'db') { runDbWorker(__wt.workerData); return; }
+function runDbWorker(cfg) {
+    const { parentPort } = require('worker_threads');
+    const Database = require('better-sqlite3');
+    const fs = require('fs'), path = require('path');
+    let db = null, stmts = new Map();
+    const st = sql => { let s = stmts.get(sql); if (!s) { s = db.prepare(sql); stmts.set(sql, s); } return s; };
+    const tryRun = sql => { try { db.prepare(sql).run(); return true; } catch (err) { if (!/duplicate column/i.test(String(err.message))) throw err; return false; } };
+    function open() {
+        db = new Database(cfg.dbPath); stmts = new Map();
+        try { db.pragma('journal_mode = WAL'); db.pragma('synchronous = NORMAL'); } catch (e) { console.error('[DB] WAL not available:', e.message); }
+        db.pragma('busy_timeout = 5000');
+        schema();
+    }
+    function schema() {
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT, pfp TEXT, provider TEXT, coins INTEGER DEFAULT 0, unlocked_colors TEXT DEFAULT '["#ffffff"]', selected_color TEXT DEFAULT '#ffffff', session_token TEXT);
+            CREATE TABLE IF NOT EXISTS world_meta (id INTEGER PRIMARY KEY CHECK(id=1), seed INTEGER NOT NULL, created_at INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS world_players (user_id TEXT PRIMARY KEY, x REAL NOT NULL DEFAULT 0, y REAL NOT NULL DEFAULT 0, upgrades TEXT NOT NULL DEFAULT '{}', updated_at INTEGER NOT NULL DEFAULT 0, last_seen INTEGER NOT NULL DEFAULT 0, owned_car TEXT, session_coins INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS world_houses (id TEXT PRIMARY KEY, owner_id TEXT, price INTEGER NOT NULL, x REAL NOT NULL, y REAL NOT NULL, purchased_at INTEGER, last_seen INTEGER);
+            CREATE TABLE IF NOT EXISTS world_companies (id TEXT PRIMARY KEY, xp INTEGER NOT NULL DEFAULT 0, level INTEGER NOT NULL DEFAULT 1);
+            CREATE TABLE IF NOT EXISTS bot_config (key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE IF NOT EXISTS banned_ips_v2 (ip_hash TEXT PRIMARY KEY, timestamp INTEGER, reason TEXT);
+            CREATE TABLE IF NOT EXISTS changelogs (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, description TEXT, markdown TEXT, date INTEGER, sort_order INTEGER);
+            CREATE TABLE IF NOT EXISTS achievements_v2 (id TEXT PRIMARY KEY, name TEXT, description TEXT, badge TEXT);
+            CREATE TABLE IF NOT EXISTS lobby_configs (room_id TEXT PRIMARY KEY, config TEXT);
+            CREATE TABLE IF NOT EXISTS user_achievements_v2 (user_id TEXT, achievement_id TEXT, unlocked_at INTEGER, PRIMARY KEY (user_id, achievement_id));
+            CREATE TABLE IF NOT EXISTS leaderboard_scores (id INTEGER PRIMARY KEY AUTOINCREMENT, mode TEXT NOT NULL, score INTEGER NOT NULL, tank TEXT, pos_x REAL, pos_y REAL,
+                scorer_name TEXT, scorer_is_bot INTEGER DEFAULT 0, scorer_account_id TEXT, scorer_account_name TEXT,
+                killer_name TEXT, killer_is_bot INTEGER DEFAULT 0, killer_account_id TEXT, killer_account_name TEXT, created_at INTEGER);
+            CREATE INDEX IF NOT EXISTS idx_leaderboard_mode_score ON leaderboard_scores(mode, score DESC);
+        `);
+        // Migrations run after every CREATE TABLE above, since they ALTER tables that must already exist.
+        for (const q of [
+            `ALTER TABLE changelogs ADD COLUMN type TEXT DEFAULT 'changelog'`, `ALTER TABLE changelogs ADD COLUMN estimated_end INTEGER`,
+            `ALTER TABLE users ADD COLUMN high_score INTEGER DEFAULT 0`, `ALTER TABLE users ADD COLUMN kills INTEGER DEFAULT 0`,
+            'ALTER TABLE world_meta ADD COLUMN layout_version INTEGER NOT NULL DEFAULT 1',
+            ...['session_coins INTEGER NOT NULL DEFAULT 0', 'score REAL NOT NULL DEFAULT 0', 'level INTEGER NOT NULL DEFAULT 1', "tank_type TEXT NOT NULL DEFAULT 'Basic'",
+                'stat_points INTEGER NOT NULL DEFAULT 0', 'car_x REAL', 'car_y REAL', 'car_a REAL', 'job TEXT', 'job_last INTEGER NOT NULL DEFAULT 0', 'play_ms INTEGER NOT NULL DEFAULT 0',
+                'job_cd INTEGER NOT NULL DEFAULT 0', 'car_fuel REAL', 'souv TEXT', 'stay_bid INTEGER', 'stay_until INTEGER', 'job_tasks INTEGER NOT NULL DEFAULT 0'].map(c => 'ALTER TABLE world_players ADD COLUMN ' + c)
+        ]) { if (tryRun(q)) console.log(`[Database] Migration successful: ${q}`); }
+    }
+    const LB_INSERT = `INSERT INTO leaderboard_scores (mode, score, tank, pos_x, pos_y, scorer_name, scorer_is_bot, scorer_account_id, scorer_account_name,
+        killer_name, killer_is_bot, killer_account_id, killer_account_name, created_at)
+        VALUES (@mode, @score, @tank, @pos_x, @pos_y, @scorer_name, @scorer_is_bot, @scorer_account_id, @scorer_account_name,
+        @killer_name, @killer_is_bot, @killer_account_id, @killer_account_name, @created_at)`;
+    const OPS = {
+        seedAchievements(list) { const s = st('INSERT OR IGNORE INTO achievements_v2 (id, name, description, badge) VALUES (?, ?, ?, ?)'); db.transaction(() => { for (const a of list) s.run(a.id, a.name, a.description, a.badge); })(); return true; },
+        // World Mode autosave (one transaction per player)
+        worldSave(d) {
+            db.transaction(() => {
+                st(`INSERT INTO world_players(user_id,x,y,upgrades,updated_at,last_seen,owned_car,session_coins,score,level,tank_type,stat_points,car_x,car_y,car_a,job,job_last,play_ms,job_cd)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(user_id) DO UPDATE SET x=excluded.x,y=excluded.y,upgrades=excluded.upgrades,updated_at=excluded.updated_at,last_seen=excluded.last_seen,owned_car=excluded.owned_car,
+                    session_coins=excluded.session_coins,score=excluded.score,level=excluded.level,tank_type=excluded.tank_type,stat_points=excluded.stat_points,car_x=excluded.car_x,car_y=excluded.car_y,car_a=excluded.car_a,
+                    job=excluded.job,job_last=excluded.job_last,play_ms=excluded.play_ms,job_cd=excluded.job_cd`).run(d.userId, d.x, d.y, d.upgrades, d.now, d.now, d.car, d.sessionCoins,
+                    d.score, d.level, d.tankType, d.statPoints, d.carX, d.carY, d.carA, d.job, d.jobLast, d.playMs, d.jobCd);
+                st('UPDATE world_players SET car_fuel=?, souv=?, stay_bid=?, stay_until=?, job_tasks=? WHERE user_id=?').run(d.fuel, d.souv, d.stayBid, d.stayUntil, d.jobTasks, d.userId);
+                st('UPDATE world_houses SET last_seen=? WHERE owner_id=?').run(d.now, d.userId);
+            })();
+            return true;
+        },
+        // Returns the achievement row when it was newly unlocked, null when the player already had it.
+        achieve({ u, a }) { const r = st('INSERT OR IGNORE INTO user_achievements_v2 (user_id, achievement_id, unlocked_at) VALUES (?, ?, ?)').run(u, a, Date.now()); return r.changes ? (st('SELECT * FROM achievements_v2 WHERE id = ?').get(a) || null) : null; },
+        // Global per-mode leaderboard: insert if it makes the top `limit`, prune, report the new cut-off score.
+        lbRecord(d) {
+            return db.transaction(() => {
+                const L = d.limit, lowest = () => st('SELECT score FROM leaderboard_scores WHERE mode = ? ORDER BY score ASC LIMIT 1').get(d.mode);
+                const count = st('SELECT COUNT(*) as c FROM leaderboard_scores WHERE mode = ?').get(d.mode).c;
+                if (count >= L) { const low = lowest(); if (low && d.row.score <= low.score) return { min: low.score }; }
+                const nm = id => id ? st('SELECT id, username FROM users WHERE id = ?').get(id) || null : null, s = nm(d.scorerId), k = nm(d.killerId);
+                st(LB_INSERT).run({ ...d.row, scorer_account_id: s ? s.id : null, scorer_account_name: s ? s.username : null, killer_account_id: k ? k.id : null, killer_account_name: k ? k.username : null });
+                st('DELETE FROM leaderboard_scores WHERE mode = ? AND id NOT IN (SELECT id FROM leaderboard_scores WHERE mode = ? ORDER BY score DESC LIMIT ?)').run(d.mode, d.mode, L);
+                const low = count + 1 >= L ? lowest() : null;
+                return { min: low ? low.score : null };
+            })();
+        },
+        // A consistent copy of the live database, zipped, for the Discord backup channel.
+        async backup({ folder }) {
+            const AdmZip = require('adm-zip');
+            fs.mkdirSync(folder, { recursive: true });
+            const ts = new Date().toISOString().replace(/[:.]/g, '-'), tmp = path.join(folder, `game-${ts}.db`), zipPath = path.join(folder, `backup-${ts}.zip`);
+            await db.backup(tmp);
+            const zip = new AdmZip(); zip.addLocalFile(tmp); zip.writeZip(zipPath); fs.unlinkSync(tmp);
+            return { zipPath };
+        },
+        // Replace the live database with the .db inside a backup zip (the only connection is ours, so close, swap, reopen).
+        restore({ zipPath, tempFolder }) {
+            const AdmZip = require('adm-zip');
+            fs.mkdirSync(tempFolder, { recursive: true });
+            new AdmZip(zipPath).extractAllTo(tempFolder, true);
+            const f = fs.readdirSync(tempFolder).find(n => n.endsWith('.db'));
+            if (!f) throw new Error('No .db file found inside zip');
+            const src = path.join(tempFolder, f);
+            new Database(src, { readonly: true, fileMustExist: true }).close();          // refuse anything SQLite can't open
+            db.close();
+            for (const ext of ['-wal', '-shm']) { try { fs.unlinkSync(cfg.dbPath + ext); } catch (e) { } }
+            fs.copyFileSync(src, cfg.dbPath);
+            open();
+            fs.rmSync(tempFolder, { recursive: true, force: true });
+            return true;
+        }
+    };
+    open();
+    parentPort.on('message', async m => {
+        let res = null, err = null;
+        try {
+            switch (m.k) {
+                case 'run': { const r = st(m.sql).run(...(m.p || [])); res = { changes: r.changes, id: Number(r.lastInsertRowid) }; break; }
+                case 'get': res = st(m.sql).get(...(m.p || [])) ?? null; break;
+                case 'all': res = st(m.sql).all(...(m.p || [])); break;
+                case 'tx': res = db.transaction(list => list.map(([sql, p]) => st(sql).run(...(p || [])).changes))(m.list); break;
+                case 'op': if (!OPS[m.op]) throw new Error('unknown op ' + m.op); res = await OPS[m.op](m.a); break;
+            }
+        } catch (e) { err = String(e && e.message || e); if (!m.id) console.error('[DB worker]', m.k, m.op || m.sql, err); }
+        if (m.id) parentPort.postMessage({ id: m.id, res, err });
+    });
+}
+
 require('dotenv').config();//
 // ===================== BINARY WIRE FORMAT (shared by server.js and client.js – keep both copies identical) =====================
 // Every WebSocket message is binary. Inputs keep their fixed 14-byte layout (first byte 1); everything else is a compact
@@ -70,8 +193,6 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { Worker } = require('worker_threads');
-const Database = require('better-sqlite3');
-const AdmZip = require('adm-zip');
 const os = require('os');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 // ===================== SERVER CONFIG =====================
@@ -80,130 +201,82 @@ const { game: isGame, gateway: isGateway } = ServerState;
 const PORT = process.env.PORT || 8080;
 const PUBLIC_URL = process.env.RAILWAY_STATIC_URL || `localhost:${PORT}`;
 // ===================== DATABASE =====================
+// All SQLite work runs on one worker thread (runDbWorker, top of this file), which owns the only connection, so the
+// game loop never waits on the disk. The game thread sends queries and gets promises back (DB.get / all / run / tx / op)
+// or posts writes it doesn't need to wait for (DB.w / DB.wop). The worker handles messages strictly in order, so a read
+// always sees every write sent before it. What the game needs synchronously – accounts of connected players, IP bans,
+// house ownership, company levels – lives in memory and is written through.
 const dbPath = process.env.RAILWAY_VOLUME_MOUNT_PATH 
     ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'game.db') 
     : 'game.db';
+console.log(`[Database] Mounted at: ${dbPath} (worker thread)`);
+let dbWorker = null, dbSeq = 0, shuttingDown = false;
+const dbWait = new Map();
+function dbStart() {
+    dbWorker = new Worker(__filename, { workerData: { role: 'db', dbPath } });
+    dbWorker.on('message', m => { const w = dbWait.get(m.id); if (!w) return; dbWait.delete(m.id); if (m.err) w.rej(new Error(m.err)); else w.res(m.res); });
+    dbWorker.on('error', err => console.error('[DB] worker error:', err));
+    dbWorker.on('exit', code => {
+        for (const w of dbWait.values()) w.rej(new Error('database worker stopped')); dbWait.clear();
+        if (!shuttingDown) { console.error(`[DB] worker exited (code ${code}) – restarting`); dbStart(); }
+    });
+}
+dbStart();
+function dbAsk(msg) { return new Promise((res, rej) => { const id = ++dbSeq; dbWait.set(id, { res, rej }); msg.id = id; dbWorker.postMessage(msg); }); }
+const DB = {
+    get: (sql, ...p) => dbAsk({ k: 'get', sql, p }),
+    all: (sql, ...p) => dbAsk({ k: 'all', sql, p }),
+    run: (sql, ...p) => dbAsk({ k: 'run', sql, p }),
+    tx: list => dbAsk({ k: 'tx', list }),                                  // [[sql, params], ...] in one transaction
+    op: (op, a) => dbAsk({ k: 'op', op, a }),                              // a named operation (see OPS in the worker)
+    w: (sql, ...p) => dbWorker.postMessage({ k: 'run', sql, p }),          // fire and forget; the worker logs failures
+    wtx: list => dbWorker.postMessage({ k: 'tx', list }),
+    wop: (op, a) => dbWorker.postMessage({ k: 'op', op, a }),
+    barrier: () => dbAsk({ k: 'get', sql: 'SELECT 1 AS ok', p: [] })      // resolves once every earlier message is done
+};
+// Wrap async Express handlers so a rejected promise becomes a 500 instead of an unhandled rejection.
+const ah = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(err => { console.error('[HTTP]', req.method, req.path, err); if (!res.headersSent) res.status(500).json({ error: 'Internal Server Error' }); });
 
-const db = new Database(dbPath);
-
-console.log(`[Database] Mounted at: ${dbPath}`);
-
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        username TEXT,
-        pfp TEXT,
-        provider TEXT,
-        coins INTEGER DEFAULT 0,
-        unlocked_colors TEXT DEFAULT '["#ffffff"]',
-        selected_color TEXT DEFAULT '#ffffff',
-        session_token TEXT
-    )
-`).run();
-
-// Persistent World Mode data. The terrain seed is generated once and is only
-// replaced by the Discord administrator regeneration command.
-db.prepare(`CREATE TABLE IF NOT EXISTS world_meta (id INTEGER PRIMARY KEY CHECK(id=1), seed INTEGER NOT NULL, created_at INTEGER NOT NULL)`).run();
-db.prepare(`CREATE TABLE IF NOT EXISTS world_players (user_id TEXT PRIMARY KEY, x REAL NOT NULL DEFAULT 0, y REAL NOT NULL DEFAULT 0, upgrades TEXT NOT NULL DEFAULT '{}', updated_at INTEGER NOT NULL DEFAULT 0, last_seen INTEGER NOT NULL DEFAULT 0, owned_car TEXT, session_coins INTEGER NOT NULL DEFAULT 0)`).run();
-try { db.prepare('ALTER TABLE world_players ADD COLUMN session_coins INTEGER NOT NULL DEFAULT 0').run(); } catch (err) { if (!String(err.message).includes('duplicate column')) throw err; }
-db.prepare(`CREATE TABLE IF NOT EXISTS world_houses (id TEXT PRIMARY KEY, owner_id TEXT, price INTEGER NOT NULL, x REAL NOT NULL, y REAL NOT NULL, purchased_at INTEGER, last_seen INTEGER)`).run();
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS bot_config (
-        key TEXT PRIMARY KEY,
-        value TEXT
-    )
-`).run();
-
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS banned_ips_v2 (
-        ip_hash TEXT PRIMARY KEY,
-        timestamp INTEGER,
-        reason TEXT
-    )
-`).run();
-
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS changelogs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT,
-        description TEXT,
-        markdown TEXT,
-        date INTEGER,
-        sort_order INTEGER
-    )
-`).run();
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS achievements_v2 (
-        id TEXT PRIMARY KEY,
-        name TEXT,
-        description TEXT,
-        badge TEXT
-    )
-`).run();
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS lobby_configs (
-        room_id TEXT PRIMARY KEY,
-        config TEXT
-    )
-`).run();
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS user_achievements_v2 (
-        user_id TEXT,
-        achievement_id TEXT,
-        unlocked_at INTEGER,
-        PRIMARY KEY (user_id, achievement_id)
-    )
-`).run();
-
-// Global highscore leaderboard: top scores are kept per game mode, capped at
-// LEADERBOARD_LIMIT entries per mode (see recordLeaderboardScore()).
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS leaderboard_scores (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        mode TEXT NOT NULL,
-        score INTEGER NOT NULL,
-        tank TEXT,
-        pos_x REAL,
-        pos_y REAL,
-        scorer_name TEXT,
-        scorer_is_bot INTEGER DEFAULT 0,
-        scorer_account_id TEXT,
-        scorer_account_name TEXT,
-        killer_name TEXT,
-        killer_is_bot INTEGER DEFAULT 0,
-        killer_account_id TEXT,
-        killer_account_name TEXT,
-        created_at INTEGER
-    )
-`).run();
-db.prepare(`
-    CREATE INDEX IF NOT EXISTS idx_leaderboard_mode_score
-    ON leaderboard_scores(mode, score DESC)
-`).run();
-
-// Migrations must run after every CREATE TABLE above, since they ALTER
-// tables (e.g. changelogs) that need to already exist.
-const migrations = [
-    `ALTER TABLE changelogs ADD COLUMN type TEXT DEFAULT 'changelog'`,
-    `ALTER TABLE changelogs ADD COLUMN estimated_end INTEGER`,
-    // These two columns were already referenced by the death-handling code
-    // (high_score / kills tracking) but were never actually added to the
-    // table, which made every one of those UPDATE queries throw. Adding
-    // them here fixes that and lets per-user high score + kill tracking work.
-    `ALTER TABLE users ADD COLUMN high_score INTEGER DEFAULT 0`,
-    `ALTER TABLE users ADD COLUMN kills INTEGER DEFAULT 0`
-];
-
-migrations.forEach(query => {
-    try {
-        db.prepare(query).run();
-        console.log(`[Database] Migration successful: ${query}`);
-    } catch (err) {
-        if (!err.message.includes("duplicate column name")) {
-            console.error(`[Database] Migration failed: ${err.message}`);
-        }
-    }
-});
+// ---- accounts: an in-memory copy of every connected player's users row, written through ----
+// Coins only ever change by deltas (coins = coins + ?), applied to the copy and the database alike, so the two never
+// drift. A row is loaded when a client logs in and kept while any client uses it (plus 10 minutes). Changes made
+// while a row is still loading are queued and applied to it when it arrives.
+const Users = {
+    map: new Map(), loading: new Map(), pend: new Map(), refs: new Map(), idle: new Map(),
+    get(id) { return id ? this.map.get(id) || null : null; },
+    load(id) {
+        if (!id) return Promise.resolve(null);
+        if (this.map.has(id)) return Promise.resolve(this.map.get(id));
+        if (this.loading.has(id)) return this.loading.get(id);
+        const p = DB.get('SELECT * FROM users WHERE id = ?', id).then(row => {
+            this.loading.delete(id);
+            const q = this.pend.get(id) || []; this.pend.delete(id);
+            if (!row) return null;
+            for (const f of q) f(row);
+            this.map.set(id, row); if (!this.refs.get(id)) this.idle.set(id, Date.now());
+            return row;
+        }, err => { this.loading.delete(id); this.pend.delete(id); throw err; });
+        this.loading.set(id, p); return p;
+    },
+    async byToken(token) { if (!token) return null; const r = await DB.get('SELECT id FROM users WHERE session_token = ?', String(token)); return r ? this.load(r.id) : null; },
+    _apply(id, f) { const r = this.map.get(id); if (r) f(r); else if (this.loading.has(id)) { if (!this.pend.has(id)) this.pend.set(id, []); this.pend.get(id).push(f); } },
+    addCoins(id, d) { d = Math.round(d); if (!id || !d) return; this._apply(id, r => { r.coins = (r.coins || 0) + d; }); DB.w('UPDATE users SET coins = coins + ? WHERE id = ?', d, id); },
+    set(id, fields) {
+        const keys = Object.keys(fields); if (!id || !keys.length) return;
+        this._apply(id, r => Object.assign(r, fields));
+        DB.w(`UPDATE users SET ${keys.map(k => k + ' = ?').join(', ')} WHERE id = ?`, ...keys.map(k => fields[k]), id);
+    },
+    addKill(id) { this._apply(id, r => { r.kills = (r.kills || 0) + 1; }); DB.w('UPDATE users SET kills = kills + 1 WHERE id = ?', id); },
+    forget(id) { this.map.delete(id); this.idle.delete(id); },
+    ref(id) { if (!id) return; this.refs.set(id, (this.refs.get(id) || 0) + 1); this.idle.delete(id); },
+    unref(id) { if (!id) return; const n = (this.refs.get(id) || 0) - 1; if (n > 0) this.refs.set(id, n); else { this.refs.delete(id); this.idle.set(id, Date.now()); } },
+    sweep() { const cut = Date.now() - 10 * 60 * 1000; for (const [id, t] of this.idle) if (t < cut && !this.refs.get(id)) { this.map.delete(id); this.idle.delete(id); } },
+    async reloadAll() { const ids = [...this.map.keys()]; this.map.clear(); this.idle.clear(); for (const id of ids) await this.load(id); }
+};
+setInterval(() => Users.sweep(), 60 * 1000);
+const bannedIps = new Set();          // ip hashes, loaded at startup, kept in step with the admin ban / unban routes
+// Run fn once the client's login (if any) has been looked up; immediately when nothing is pending.
+function afterAuth(client, fn) { if (client.authPending) client.authP.then(() => { if (!client.closed) fn(); }); else fn(); }
 // ===================== BOT CONSTANTS =====================
 const BACKUP_INTERVAL = 1000 * 60 * 60 * 12;
 const BACKUP_CHANNEL_ID = '1513631360450035753';
@@ -225,7 +298,7 @@ const LEVEL_REQUIREMENTS = [ 0, 0, 22, 100, 210, 355, 470, 600, 775, 930, 1100, 
 // bot_config so it survives restarts, but read from this in-memory
 // variable on every spawn so toggling it takes effect immediately.
 const SANDBOX_SPAWN_SCORE = 24000;
-let sandboxMode = false;
+let sandboxMode = true;
 // ===================== GAME DATA =====================
 let BOT_NAMES = [];
 try {
@@ -374,12 +447,6 @@ const ACHIEVEMENTS = [
         badge: 'shield'
     }
 ];
-ACHIEVEMENTS.forEach(a => {
-    db.prepare(`
-        INSERT OR IGNORE INTO achievements_v2 (id, name, description, badge)
-        VALUES (?, ?, ?, ?)
-    `).run(a.id, a.name, a.description, a.badge);
-});
 const UPGRADE_TREE = {
     'Basic': ['Twin', 'Sniper', 'Machine Gun', 'Flank Guard'],
     'Sniper': ['Overlord', 'Necromancer', 'Predator', 'Manager'],
@@ -399,20 +466,12 @@ const SHOP_ITEMS = {
     ]
 };
 function saveLobbyConfig(roomId, config) {
-    db.prepare(`
-        INSERT OR REPLACE INTO lobby_configs (room_id, config)
-        VALUES (?, ?)
-    `).run(roomId, JSON.stringify(config));
+    DB.w('INSERT OR REPLACE INTO lobby_configs (room_id, config) VALUES (?, ?)', roomId, JSON.stringify(config));
 }
 
-function loadLobbyConfig(roomId) {
-    const row = db.prepare(`
-        SELECT config
-        FROM lobby_configs
-        WHERE room_id = ?
-    `).get(roomId);
-
-    return row ? JSON.parse(row.config) : {};
+async function loadLobbyConfig(roomId) {
+    const row = await DB.get('SELECT config FROM lobby_configs WHERE room_id = ?', roomId);
+    try { return row ? JSON.parse(row.config) : {}; } catch (e) { return {}; }
 }
 // ===================== EXPRESS SETUP =====================
 
@@ -422,7 +481,7 @@ app.use(express.json());
 
 // ===================== MIDDLEWARE ========================
 
-const requireAdmin = (req, res, next) => {
+const requireAdmin = ah(async (req, res, next) => {
     let token = req.headers.authorization?.split(' ')[1] || req.query.token;
     if (!token && req.headers.cookie) {
         const match = req.headers.cookie.match(/sessionToken=([^;]+)/);
@@ -433,29 +492,24 @@ const requireAdmin = (req, res, next) => {
         return res.status(401).sendFile(path.join(__dirname, 'public', '401.html'));
     }
     
-    const user = db.prepare("SELECT username FROM users WHERE session_token = ?").get(token);
+    const user = await DB.get("SELECT username FROM users WHERE session_token = ?", token);
     if (!user || user.username !== process.env.ADMIN_USERNAME) {
         return res.status(403).sendFile(path.join(__dirname, 'public', '403.html'));
     }
     next();
-};
+});
 
 // ===================== ROUTING =====================
 
-function handleUserLogin(res, providerId, username, pfp, provider) {
-    let user = db.prepare("SELECT * FROM users WHERE id = ?").get(providerId);
+async function handleUserLogin(res, providerId, username, pfp, provider) {
+    const user = await DB.get("SELECT id FROM users WHERE id = ?", providerId);
     const sessionToken = crypto.randomBytes(32).toString('hex');
     if (!user) {
-        db.prepare(`
-            INSERT INTO users (id, username, pfp, provider, session_token, unlocked_colors) 
-            VALUES (?, ?, ?, ?, ?, ?)
-        `).run(providerId, username, pfp, provider, sessionToken, JSON.stringify(['#ffffff']));
+        await DB.run(`INSERT INTO users (id, username, pfp, provider, session_token, unlocked_colors) VALUES (?, ?, ?, ?, ?, ?)`,
+            providerId, username, pfp, provider, sessionToken, JSON.stringify(['#ffffff']));
     } else {
-        db.prepare(`
-            UPDATE users 
-            SET username = ?, pfp = ?, session_token = ? 
-            WHERE id = ?
-        `).run(username, pfp, sessionToken, providerId);
+        Users.set(providerId, { username, pfp, session_token: sessionToken });   // also updates the in-memory copy if they're online
+        await DB.barrier();
     }
     res.redirect(`/?token=${sessionToken}`);
 }
@@ -498,7 +552,7 @@ app.get('/auth/google/callback', async (req, res) => {
             headers: { Authorization: `Bearer ${tokenData.access_token}` }
         });
         const profile = await profileRes.json();
-        handleUserLogin(res, `google_${profile.id}`, profile.name, profile.picture, 'google');
+        await handleUserLogin(res, `google_${profile.id}`, profile.name, profile.picture, 'google');
     } catch (err) {
         console.error("Google Auth Crash:", err.message);
         res.redirect('/?error=auth_failed');
@@ -545,20 +599,20 @@ app.get('/auth/discord/callback', async (req, res) => {
             ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png` 
             : `https://cdn.discordapp.com/embed/avatars/${parseInt(profile.discriminator || 0) % 5}.png`;
 
-        handleUserLogin(res, `discord_${profile.id}`, profile.username, avatarUrl, 'discord');
+        await handleUserLogin(res, `discord_${profile.id}`, profile.username, avatarUrl, 'discord');
     } catch (err) {
         console.error("Full Auth Crash:", err.message);
         res.redirect('/?error=auth_failed');
     }
 });
 
-app.get('/api/me', (req, res) => {
+app.get('/api/me', ah(async (req, res) => {
     let token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ error: "No token" });
-    const user = db.prepare("SELECT username, pfp, coins FROM users WHERE session_token = ?").get(token);
+    const user = await DB.get("SELECT username, pfp, coins FROM users WHERE session_token = ?", token);
     if (user) res.json(user);
     else res.status(404).json({ error: "User not found" });
-});
+}));
 
 app.get('/app', requireAdmin, (req, res) => {
     res.sendFile(path.join(__dirname, 'admin.html'));
@@ -622,7 +676,8 @@ app.post('/api/admin/action', requireAdmin, (req, res) => {
 
     if (action === 'kick' || action === 'ban') {
         if (action === 'ban' && ipHash) {
-            db.prepare("INSERT OR REPLACE INTO banned_ips_v2 (ip_hash, timestamp, reason) VALUES (?, ?, ?)").run(ipHash, Date.now(), reason || "No reason specified");
+            bannedIps.add(ipHash);
+            DB.w("INSERT OR REPLACE INTO banned_ips_v2 (ip_hash, timestamp, reason) VALUES (?, ?, ?)", ipHash, Date.now(), reason || "No reason specified");
         }
         if (targetClient) {
             targetClient.ws.close(4000, action === 'ban' ? "Banned" : "Kicked");
@@ -639,16 +694,16 @@ app.post('/api/admin/action', requireAdmin, (req, res) => {
     res.status(400).json({ error: "Invalid action" });
 });
 
-app.get('/api/admin/bans', requireAdmin, (req, res) => {
-    const bans = db.prepare("SELECT * FROM banned_ips_v2 ORDER BY timestamp DESC").all();
-    res.json(bans);
-});
+app.get('/api/admin/bans', requireAdmin, ah(async (req, res) => {
+    res.json(await DB.all("SELECT * FROM banned_ips_v2 ORDER BY timestamp DESC"));
+}));
 
-app.post('/api/admin/unban', requireAdmin, (req, res) => {
+app.post('/api/admin/unban', requireAdmin, ah(async (req, res) => {
     const { ipHash } = req.body;
-    db.prepare("DELETE FROM banned_ips_v2 WHERE ip_hash = ?").run(ipHash);
+    bannedIps.delete(ipHash);
+    await DB.run("DELETE FROM banned_ips_v2 WHERE ip_hash = ?", ipHash);
     res.json({ success: true });
-});
+}));
 
 app.get('/api/admin/server_instances', requireAdmin, (req, res) => {
     const instances = Object.values(rooms).map(r => ({
@@ -660,18 +715,15 @@ app.get('/api/admin/server_instances', requireAdmin, (req, res) => {
     res.json(instances);
 });
 
-app.post('/api/admin/server_instances/create', requireAdmin, (req, res) => {
+app.post('/api/admin/server_instances/create', requireAdmin, ah(async (req, res) => {
     const { id, mode } = req.body;
     if (!id || !mode) return res.status(400).json({ error: "Invalid parameters" });
     if (rooms[id]) return res.status(400).json({ error: "Server already exists" });
-    
-    rooms[id] = new Room(
-    id,
-    mode,
-    loadLobbyConfig(id)
-);
+    const config = await loadLobbyConfig(id);
+    if (rooms[id]) return res.status(400).json({ error: "Server already exists" });
+    rooms[id] = new Room(id, mode, config);
     res.json({ success: true });
-});
+}));
 
 app.post('/api/admin/server_instances/action', requireAdmin, (req, res) => {
     const { action, serverIds } = req.body;
@@ -747,21 +799,20 @@ if (shapes.length > room.config.shapeCount) {
         config: room.config
     });
 });
-app.get('/api/changelogs', (req, res) => {
-    const logs = db.prepare("SELECT * FROM changelogs ORDER BY sort_order DESC, date DESC").all();
-    res.json(logs);
-});
+app.get('/api/changelogs', ah(async (req, res) => {
+    res.json(await DB.all("SELECT * FROM changelogs ORDER BY sort_order DESC, date DESC"));
+}));
 
-app.post('/api/admin/changelogs', requireAdmin, (req, res) => {
+app.post('/api/admin/changelogs', requireAdmin, ah(async (req, res) => {
     const { title, description, markdown, sort_order } = req.body;
-    db.prepare("INSERT INTO changelogs (title, description, markdown, date, sort_order) VALUES (?, ?, ?, ?, ?)").run(title, description, markdown, Date.now(), sort_order || 0);
+    await DB.run("INSERT INTO changelogs (title, description, markdown, date, sort_order) VALUES (?, ?, ?, ?, ?)", title, description, markdown, Date.now(), sort_order || 0);
     res.json({ success: true });
-});
+}));
 
-app.delete('/api/admin/changelogs/:id', requireAdmin, (req, res) => {
-    db.prepare("DELETE FROM changelogs WHERE id = ?").run(req.params.id);
+app.delete('/api/admin/changelogs/:id', requireAdmin, ah(async (req, res) => {
+    await DB.run("DELETE FROM changelogs WHERE id = ?", req.params.id);
     res.json({ success: true });
-});
+}));
 app.get('/api/achievements', (req, res) => {
     res.json(ACHIEVEMENTS);
 });
@@ -770,42 +821,31 @@ app.get('/api/achievements', (req, res) => {
 // Global highscore leaderboard: top 50 scores per game mode. Public/read-only,
 // like /api/changelogs and /api/achievements above.
 
-app.get('/api/leaderboard/modes', (req, res) => {
-    const rows = db.prepare(`SELECT DISTINCT mode FROM leaderboard_scores`).all();
+app.get('/api/leaderboard/modes', ah(async (req, res) => {
+    const rows = await DB.all(`SELECT DISTINCT mode FROM leaderboard_scores`);
     res.json(rows.map(r => r.mode));
-});
+}));
 
-app.get('/api/leaderboard/:mode', (req, res) => {
+app.get('/api/leaderboard/:mode', ah(async (req, res) => {
     const { mode } = req.params;
-    const rows = db.prepare(`
-        SELECT * FROM leaderboard_scores
-        WHERE mode = ?
-        ORDER BY score DESC
-        LIMIT ?
-    `).all(mode, LEADERBOARD_LIMIT);
-
+    const rows = await DB.all(`SELECT * FROM leaderboard_scores WHERE mode = ? ORDER BY score DESC LIMIT ?`, mode, LEADERBOARD_LIMIT);
     res.json({
         mode,
         leaderboard: rows.map(formatLeaderboardRow)
     });
-});
+}));
 
-app.get('/api/leaderboard', (req, res) => {
-    const modes = db.prepare(`SELECT DISTINCT mode FROM leaderboard_scores`).all().map(r => r.mode);
+app.get('/api/leaderboard', ah(async (req, res) => {
+    const modes = (await DB.all(`SELECT DISTINCT mode FROM leaderboard_scores`)).map(r => r.mode);
     const result = {};
-    modes.forEach(mode => {
-        const rows = db.prepare(`
-            SELECT * FROM leaderboard_scores
-            WHERE mode = ?
-            ORDER BY score DESC
-            LIMIT ?
-        `).all(mode, LEADERBOARD_LIMIT);
+    for (const mode of modes) {
+        const rows = await DB.all(`SELECT * FROM leaderboard_scores WHERE mode = ? ORDER BY score DESC LIMIT ?`, mode, LEADERBOARD_LIMIT);
         result[mode] = rows.map(formatLeaderboardRow);
-    });
+    }
     res.json(result);
-});
+}));
 
-app.get('/api/me/achievements', (req, res) => {
+app.get('/api/me/achievements', ah(async (req, res) => {
     try {
         const authHeader = req.headers.authorization;
         let token = authHeader?.split(' ')[1];
@@ -815,10 +855,7 @@ app.get('/api/me/achievements', (req, res) => {
         }
 
         // 1. Safe User Lookup
-        const user = db.prepare(`
-            SELECT id FROM users
-            WHERE session_token = ?
-        `).get(token);
+        const user = await DB.get(`SELECT id FROM users WHERE session_token = ?`, token);
 
         // Check if user exists BEFORE accessing user.id to avoid TypeError crash
         if (!user) {
@@ -826,7 +863,7 @@ app.get('/api/me/achievements', (req, res) => {
         }
 
         // 2. Fetch Achievements (Fixing 'badge' vs 'icon' based on your frontend)
-        const achievements = db.prepare(`
+        const achievements = await DB.all(`
             SELECT
                 a.id,
                 a.name,
@@ -837,7 +874,7 @@ app.get('/api/me/achievements', (req, res) => {
             JOIN achievements_v2 a ON ua.achievement_id = a.id
             WHERE ua.user_id = ?
             ORDER BY ua.unlocked_at DESC
-        `).all(user.id);
+        `, user.id);
 
         res.json(achievements);
 
@@ -846,15 +883,15 @@ app.get('/api/me/achievements', (req, res) => {
         console.error("Database error in /api/me/achievements:", dbError);
         res.status(500).json({ error: 'Internal Server Error', details: dbError.message });
     }
-});
+}));
 // ===================== ADMIN: STATS =====================
 
-app.get('/api/admin/stats', requireAdmin, (req, res) => {
+app.get('/api/admin/stats', requireAdmin, ah(async (req, res) => {
     const totalPlayers = Object.values(rooms).reduce((sum, r) => sum + r.clients.filter(c => c.player).length, 0);
     const totalRooms = Object.values(rooms).filter(r => r.status === 'running').length;
     const memUsage = process.memoryUsage();
     const usedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
-    const totalAccounts = db.prepare("SELECT COUNT(*) as count FROM users").get().count;
+    const totalAccounts = (await DB.get("SELECT COUNT(*) as count FROM users")).count;
     res.json({
         totalPlayers,
         totalRooms,
@@ -862,12 +899,12 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
         uptime: Math.floor(process.uptime()),
         totalAccounts
     });
-});
+}));
 
 // ===================== ADMIN: ACCOUNTS =====================
 
-app.get('/api/admin/accounts', requireAdmin, (req, res) => {
-    const accounts = db.prepare("SELECT id, username, pfp, provider, coins, unlocked_colors, selected_color, session_token FROM users ORDER BY username").all();
+app.get('/api/admin/accounts', requireAdmin, ah(async (req, res) => {
+    const accounts = await DB.all("SELECT id, username, pfp, provider, coins, unlocked_colors, selected_color, session_token FROM users ORDER BY username");
     const result = accounts.map(a => {
         let colors = ['#ffffff'];
         try { colors = JSON.parse(a.unlocked_colors); } catch(e) {}
@@ -883,61 +920,64 @@ app.get('/api/admin/accounts', requireAdmin, (req, res) => {
         };
     });
     res.json(result);
-});
+}));
 
-app.patch('/api/admin/accounts/:id', requireAdmin, (req, res) => {
+// Account edits go through Users so a player who is online sees them at once (and the copy stays in step).
+app.patch('/api/admin/accounts/:id', requireAdmin, ah(async (req, res) => {
     const coins = parseInt(req.body.coins);
     if (isNaN(coins) || coins < 0) return res.status(400).json({ error: "Invalid coins value" });
-    db.prepare("UPDATE users SET coins = ? WHERE id = ?").run(coins, req.params.id);
+    Users.set(req.params.id, { coins }); await DB.barrier();
     res.json({ success: true });
-});
+}));
 
-app.post('/api/admin/accounts/:id/reset', requireAdmin, (req, res) => {
-    db.prepare("UPDATE users SET coins = 0, unlocked_colors = ?, selected_color = '#ffffff' WHERE id = ?")
-        .run(JSON.stringify(['#ffffff']), req.params.id);
+app.post('/api/admin/accounts/:id/reset', requireAdmin, ah(async (req, res) => {
+    Users.set(req.params.id, { coins: 0, unlocked_colors: JSON.stringify(['#ffffff']), selected_color: '#ffffff' }); await DB.barrier();
     res.json({ success: true });
-});
+}));
 
-app.delete('/api/admin/accounts/:id', requireAdmin, (req, res) => {
-    db.prepare("DELETE FROM users WHERE id = ?").run(req.params.id);
+app.delete('/api/admin/accounts/:id', requireAdmin, ah(async (req, res) => {
+    Users.forget(req.params.id);
+    await DB.run("DELETE FROM users WHERE id = ?", req.params.id);
     res.json({ success: true });
-});
+}));
 
-app.post('/api/admin/accounts/:id/expire', requireAdmin, (req, res) => {
-    db.prepare("UPDATE users SET session_token = NULL WHERE id = ?").run(req.params.id);
+app.post('/api/admin/accounts/:id/expire', requireAdmin, ah(async (req, res) => {
+    Users.set(req.params.id, { session_token: null }); await DB.barrier();
     res.json({ success: true });
-});
+}));
 
-app.post('/api/admin/expire-all-sessions', requireAdmin, (req, res) => {
-    db.prepare("UPDATE users SET session_token = NULL").run();
+app.post('/api/admin/expire-all-sessions', requireAdmin, ah(async (req, res) => {
+    for (const r of Users.map.values()) r.session_token = null;
+    await DB.run("UPDATE users SET session_token = NULL");
     res.json({ success: true });
-});
+}));
 
 // ===================== ADMIN: GAME CONFIG =====================
 
-app.get('/api/admin/game-config', requireAdmin, (req, res) => {
+app.get('/api/admin/game-config', requireAdmin, ah(async (req, res) => {
     const keys = ['maintenance_mode', 'motd', 'coin_multiplier', 'max_bots'];
     const config = {};
-    keys.forEach(k => {
-        const row = db.prepare("SELECT value FROM bot_config WHERE key = ?").get(k);
+    for (const k of keys) {
+        const row = await DB.get("SELECT value FROM bot_config WHERE key = ?", k);
         config[k] = row ? row.value : null;
-    });
+    }
     config.sandbox_mode = sandboxMode;
     res.json(config);
-});
+}));
 
-app.post('/api/admin/game-config', requireAdmin, (req, res) => {
+app.post('/api/admin/game-config', requireAdmin, ah(async (req, res) => {
     const { maintenance_mode, motd, coin_multiplier, max_bots, sandbox_mode } = req.body;
     const entries = { maintenance_mode, motd, coin_multiplier, max_bots };
-    const upsert = db.prepare("INSERT OR REPLACE INTO bot_config (key, value) VALUES (?, ?)");
+    const list = [];
     for (const [k, v] of Object.entries(entries)) {
-        if (v !== undefined) upsert.run(k, String(v));
+        if (v !== undefined) list.push(["INSERT OR REPLACE INTO bot_config (key, value) VALUES (?, ?)", [k, String(v)]]);
     }
+    if (list.length) await DB.tx(list);
     if (sandbox_mode !== undefined) {
         setSandboxMode(sandbox_mode === true || sandbox_mode === 'true');
     }
     res.json({ success: true, sandbox_mode: sandboxMode });
-});
+}));
 
 // ===================== ADMIN: BROADCAST =====================
 
@@ -971,18 +1011,18 @@ app.post('/api/admin/kick-all', requireAdmin, (req, res) => {
 
 // ===================== ADMIN: DOWNTIME =====================
 
-app.post('/api/admin/downtime', requireAdmin, (req, res) => {
+app.post('/api/admin/downtime', requireAdmin, ah(async (req, res) => {
     const { title, message, severity, estimated_end } = req.body;
     if (!title || !message) return res.status(400).json({ error: "Title and message are required" });
     // First line of markdown encodes severity so the changelog renderer can extract it
     const markdown = `severity:${severity || 'warning'}\n${message}`;
     const endTime = estimated_end ? new Date(estimated_end).getTime() : null;
-    db.prepare(`
+    await DB.run(`
         INSERT INTO changelogs (title, description, markdown, date, sort_order, type, estimated_end)
         VALUES (?, ?, ?, ?, ?, 'downtime', ?)
-    `).run(title, message, markdown, Date.now(), 999, endTime);
+    `, title, message, markdown, Date.now(), 999, endTime);
     res.json({ success: true });
-});
+}));
 
 app.use((req, res, next) => {
     res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
@@ -1296,111 +1336,48 @@ function isInEnemyBase(room, obj, aiTeam) {
     return false;
 }
 
+// Achievements are written by the database worker; the toast is sent when it confirms a new unlock. Unlocks seen this
+// session are remembered so repeat kills don't send the same request again.
+const achSeen = new Set();
 function unlockAchievement(userId, achievementId, ws = null) {
-    const already = db.prepare(`
-        SELECT * FROM user_achievements_v2
-        WHERE user_id = ? AND achievement_id = ?
-    `).get(userId, achievementId);
-
-    if (already) return false;
-
-    db.prepare(`
-        INSERT INTO user_achievements_v2
-        (user_id, achievement_id, unlocked_at)
-        VALUES (?, ?, ?)
-    `).run(userId, achievementId, Date.now());
-
-    const achievement = db.prepare(`
-        SELECT * FROM achievements_v2 WHERE id = ?
-    `).get(achievementId);
-
-    if (ws && achievement) {
-        wsSendObj(ws, ({
-            type: 'achievement_unlocked',
-            achievement
-        }));
-    }
-
-    return true;
+    const key = userId + '\u0000' + achievementId;
+    if (!userId || achSeen.has(key)) return;
+    achSeen.add(key);
+    DB.op('achieve', { u: userId, a: achievementId }).then(achievement => {
+        if (achievement && ws && ws.readyState === WebSocket.OPEN) wsSendObj(ws, ({ type: 'achievement_unlocked', achievement }));
+    }).catch(err => { achSeen.delete(key); console.error('[Achievements]', err.message); });
 }
 
 // ===================== GLOBAL LEADERBOARD =====================
 const LEADERBOARD_LIMIT = 50;
+const lbCutoff = new Map();      // mode -> lowest score on a full board (as last reported by the worker)
 
-// Records a death's score against the global per-mode leaderboard, keeping
-// only the top LEADERBOARD_LIMIT entries for that mode. `entity` is whoever
-// just died (the scorer); `killer`/`killerClient` (both optional) describe
-// whoever landed the killing blow, resolved by the caller.
+// Records a death's score against the global per-mode leaderboard, keeping only the top LEADERBOARD_LIMIT entries for
+// that mode. `entity` is whoever just died (the scorer); `killer`/`killerClient` (both optional) describe whoever landed
+// the killing blow. Scores that can't make the board are dropped here without a database round trip; the rest (count,
+// insert, prune, account names) is one transaction in the database worker.
 function recordLeaderboardScore(mode, entity, killer, killerClient) {
     if (!['tank', 'ai'].includes(entity.type)) return;
     if (!Number.isFinite(entity.score) || entity.score <= 0) return;
-
-    // Cheap early-out: if the board is already full for this mode and this
-    // score wouldn't crack the top LEADERBOARD_LIMIT, skip the insert+prune
-    // entirely so low scores don't churn the table.
-    const currentCount = db.prepare(
-        `SELECT COUNT(*) as c FROM leaderboard_scores WHERE mode = ?`
-    ).get(mode).c;
-    if (currentCount >= LEADERBOARD_LIMIT) {
-        const lowest = db.prepare(
-            `SELECT score FROM leaderboard_scores WHERE mode = ? ORDER BY score ASC LIMIT 1`
-        ).get(mode);
-        if (lowest && entity.score <= lowest.score) return;
-    }
-
-    let scorerAccountId = null;
-    let scorerAccountName = null;
-    // This runs before the client's `.player` reference is cleared on death,
-    // so we can still look it up here to check for a linked account.
+    const score = Math.floor(entity.score), cut = lbCutoff.get(mode);
+    if (cut != null && score <= cut) return;
+    // This runs before the client's `.player` reference is cleared on death, so we can still look up a linked account.
     const scorerRoomClient = entity.room?.clients?.find(c => c.player === entity) || null;
-    if (scorerRoomClient?.dbId) {
-        const user = db.prepare("SELECT id, username FROM users WHERE id = ?").get(scorerRoomClient.dbId);
-        if (user) {
-            scorerAccountId = user.id;
-            scorerAccountName = user.username;
+    DB.op('lbRecord', {
+        mode, limit: LEADERBOARD_LIMIT, scorerId: scorerRoomClient?.dbId || null, killerId: killerClient?.dbId || null,
+        row: {
+            mode, score,
+            tank: entity.tankType || null,
+            pos_x: entity.x,
+            pos_y: entity.y,
+            scorer_name: entity.name || (entity.type === 'ai' ? 'Bot' : 'Unnamed'),
+            scorer_is_bot: entity.type === 'ai' ? 1 : 0,
+            killer_name: killer ? (killer.name || (killer.type === 'ai' ? 'Bot' : 'Unnamed')) : null,
+            killer_is_bot: killer ? (killer.type === 'ai' ? 1 : 0) : null,
+            created_at: Date.now()
         }
-    }
-
-    let killerAccountId = null;
-    let killerAccountName = null;
-    if (killerClient?.dbId) {
-        const user = db.prepare("SELECT id, username FROM users WHERE id = ?").get(killerClient.dbId);
-        if (user) {
-            killerAccountId = user.id;
-            killerAccountName = user.username;
-        }
-    }
-
-    db.prepare(`
-        INSERT INTO leaderboard_scores
-        (mode, score, tank, pos_x, pos_y, scorer_name, scorer_is_bot, scorer_account_id, scorer_account_name,
-         killer_name, killer_is_bot, killer_account_id, killer_account_name, created_at)
-        VALUES (@mode, @score, @tank, @pos_x, @pos_y, @scorer_name, @scorer_is_bot, @scorer_account_id, @scorer_account_name,
-                @killer_name, @killer_is_bot, @killer_account_id, @killer_account_name, @created_at)
-    `).run({
-        mode,
-        score: Math.floor(entity.score),
-        tank: entity.tankType || null,
-        pos_x: entity.x,
-        pos_y: entity.y,
-        scorer_name: entity.name || (entity.type === 'ai' ? 'Bot' : 'Unnamed'),
-        scorer_is_bot: entity.type === 'ai' ? 1 : 0,
-        scorer_account_id: scorerAccountId,
-        scorer_account_name: scorerAccountName,
-        killer_name: killer ? (killer.name || (killer.type === 'ai' ? 'Bot' : 'Unnamed')) : null,
-        killer_is_bot: killer ? (killer.type === 'ai' ? 1 : 0) : null,
-        killer_account_id: killerAccountId,
-        killer_account_name: killerAccountName,
-        created_at: Date.now()
-    });
-
-    // Prune back down to the top LEADERBOARD_LIMIT entries for this mode.
-    db.prepare(`
-        DELETE FROM leaderboard_scores
-        WHERE mode = ? AND id NOT IN (
-            SELECT id FROM leaderboard_scores WHERE mode = ? ORDER BY score DESC LIMIT ?
-        )
-    `).run(mode, mode, LEADERBOARD_LIMIT);
+    }).then(r => { if (r && r.min != null) lbCutoff.set(mode, r.min); else lbCutoff.delete(mode); })
+      .catch(err => console.error('[Leaderboard]', err.message));
 }
 
 function formatLeaderboardRow(row, index) {
@@ -2296,11 +2273,9 @@ class Drone {
 
 // ===================== ROOMS =====================
 
-const rooms = {
-    "FFA-S1": new Room("FFA-S1", "FFA",loadLobbyConfig('FFA-S1')),
-    "2TDM-S1": new Room("2TDM-S1", "2TDM",loadLobbyConfig('2TDM-S1')),
-    "4TDM-S1": new Room("4TDM-S1", "4TDM",loadLobbyConfig('4TDM-S1')),
-};
+// The arena rooms are created at startup once their saved lobby configs have been read (see serverStart below).
+const rooms = {};
+const DEFAULT_ROOMS = [["FFA-S1", "FFA"], ["2TDM-S1", "2TDM"], ["4TDM-S1", "4TDM"]];
 
 // WORLD is a real arena Room: the same Entity, input, firing, collision,
 // projectile, XP and broadcast loops process its players and shape targets.
@@ -2810,15 +2785,8 @@ function updateRoom(room) {
             if (['tank', 'ai'].includes(e.type)) {
                 if (killer && killer.isPlayer) {
                     if (killerClient?.dbId) {
-                        db.prepare(`
-                            UPDATE users
-                            SET kills = kills + 1
-                            WHERE id = ?
-                        `).run(killerClient.dbId);
-
-                        const stats = db.prepare(`
-                            SELECT kills FROM users WHERE id = ?
-                        `).get(killerClient.dbId);
+                        Users.addKill(killerClient.dbId);
+                        const stats = Users.get(killerClient.dbId) || { kills: 0 };
 
                         unlockAchievement(
                             killerClient.dbId,
@@ -2856,26 +2824,18 @@ function updateRoom(room) {
                 wsSendObj(e.ws, ({ type: 'death', score: e.score, level: e.level, timeAlive: timeAlive, tank: e.tankType, killerId: e.lastDamagedBy }));
                 let client = room.clients.find(c => c.player === e);
                 if (client && client.dbId) {
-                    let earnedCoins = Math.floor(e.score / 1000); 
-                    
-                    let userRecord = db.prepare("SELECT high_score, provider FROM users WHERE id = ?").get(client.dbId);
-                    let isNewHighScore = false;
-                    
-                    if (userRecord && e.score > (userRecord.high_score || 0)) {
-                        db.prepare("UPDATE users SET high_score = ? WHERE id = ?").run(e.score, client.dbId);
-                        isNewHighScore = true;
-                    }
-
-                    if (earnedCoins > 0) {
-                        db.prepare("UPDATE users SET coins = coins + ? WHERE id = ?").run(earnedCoins, client.dbId);
-                    }
-                    
-                    let updatedUser = db.prepare("SELECT * FROM users WHERE id = ?").get(client.dbId);
-                    wsSendObj(client.ws, ({ type: 'profile_update', profile: updatedUser }));
-                    
-                    if (isNewHighScore && userRecord.provider === 'discord') {
-                        updateLeaderboard();
-                    }
+                    // rewards are applied to the in-memory account (and written through by the database worker)
+                    const uid = client.dbId, ws2 = client.ws, score = e.score, earnedCoins = Math.floor(score / 1000);
+                    const reward = userRecord => {
+                        if (!userRecord) return;
+                        const isNewHighScore = score > (userRecord.high_score || 0);
+                        if (isNewHighScore) Users.set(uid, { high_score: score });
+                        if (earnedCoins > 0) Users.addCoins(uid, earnedCoins);
+                        wsSendObj(ws2, ({ type: 'profile_update', profile: Users.get(uid) || userRecord }));
+                        if (isNewHighScore && userRecord.provider === 'discord') updateLeaderboard();
+                    };
+                    const cached = Users.get(uid);
+                    if (cached) reward(cached); else Users.load(uid).then(reward).catch(err => console.error('[Death reward]', err.message));
                 }
                 if (client) {
                     client.player = null;
@@ -3062,7 +3022,7 @@ function worldOnHighway(x, y) {
 }
 // Every airport has its own design: name, terminal plan, colours, control tower, runway surface, second runway.
 const AP_DESIGNS = {
-    central:    { nm: 'Central City International',  kind: 'satellite', rw2: 'par',   surf: 'asphalt',  tower: 'needle',  roof: '#dfe6ee', wall: '#4f6b88', acc: '#00a8d6', glass: '#5fb7e0' },
+    central:    { nm: 'Central City International',  kind: 'mega',      rw2: 'par',   surf: 'asphalt',  tower: 'needle',  roof: '#dfe6ee', wall: '#4f6b88', acc: '#00a8d6', glass: '#5fb7e0' },
     port:       { nm: 'Port Aldren Harbour Airport', kind: 'piers',     rw2: 'cross', surf: 'asphalt',  tower: 'square',  roof: '#b9c3ca', wall: '#55687a', acc: '#1d4f7a', glass: '#7aa7c4' },
     highmoor:   { nm: 'Highmoor Moorside Airport',   kind: 'linear',    rw2: null,    surf: 'asphalt',  tower: 'stone',   roof: '#5f9a86', wall: '#a9805f', acc: '#2f5d50', glass: '#8fb5a8' },
     solana:     { nm: 'Solana Sunport',              kind: 'curve',     rw2: 'par',   surf: 'concrete', tower: 'cyl',     roof: '#f3e7c9', wall: '#d39a5c', acc: '#e67e22', glass: '#64b5d9' },
@@ -3100,7 +3060,10 @@ const W_COMPANIES = [
     { id: 'swift',     name: 'SwiftParcel',        pay: 68, color: '#e05a2a', role: 'Bike Courier', kind: 'courier', task: 0,  strict: 25, perk: 'tips',   styles: ['generic', 'oldtown'] },
     { id: 'citycab',   name: 'CityCab',            pay: 60, color: '#d9a800', role: 'Taxi Driver',  kind: 'taxi',    task: 0,  strict: 25, perk: 'fuel',   styles: ['cyber', 'generic', 'oldtown'] },
     { id: 'tours',     name: 'Old Town Tours',     pay: 60, color: '#c0392b', role: 'Tour Guide',   kind: 'guide',   task: 0,  strict: 30, perk: 'tips',   styles: ['oldtown'] },
-    { id: 'coop',      name: 'Green Valley Co-op', pay: 6,  color: '#4f9a3a', role: 'Farm Hand',    kind: 'farm',    task: 0,  strict: 30, perk: 'meal',   styles: ['rural'] }
+    { id: 'coop',      name: 'Green Valley Co-op', pay: 6,  color: '#4f9a3a', role: 'Farm Hand',    kind: 'farm',    task: 0,  strict: 30, perk: 'meal',   styles: ['rural'] },
+    // Central Air pilots fly real aircraft from the Central City International crew apron (see the pilot section).
+    // pay = coins per 1000 km of route flown, on a safe landing at the destination; no branches (styles: []).
+    { id: 'centralair', name: 'Central Air',       pay: 7400, color: '#c0392b', role: 'Pilot',      kind: 'pilot',   task: 0,  strict: 45, perk: null,     styles: [] }
 ];
 const MALL_NAMES = ['Skyline Galleria', 'Arcadia Plaza', 'Neon Bazaar', 'Meridian Mall', 'Aurora Centre', 'Grand Arcade', 'Vertex Mall', 'Crystal Court'];
 const HOTEL_NAMES = ['Grand Meridian', 'The Aurora', 'Skyline Suites', 'Hotel Lumen', 'The Regent', 'Hotel Vantage', 'Starlight Hotel'];
@@ -3315,9 +3278,10 @@ function buildCityLayout(seed, city, idx) {
     for (let i = 0; i < dev.length; i++) if (dev[i]) all[i] = 1;
     orthoConvex(all, MN);
     // ---- airport: a 2x2 block of macro cells (2x1 for small towns) next to the developed area, closest to a seeded bearing
-    const prefA = wHash(seed, 4242, 17) * Math.PI * 2, apBig = !(city.style === 'rural' || city.size < 24000);
+    // Central City International is the mega hub: a 4x3 block (14 km x 11 km) with three terminals and two parallel runways.
+    const prefA = wHash(seed, 4242, 17) * Math.PI * 2, apBig = !(city.style === 'rural' || city.size < 24000), apMega = (AP_DESIGNS[city.id] || {}).kind === 'mega';
     let air = null, airScore = Infinity;
-    for (const [fw, fh] of apBig ? [[2, 2], [2, 1], [1, 1]] : [[2, 1], [1, 1]]) {
+    for (const [fw, fh] of apMega ? [[4, 3], [3, 4], [3, 3], [2, 2]] : apBig ? [[2, 2], [2, 1], [1, 1]] : [[2, 1], [1, 1]]) {
         for (let I = -M + 1; I < M - fw; I++) for (let J = -M + 1; J < M - fh; J++) {
             let ok = true, touch = false;
             for (let a = 0; a < fw && ok; a++) for (let b = 0; b < fh; b++) { const k = mIdx(I + a, J + b); if (!all[k] || dev[k]) { ok = false; break; } }
@@ -3737,11 +3701,14 @@ function buildCityLayout(seed, city, idx) {
     // (linear, piers, satellite, curved, lodge, box), colours, tower, runway surface and a second runway or not.
     // Stands carry the parking heading and the push-back point, which the flight code uses for taxiing.
     function airportBlock(B, rng, termTop) {
-        const D = AP_DESIGNS[city.id] || AP_DESIGNS.lakemont, X0 = B.x + 20, W = B.w - 40, Y0 = B.y + 20, H = B.h - 40, cx = W / 2, big = H > 5000;
+        let D = AP_DESIGNS[city.id] || AP_DESIGNS.lakemont;
+        if (D.kind === 'mega') { if (B.w > 9800 && B.h > 9800) return megaAirportBlock(B, rng, termTop, D); D = Object.assign({}, D, { kind: 'satellite' }); }
+        const X0 = B.x + 20, W = B.w - 40, Y0 = B.y + 20, H = B.h - 40, cx = W / 2, big = H > 5000;
         const ry = (y, h = 0) => termTop ? Y0 + H - y - h : Y0 + y;
         const R = (x, y, w, h) => ({ x: Math.round(X0 + x), y: Math.round(ry(y, h)), w: Math.round(w), h: Math.round(h) });
         const P = (x, y) => ({ x: Math.round(X0 + x), y: Math.round(ry(y)) });
-        const deco = (k, r, extra) => addDeco(k, r.x, r.y, r.w, r.h, extra);
+        const rws = [];                                                  // every runway rectangle, for pilots: touching down anywhere else is a crash
+        const deco = (k, r, extra) => { if (k === 'runway') rws.push({ x: r.x, y: r.y, w: r.w, h: r.h, v: extra && extra.vert ? 1 : 0, nr: (extra && extra.nr) || '' }); return addDeco(k, r.x, r.y, r.w, r.h, extra); };
         const UP = termTop ? -Math.PI / 2 : Math.PI / 2;               // world heading of local +y (towards the terminal)
         const pal = { rc: D.roof, wc: D.wall, acc: D.acc, gl: D.glass, dk: D.kind, ap: city.id };
         const G = big ? { rwY: 1150, rwH: 230, tyY: 1760, tyH: 130, apY: 2020, termY: 4380, termH: 620 }
@@ -3811,14 +3778,92 @@ function buildCityLayout(seed, city, idx) {
         }
         const tw = D.tower, tH = { needle: 260, cyl: 170, square: 150, stone: 120, adobe: 110, pagoda: 160, lattice: 140, beacon: 70 }[tw] || 150, tS = tw === 'beacon' ? 70 : 130;
         addBuilding('ctower', X0 + Math.max(120, cx - Math.min(W * 0.36, 2600) - 300), ry(ly + 40, tS), tS, tS, { s: 3, ts: tw, bh: tH, wc: D.wall, acc: D.acc });
-        for (let i = 0; i < 26; i++) { const p = P(80 + rng() * (W - 160), 40 + rng() * (G.rwY - 120)); addTree(p.x, p.y, Math.floor(rng() * 8), 9); }
+        const offRw = p => !rws.some(r => p.x > r.x - 120 && p.x < r.x + r.w + 120 && p.y > r.y - 120 && p.y < r.y + r.h + 120);   // never a tree on a runway
+        for (let i = 0; i < 26; i++) { const p = P(80 + rng() * (W - 160), 40 + rng() * (G.rwY - 120)); if (offRw(p)) addTree(p.x, p.y, Math.floor(rng() * 8), 9); }
         for (let i = 0; i < 10; i++) { const p = P(rng() < 0.5 ? 60 + rng() * 200 : W - 260 + rng() * 200, ly + 150 + rng() * Math.max(100, H - ly - 300)); addTree(p.x, p.y, Math.floor(rng() * 8), 9); }
         const st = stands.map((s, i) => { const p = P(s.lx, s.ly), o = P(s.ox, s.oy); return { x: p.x, y: p.y, a: +s.a.toFixed(4), ox: o.x, oy: o.y, ex: Math.round(X0 + (s.ex ?? s.ox)), g: i + 1, remote: s.remote || 0 }; });
         const off = P(cx + 260, ly + 110);
         L.airport = {
             city: city.id, name: D.nm, code: city.code, x0: rw.x, x1: rw.x + rw.w, ry: P(0, G.rwY + G.rwH / 2).y, ty: P(0, G.tyY + G.tyH / 2).y,
             endW: Math.round(X0 + endW), endE: Math.round(X0 + endE), stands: st, sb: { x: st[0].x, y: st[0].y }, off, big: big ? 1 : 0, design: D.kind,
-            door: { x: term.door.x, y: term.door.y }, term: { id: term.id, x: term.x, y: term.y, w: term.w, h: term.h, dir: term.door.dir }, flip: termTop ? 1 : 0
+            door: { x: term.door.x, y: term.door.y }, term: { id: term.id, x: term.x, y: term.y, w: term.w, h: term.h, dir: term.door.dir }, flip: termTop ? 1 : 0,
+            terms: [{ id: term.id, n: 1, x: term.x, y: term.y, w: term.w, h: term.h, dir: term.door.dir, door: { x: term.door.x, y: term.door.y }, label: 'Terminal' }],
+            rws, blk: { x: Math.round(B.x), y: Math.round(B.y), w: Math.round(B.w), h: Math.round(B.h) }, crew: []
+        };
+    }
+
+    // ---- the mega hub (Central City International): two parallel runways, three terminals (T1 linear, T2 with two
+    // piers, T3 curved), remote stands, the Central Air crew apron and Flight Operations building, hotel, hangars, cargo.
+    // Same local frame as airportBlock (y grows from the runways towards the city, mirrored when termTop).
+    function megaAirportBlock(B, rng, termTop, D) {
+        const X0 = B.x + 20, W = B.w - 40, Y0 = B.y + 20, H = B.h - 40, cx = W / 2, flip = termTop ? 1 : 0;
+        const ry = (y, h = 0) => termTop ? Y0 + H - y - h : Y0 + y;
+        const R = (x, y, w, h) => ({ x: Math.round(X0 + x), y: Math.round(ry(y, h)), w: Math.round(w), h: Math.round(h) });
+        const P = (x, y) => ({ x: Math.round(X0 + x), y: Math.round(ry(y)) });
+        const rws = [];
+        const deco = (k, r, extra) => { if (k === 'runway') rws.push({ x: r.x, y: r.y, w: r.w, h: r.h, v: extra && extra.vert ? 1 : 0, nr: (extra && extra.nr) || '' }); return addDeco(k, r.x, r.y, r.w, r.h, extra); };
+        const UP = termTop ? -Math.PI / 2 : Math.PI / 2, surf = D.surf;
+        const pal = { rc: D.roof, wc: D.wall, acc: D.acc, gl: D.glass, dk: 'linear', ap: city.id };
+        const G = { rwLY: 380, rwLH: 220, rwY: 1250, rwH: 260, tyY: 1900, tyH: 140, apY: 2100, termY: 5000, termH: 760 };
+        const rwX = 450, rwW = W - 900, endW = 700, endE = W - 700;
+        // ---- airside: runway 09L/27R (outer), 09R/27L (main, used by the timetable), connectors, parallel taxiway ----
+        deco('runway', R(rwX + 500, G.rwLY, rwW - 1000, G.rwLH), { code: city.code, surf, nr: 'L', flip });
+        const rw = R(rwX, G.rwY, rwW, G.rwH);
+        deco('runway', rw, { code: city.code, surf, nr: 'R', flip });
+        for (const x of [rwX + 800, W * 0.3, W * 0.5, W * 0.7, W - rwX - 800]) deco('taxiway', R(x - 60, G.rwLY + G.rwLH, 120, G.rwY - G.rwLY - G.rwLH), { surf });
+        deco('taxiway', R(endW - 60, G.tyY, endE - endW + 120, G.tyH), { surf });
+        for (const x of [endW, endE, W * 0.25, W * 0.42, W * 0.58, W * 0.75]) deco('taxiway', R(x - 60, G.rwY + G.rwH, 120, G.tyY - G.rwY - G.rwH), { surf });
+        // ---- terminals and stands ----
+        const stands = [], apX0 = 1700, apX1 = W - 1700, gap = 450, tw2 = 3600, tw1 = Math.max(2000, cx - tw2 / 2 - gap - apX0);
+        const termB = (x, w, y, h, k, extra) => addBuilding(k, X0 + x, ry(y, h), w, h, Object.assign({ s: Math.floor(rng() * 9999), code: city.code, nm: D.nm, flip, bh: 64 }, pal, extra));
+        const standRow = (x0, x1, y, sp, t) => { for (let x = x0; x <= x1 + 1; x += sp) { if (x < apX0 + 300 || x > apX1 - 300) continue; stands.push({ lx: x, ly: y - 360, a: UP, ox: x, oy: y - 900, ex: x, t, bridge: { lx: x - 170, ly: y, len: 230 } }); } };
+        const door = () => ({ door: { dir: termTop ? 'N' : 'S' } });
+        const T1x = apX0, T2x = cx - tw2 / 2, T3x = cx + tw2 / 2 + gap;
+        const t1 = termB(T1x, tw1, G.termY, G.termH, 'terminal', Object.assign(door(), { tn: 'TERMINAL 1', tno: 1, dk: 'linear' }));
+        const t2 = termB(T2x, tw2, G.termY, G.termH, 'terminal', Object.assign(door(), { tn: 'TERMINAL 2', tno: 2, dk: 'piers' }));
+        const t3 = termB(T3x, tw1, G.termY, G.termH, 'terminal', Object.assign(door(), { tn: 'TERMINAL 3', tno: 3, dk: 'curve' }));
+        standRow(T1x + 330, T1x + tw1 - 330, G.termY, 660, 1);
+        standRow(T3x + 330, T3x + tw1 - 330, G.termY, 660, 3);
+        for (const px of [cx - 1000, cx + 1000]) {                            // Terminal 2: two piers, four stands on each
+            termB(px - 90, 180, G.termY - 1500, 1500, 'pier', { bh: 30 });
+            for (let j = 0; j < 2; j++) for (const sd of [-1, 1]) { const y = G.termY - 380 - j * 700; stands.push({ lx: px + sd * 430, ly: y, a: sd < 0 ? 0 : Math.PI, ox: px + sd * 760, oy: y, ex: px + sd * 760, t: 2, bridge: { lx: px + sd * 90, ly: y - 120, len: 200, side: sd } }); }
+        }
+        for (const y of [2560, 3220, 3880]) stands.push({ lx: 800, ly: y, a: Math.PI, ox: 1330, oy: y, ex: 1330, bridge: null, remote: 1, t: 0 });   // remote stands, by bus
+        stands.sort((p, q) => p.lx - q.lx || p.ly - q.ly);
+        // the Central Air crew apron (east): aircraft for Central Air pilots, nose towards the taxiway, never used by the timetable
+        const crew = [2650, 3300, 3950].map((y, i) => { const p = P(W - 1000, y); return { x: p.x, y: p.y, a: +flAng(UP + Math.PI).toFixed(4), g: 'C' + (i + 1) }; });
+        deco('apron', R(250, 2150, 1300, 2150), { flip, surf: 'concrete', stands: [] });
+        deco('apron', R(W - 1550, 2150, 1300, 2150), { flip, surf: 'concrete', stands: crew.map(c => [c.x, c.y, c.a, c.g]) });
+        deco('apron', R(apX0, G.apY, apX1 - apX0, G.termY - G.apY), { flip, surf, stands: stands.map((s, i) => { const p = P(s.lx, s.ly); return [p.x, p.y, +s.a.toFixed(3), i + 1]; }) });
+        for (const s of stands) if (s.bridge) { const b = s.bridge, p = P(b.lx, b.ly); addDeco('jetbridge', p.x - 40, p.y - 40, 80, 80, { a: b.side ? (b.side < 0 ? Math.PI : 0) : -UP, len: b.len }); }
+        // ---- landside: kerbs, car parks, tower, hotel, Flight Ops, hangars, cargo, fuel farm ----
+        const ly = G.termY + G.termH;
+        for (const [tx, tw] of [[T1x, tw1], [T2x, tw2], [T3x, tw1]]) {
+            addDeco('curb', X0 + tx - 60, ry(ly + 30, 170), tw + 120, 170);
+            for (const lx of [tx + 150, tx + tw - 790]) { const r = R(lx, ly + 330, 640, 760); fillLotWithCars(addLot(r.x, r.y, r.w, r.h, false), rng, 0.55); }
+        }
+        deco('path', R(cx - 70, ly + 200, 140, H - ly - 200));
+        for (const lx of [cx - 2600, cx - 1700, cx + 1000, cx + 1900]) { const r = R(lx, ly + 1350, 700, 900); fillLotWithCars(addLot(r.x, r.y, r.w, r.h, false), rng, 0.4); }   // long stay
+        addBuilding('ctower', X0 + T2x - gap / 2 - 70, ry(G.termY + 160, 140), 140, 140, { s: 3, ts: D.tower, bh: 290, wc: D.wall, acc: D.acc });
+        addBuilding('hotel', X0 + cx + 160, ry(ly + 1300, 760), 700, 760, { s: Math.floor(rng() * 9999), f: 22, stars: 5, nm: 'Central Skyport Hotel' });
+        addBuilding('hotel', X0 + cx - 860, ry(ly + 1300, 640), 600, 640, { s: Math.floor(rng() * 9999), f: 12, stars: 3, nm: 'Runway Inn Express' });
+        const ops = addBuilding('mid', X0 + W - 1500, ry(ly + 380, 640), 920, 640, { s: Math.floor(rng() * 9999), f: 9, t: 2, door: { dir: termTop ? 'N' : 'S' } });
+        makeWork(ops, 'centralair'); ops.sign = 'Central Air · Flight Ops'; ops.ops = 1;
+        { const r = R(W - 1500, ly + 1150, 920, 520); fillLotWithCars(addLot(r.x, r.y, r.w, r.h, false), rng, 0.6); }   // crew car park
+        addBuilding('hangar', X0 + 200, ry(ly + 260, 700), 1150, 700, { door: { dir: termTop ? 'S' : 'N' }, s: Math.floor(rng() * 9999), lbl: 'CENTRAL AIR MAINTENANCE' });
+        addBuilding('hangar', X0 + 200, ry(ly + 1100, 760), 1150, 760, { door: { dir: termTop ? 'S' : 'N' }, s: Math.floor(rng() * 9999), lbl: 'CARGO' });
+        addBuilding('hangar', X0 + 200, ry(ly + 2000, 760), 1150, 760, { door: { dir: termTop ? 'S' : 'N' }, s: Math.floor(rng() * 9999), lbl: 'CARGO 2' });
+        for (let i = 0; i < 6; i++) addDeco('fueltank', X0 + W - 560 + (i % 2) * 260, ry(ly + 1900 + Math.floor(i / 2) * 260), 0, 0, { r: 105 });
+        for (let i = 0; i < 40; i++) { const p = P(80 + rng() * (W - 160), 30 + rng() * 260); if (!rws.some(r => p.x > r.x - 120 && p.x < r.x + r.w + 120 && p.y > r.y - 120 && p.y < r.y + r.h + 120)) addTree(p.x, p.y, Math.floor(rng() * 8), 9); }
+        for (let i = 0; i < 24; i++) { const p = P(rng() < 0.5 ? 60 + rng() * 120 : W - 180 + rng() * 120, ly + 150 + rng() * Math.max(100, H - ly - 300)); addTree(p.x, p.y, Math.floor(rng() * 8), 9); }
+        const st = stands.map((s, i) => { const p = P(s.lx, s.ly), o = P(s.ox, s.oy); return { x: p.x, y: p.y, a: +s.a.toFixed(4), ox: o.x, oy: o.y, ex: Math.round(X0 + (s.ex ?? s.ox)), g: i + 1, remote: s.remote || 0, t: s.t || 0 }; });
+        const off = P(cx + 260, ly + 110), T = b => ({ id: b.id, n: b.tno, x: b.x, y: b.y, w: b.w, h: b.h, dir: b.door.dir, door: { x: b.door.x, y: b.door.y }, label: 'Terminal ' + b.tno });
+        L.airport = {
+            city: city.id, name: D.nm, code: city.code, x0: rw.x, x1: rw.x + rw.w, ry: P(0, G.rwY + G.rwH / 2).y, ty: P(0, G.tyY + G.tyH / 2).y,
+            endW: Math.round(X0 + endW), endE: Math.round(X0 + endE), stands: st, sb: { x: st[0].x, y: st[0].y }, off, big: 1, mega: 1, design: 'mega',
+            door: { x: t2.door.x, y: t2.door.y }, term: { id: t1.id, x: t1.x, y: t1.y, w: t1.w, h: t1.h, dir: t1.door.dir }, flip,
+            terms: [T(t1), T(t2), T(t3)], rws, crew, ops: { id: ops.id, door: { x: ops.door.x, y: ops.door.y } },
+            blk: { x: Math.round(B.x), y: Math.round(B.y), w: Math.round(B.w), h: Math.round(B.h) }
         };
     }
 
@@ -4538,6 +4583,72 @@ function buildTerminalInterior(ap) {
     intAdd(D, { k: 'jetway', x: doorX - 60, y: Y0 - 22, w: 120, h: 30 });
     return D;
 }
+// ---- the mega hub's terminals: one big interior per terminal. Landside: twelve check-in desks, departures board, café,
+// ATM, baggage reclaim and the landside SkyTrain; four-lane security; airside: a gate desk for every stand of this
+// terminal with seating, a moving walkway, six shops, a food court, the Central Air lounge and the airside SkyTrain.
+function worldTermKey(city, n) { return n > 1 ? `term:${city}:${n}` : 'term:' + city; }
+function apTermOf(ap, S) { return ap && ap.mega && S ? (S.t || 0) : 0; }   // 0 = any terminal (bus gates, single-terminal airports)
+function buildMegaTerminalInterior(ap, n) {
+    const EXT = 4000, X0 = 200, Y0 = 420, W = 3600, H = 3300, fl = { x: X0, y: Y0, w: W, h: H }, doorX = X0 + W / 2, secY = Y0 + 1560, T = 22;
+    const AD = AP_DESIGNS[ap.city] || AP_DESIGNS.lakemont, term = ap.terms.find(t => t.n === n) || ap.terms[0];
+    const gates = ap.stands.filter(s => (s.t || 0) === n), lanes = [doorX - 900, doorX - 300, doorX + 300, doorX + 900];
+    const D = {
+        kind: 'terminal', mega: 1, tno: n, ext: EXT, floor: fl, lanes, secY,
+        theme: { accent: AD.acc, name: `${ap.name} · Terminal ${n} (${ap.code})`, code: ap.code, city: ap.city, floor: ['tech', 'marble', 'tech'][(n - 1) % 3], wall: AD.wall },
+        walls: intWallsAround(fl, doorX, 200), furn: [], stations: [], rooms: [{ x: X0, y: secY, w: W, h: H - (secY - Y0), c: 'hall' }, { x: X0, y: Y0, w: W, h: secY - Y0, c: 'lounge' }],
+        door: { x: doorX - 100, y: Y0 + H, w: 200, h: INT_WALL, px: doorX, py: Y0 + H - 36, r: 130 },
+        spawn: { x: doorX, y: Y0 + H - 130 }, ap: ap.city, bid: term.id
+    };
+    // security: a wall across the hall with four scanner lanes
+    const xs = [X0, ...lanes.flatMap(l => [l - 70, l + 70]), X0 + W];
+    for (let i = 0; i < xs.length; i += 2) D.walls.push({ x: xs[i], y: secY, w: xs[i + 1] - xs[i], h: T });
+    for (const lx of lanes) { intAdd(D, { k: 'arch', x: lx - 60, y: secY - 14, w: 120, h: 50 }); intAdd(D, { k: 'scanner', x: lx + 74, y: secY + 30, w: 46, h: 170, solid: 1 }); }
+    // ---- landside ----
+    const als = Object.keys(AIRLINES), alFor = i => n === 1 ? 'CA' : als[(i + n * 3) % als.length];
+    for (let r = 0; r < 2; r++) for (let c = 0; c < 6; c++) {
+        const left = c < 3, k = left ? c : c - 3, x = left ? X0 + 150 + k * 480 : X0 + W - 370 - k * 480, y = secY + 400 + r * 460, i = r * 6 + c, al = alFor(i);
+        intUse(D, intAdd(D, { k: 'checkin', x, y, w: 220, h: 54, solid: 1, col: AIRLINES[al].c1, n: i + 1, lbl: al }), 'tickets', x + 110, y + 120, 95);
+        for (let q = 0; q < 4; q++) intAdd(D, { k: 'post', x: x + 20 + q * 60, y: y + 190, r: 6, solid: 1 });
+    }
+    intUse(D, intAdd(D, { k: 'board', x: doorX - 150, y: secY + 50, w: 300, h: 46, solid: 1 }), 'board', doorX, secY + 160, 110);
+    intUse(D, intAdd(D, { k: 'atmi', x: X0 + W - 500, y: secY + 40, w: 50, h: 50, solid: 1 }), 'atm', X0 + W - 475, secY + 145, 55);
+    intUse(D, intAdd(D, { k: 'kiosk', x: X0 + W - 260, y: secY + 50, w: 220, h: 110, solid: 1, shop: 'cafe', label: 'Café', col: 3 }), 'shop:cafe', X0 + W - 150, secY + 220, 80);
+    for (const cx of [X0 + 640, X0 + W - 640]) { intAdd(D, { k: 'carousel', x: cx - 420, y: Y0 + H - 330, w: 840, h: 150, solid: 1 }); intAdd(D, { k: 'sign', x: cx - 200, y: Y0 + H - 390, w: 400, h: 34, txt: 'BAGGAGE RECLAIM' }); }
+    intUse(D, intAdd(D, { k: 'skytrain', x: X0 + 14, y: secY + 50, w: 120, h: 300, solid: 1, side: 'land' }), 'train', X0 + 220, secY + 200, 100); D.stations[D.stations.length - 1].side = 'land';
+    for (const [x, y] of [[X0 + 50, Y0 + H - 60], [X0 + W - 50, Y0 + H - 60], [doorX - 520, secY + 90], [doorX + 520, secY + 90]]) intAdd(D, { k: 'plant', x, y, r: 22, solid: 1 });
+    // ---- airside ----
+    intAdd(D, { k: 'window', x: X0 + 40, y: Y0 + 6, w: W - 80, h: 26, solid: 1 });
+    const gl = gates.length ? gates : [{ g: '–', none: 1 }], bus = n === 1 ? ap.stands.filter(s => !(s.t || 0)) : [];
+    const desks = gl.map(g => ({ lbl: `GATE ${g.g}` })).concat(bus.length ? [{ lbl: `BUS GATES ${bus[0].g}–${bus[bus.length - 1].g}` }] : []), sp = W / desks.length;
+    desks.forEach((d, i) => {
+        const x = X0 + (i + 0.5) * sp - 110;
+        intUse(D, intAdd(D, { k: 'gatedesk', x, y: Y0 + 70, w: 220, h: 50, solid: 1, label: d.lbl }), 'gate', x + 110, Y0 + 180, 100);
+        intAdd(D, { k: 'jetway', x: x + 50, y: Y0 - 22, w: 120, h: 30 });
+        for (let r = 0; r < 2; r++) intAdd(D, { k: 'seats', x: x - 5, y: Y0 + 270 + r * 100, w: Math.min(230, sp - 40), h: 40, solid: 1 });
+    });
+    intAdd(D, { k: 'travelator', x: X0 + 160, y: Y0 + 500, w: W - 320, h: 56 });
+    const pool = ['books', 'perfume', 'electronics', 'fashion', 'jewelry', 'toys', 'sushi', 'bubbletea', 'icecream', 'candy', 'music', 'sports'], h0 = airHash(ap.city + n), picks = ['souvenir', 'cafe'];
+    for (let i = 0; picks.length < 6 && i < 40; i++) { const k = pool[(h0 + i * 7) % pool.length]; if (!picks.includes(k) && SHOP_KINDS[k]) picks.push(k); }
+    const kx = [X0 + 100, X0 + 520, X0 + 940, X0 + W - 1140, X0 + W - 720, X0 + W - 300];
+    picks.forEach((k, i) => intUse(D, intAdd(D, { k: 'kiosk', x: kx[i], y: Y0 + 640, w: 200, h: 110, solid: 1, shop: k, label: k === 'souvenir' ? 'Duty Free' : SHOP_KINDS[k].name, col: 3 + i, ic: SHOP_KINDS[k].ic }), 'shop:' + k, kx[i] + 100, Y0 + 810, 80));
+    for (const tx of [-330, -110, 110, 330]) for (const ty of [Y0 + 1000, Y0 + 1180]) {        // food court
+        const x = doorX + tx, y = ty; intAdd(D, { k: 'foodtable', x, y, r: 26, solid: 1, col: (tx + ty) & 7 });
+        for (let q = 0; q < 4; q++) intAdd(D, { k: 'stool', x: x + Math.cos(q * Math.PI / 2 + 0.6) * 40, y: y + Math.sin(q * Math.PI / 2 + 0.6) * 40, r: 9 });
+    }
+    intAdd(D, { k: 'sign', x: doorX - 180, y: Y0 + 900, w: 360, h: 34, txt: 'FOOD COURT' });
+    // the Central Air lounge (south-west of airside)
+    const Lx = X0 + 40, Ly = secY - 560;
+    intAdd(D, { k: 'rugbig', x: Lx, y: Ly + 60, w: 820, h: 440 });
+    intAdd(D, { k: 'sign', x: Lx + 210, y: Ly + 10, w: 400, h: 34, txt: 'CENTRAL AIR LOUNGE' });
+    intAdd(D, { k: 'sofa', x: Lx + 40, y: Ly + 120, w: 200, h: 70, solid: 1 }, { k: 'sofa', x: Lx + 300, y: Ly + 120, w: 200, h: 70, solid: 1 }, { k: 'sofa', x: Lx + 40, y: Ly + 330, w: 200, h: 70, solid: 1 });
+    intUse(D, intAdd(D, { k: 'coffee', x: Lx + 600, y: Ly + 90, w: 30, h: 28 }), 'coffee', Lx + 615, Ly + 190, 70);
+    intUse(D, intAdd(D, { k: 'tv', x: Lx + 560, y: Ly + 300, w: 140, h: 34, solid: 1 }), 'tv', Lx + 630, Ly + 400, 80);
+    intAdd(D, { k: 'plant', x: Lx + 790, y: Ly + 470, r: 20, solid: 1 });
+    intUse(D, intAdd(D, { k: 'atmi', x: X0 + W - 760, y: secY - 90, w: 50, h: 50, solid: 1 }), 'atm', X0 + W - 735, secY - 150, 55);
+    intUse(D, intAdd(D, { k: 'skytrain', x: X0 + W - 134, y: secY - 700, w: 120, h: 560, solid: 1, side: 'air' }), 'train', X0 + W - 320, secY - 420, 110); D.stations[D.stations.length - 1].side = 'air';
+    for (const [x, y] of [[X0 + 50, Y0 + 60], [X0 + W - 50, Y0 + 60], [X0 + 1300, secY - 60], [X0 + W - 1300, secY - 60]]) intAdd(D, { k: 'plant', x, y, r: 22, solid: 1 });
+    return D;
+}
 function worldFurnPush(room) { for (const c of room.clients) sendWorld(c, 'world_furn', { key: room.scene, s: room.fstate || {} }); }
 function worldUsePrompt(client, def, s) {
     const w = client.world, p = client.player, room = client.room, st = room.fstate || {}, f = def.furn[s.fi], d = Math.hypot(s.x - p.x, s.y - p.y);
@@ -4568,8 +4679,8 @@ function worldUsePrompt(client, def, s) {
             const A = WL.airportByCity.get(def.ap), now = Date.now(), deps = [];
             for (const l of airNet().from.get(A.city) || []) for (let k = Math.ceil((now - 60000 - l.off) / l.per), n = 0; n < 2; k++, n++) deps.push({ l, k, dep: k * l.per + l.off });
             deps.sort((p, q) => p.dep - q.dep);
-            const lines = deps.slice(0, 8).map(({ l, k, dep }) => { const B = WL.airportByCity.get(l.to), g = A.stands[airStands(l, k).sd].g, left = dep - now;
-                return `${worldLocalClockAt(A, dep)}  ${l.fn.padEnd(6)} ${B.code} ${W_CITIES.find(c => c.id === l.to).name.padEnd(17)} Gate ${String(g).padEnd(3)} ${left <= 0 ? 'Departed' : left < 40000 ? 'Final call' : left < AIR_BOARD ? 'Boarding' : 'in ' + worldMinSec(left)}`; });
+            const lines = deps.slice(0, A.mega ? 12 : 8).map(({ l, k, dep }) => { const B = WL.airportByCity.get(l.to), S = A.stands[airStands(l, k).sd], g = S.g, tg = apTermOf(A, S), left = dep - now;
+                return `${worldLocalClockAt(A, dep)}  ${l.fn.padEnd(6)} ${B.code} ${W_CITIES.find(c => c.id === l.to).name.padEnd(17)} Gate ${String(g).padEnd(3)}${A.mega ? (tg ? ' T' + tg : ' Bus') + ' ' : ''}${left <= 0 ? 'Departed' : left < 40000 ? 'Final call' : left < AIR_BOARD ? 'Boarding' : 'in ' + worldMinSec(left)}`; });
             return [d, { ...base, title: '✈ Departures', lines: [...lines, 'Buy a boarding pass at any check-in desk'], actions: [] }];
         }
         case 'tickets': {
@@ -4578,9 +4689,17 @@ function worldUsePrompt(client, def, s) {
                 lines: [l ? `Your ticket: ${AIRLINES[l.al].name} ${l.fn} ${A.code} → ${WL.airportByCity.get(l.to).code}${it.legs.length > 1 ? ` (then ${it.legs.slice(it.i + 1).map(q => q.fn).join(', ')})` : ''}. Go through security to the gate.` : 'Choose a flight. Direct, or change planes at a hub on one ticket. Pay with cash or from the bank.'],
                 actions: airItinActions(client, A) }];
         }
+        case 'train': {
+            const A = WL.airportByCity.get(def.ap); if (!A || !A.mega) return null;
+            const gt = m => { const g = A.stands.filter(q => (q.t || 0) === m).map(q => q.g); return g.length ? `gates ${Math.min(...g)}–${Math.max(...g)}` : ''; };
+            return [d, { ...base, title: `🚝 SkyTrain · ${s.side === 'air' ? 'airside' : 'landside'}`, lines: [`You are in Terminal ${def.tno} (${gt(def.tno)})`, s.side === 'air' ? 'Airside: stay past security between terminals' : 'Landside: between the check-in halls'],
+                actions: A.terms.filter(t => t.n !== def.tno).map(t => ({ a: 't' + t.n, label: `🚝 Terminal ${t.n} · ${gt(t.n)}`, on: true })) }];
+        }
         case 'gate': {
             const A = WL.airportByCity.get(def.ap), l = worldTicketLeg(w, A), B = l && WL.airportByCity.get(l.to), cB = B && W_CITIES.find(c => c.id === B.city);
-            if (!l) return [d, { ...base, title: `Gates · ${A.code}`, lines: ['No boarding pass – buy one at check-in or on your phone'], actions: [] }];
+            if (!l) return [d, { ...base, title: `Gates · ${A.code}${def.tno ? ' · Terminal ' + def.tno : ''}`, lines: ['No boarding pass – buy one at check-in or on your phone'], actions: [] }];
+            const tg = apTermOf(A, A.stands[(l.sd || 0) % A.stands.length]);
+            if (def.tno && tg && tg !== def.tno) return [d, { ...base, title: `Gate ${l.gate} is in Terminal ${tg}`, lines: [`${AIRLINES[l.al].name} ${l.fn} · ${A.code} → ${B.code} ${cB.name}`, `Take the airside SkyTrain to Terminal ${tg} – departs ${worldLocalClockAt(A, l.dep)} local`], actions: [] }];
             const now = Date.now(), open = now >= l.dep - AIR_BOARD, left = l.dep - now;
             return [d, { ...base, title: `Gate ${l.gate} · ${A.code}`, dep: l.dep, lines: [`${AIRLINES[l.al].name} ${l.fn} · ${A.code} → ${B.code} ${cB.name}`, `${AIRCRAFT[l.ac].name} · ${w.itin.cls === 'J' ? 'Business' : 'Economy'} · departs ${worldLocalClockAt(A, l.dep)} local`,
                 open ? (left < 40000 ? `🔴 Final call – doors close in ${worldMinSec(left)}` : `🟢 Boarding now – doors close in ${worldMinSec(left)}`) : `Boarding opens in ${worldMinSec(left - AIR_BOARD)} · have a coffee or browse the duty free`],
@@ -4630,7 +4749,7 @@ function casinoStation(client, g, tid) {
 }
 function casinoBalance(client) { const w = client.world; w.bankCoins = worldBankCoins(client); return { cash: Math.floor(w.sessionCoins || 0), bank: w.bankCoins }; }
 function casinoPayout(client, amt) {
-    if (amt <= 0) return; db.prepare('UPDATE users SET coins=coins+? WHERE id=?').run(Math.round(amt), client.dbId);
+    if (amt <= 0) return; Users.addCoins(client.dbId, Math.round(amt));
     client.world.bankCoins = worldBankCoins(client); worldPushProfile(client); worldPushState(client);
 }
 function casinoFx(client, s, g, extra) {
@@ -4725,7 +4844,12 @@ function worldUse(client, s, a, extra) {
         case 'roulette': case 'blackjack': case 'slots': casinoOpen(client, s); break;
         case 'vr': if (cd('vr', 20000) && worldPayToll(client, 15)) { p.addXP(400); p.worldSpeedUntil = Math.max(now, p.worldSpeedUntil || 0) + 60000; worldNotice(client, '🥽 You shot down five drones in VR: +400 score, +25% speed for 60 s.', { level: 'good' }); } break;
         case 'petpen': if (cd('petpen', 45000)) { p.hp = Math.min(max, p.hp + max * 0.2); worldNotice(client, '🐶 The puppies love you: +20% health.', { level: 'good' }); } break;
-        case 'gate': if (a === 'board') worldBoardWithTicket(client, WL.airportByCity.get(def.ap)); break;
+        case 'gate': if (a === 'board') { const A = WL.airportByCity.get(def.ap), l = worldTicketLeg(w, A), tg = l ? apTermOf(A, A.stands[(l.sd || 0) % A.stands.length]) : 0; if (def.tno && tg && tg !== def.tno) { worldNotice(client, `Your gate is in Terminal ${tg} – take the SkyTrain.`); break; } worldBoardWithTicket(client, A); } break;
+        case 'train': {
+            const m = Number(String(a).slice(1)), A = WL.airportByCity.get(def.ap); if (!A || !A.mega || !A.terms.some(t => t.n === m) || m === def.tno) break;
+            const key = worldTermKey(A.city, m), nd = worldInteriorDef(key), st = nd.stations.find(q => q.use === 'train' && q.side === s.side) || nd.spawn;
+            worldGoto(client, key, st.x, st.y); worldNotice(client, `🚝 SkyTrain to Terminal ${m} – doors closing… ${A.name}, Terminal ${m}.`); break;
+        }
         default: if (s.use.startsWith('shop:') && a.startsWith('buy:')) worldBuyItem(client, a.slice(4), W_CITIES.find(c => c.id === def.ap) || null);
     }
 }
@@ -4778,7 +4902,7 @@ function interiorColliders(def) {
 // ===================== PERSISTENT WORLD MODE =====================
 // The exterior (WORLD room) is the city + suburbs + farmland built by buildWorldLayout().
 // Houses and workplaces are separate interior Rooms players are teleported into.
-const WORLD_LAYOUT_VERSION = 6;              // v4: city styles; v5: 1.5x larger continent, interior towns, highway grid, countryside; v6: world and cities 1.5x again, new airports
+const WORLD_LAYOUT_VERSION = 7;              // v4: city styles; v5: 1.5x larger continent, interior towns, highway grid, countryside; v6: world and cities 1.5x again, new airports; v7: Central City mega hub (3 terminals)
 const WORLD_CARS = [
     { id: 'compact', name: 'Compact', price: 2500,  speed: 6.2,  accel: 0.15, turn: 0.052, color: '#e4e7eb' },
     { id: 'sedan',   name: 'Sedan',   price: 6500,  speed: 8.0,  accel: 0.19, turn: 0.046, color: '#2684d9' },
@@ -4791,14 +4915,7 @@ const WORLD_REHIRE_MS = 3 * 60 * 1000;     // wait after being fired
 const WORLD_SAVE_MS = 5000;
 const WORLD_CAR_COLORS = ['#e2e7e9', '#286da5', '#b84e46', '#d0ad58', '#5c6975', '#f1f0e9', '#3d7a52', '#7a4f8a'];
 
-// persistent columns ---------------------------------------------------------------
-for (const col of ['score REAL NOT NULL DEFAULT 0', 'level INTEGER NOT NULL DEFAULT 1', "tank_type TEXT NOT NULL DEFAULT 'Basic'",
-    'stat_points INTEGER NOT NULL DEFAULT 0', 'car_x REAL', 'car_y REAL', 'car_a REAL', 'job TEXT',
-    'job_last INTEGER NOT NULL DEFAULT 0', 'play_ms INTEGER NOT NULL DEFAULT 0', 'job_cd INTEGER NOT NULL DEFAULT 0',
-    'car_fuel REAL', 'souv TEXT', 'stay_bid INTEGER', 'stay_until INTEGER', 'job_tasks INTEGER NOT NULL DEFAULT 0']) {
-    try { db.prepare('ALTER TABLE world_players ADD COLUMN ' + col).run(); } catch (err) { if (!/duplicate column/i.test(String(err.message))) throw err; }
-}
-try { db.prepare('ALTER TABLE world_meta ADD COLUMN layout_version INTEGER NOT NULL DEFAULT 1').run(); } catch (err) { if (!/duplicate column/i.test(String(err.message))) throw err; }
+// persistent columns: created / migrated by the database worker (see schema() in runDbWorker)
 
 // ---- state ---------------------------------------------------------------------------
 let WL = null, WSEED = 0;
@@ -4823,15 +4940,34 @@ function worldZone(x, y) {
 function rectDist(x, y, r) { const dx = Math.max(r.x - x, 0, x - (r.x + r.w)), dy = Math.max(r.y - y, 0, y - (r.y + r.h)); return Math.hypot(dx, dy); }
 
 // ---- world bootstrap -------------------------------------------------------------------
-function ensureWorld() {
-    if (WL) return WSEED;
-    let row = db.prepare('SELECT seed, layout_version FROM world_meta WHERE id=1').get();
+// worldInit (once, at startup): read the seed, build the layout (pure CPU work), migrate old saves, then load company
+// levels, house ownership and parked cars – every database step awaited from the worker.
+let WORLD_READY = null;
+function ensureWorld() { return WORLD_READY || (WORLD_READY = worldInit()); }
+async function worldInit() {
+    let row = await DB.get('SELECT seed, layout_version FROM world_meta WHERE id=1');
     if (!row) {
         const seed = crypto.randomInt(1, 0x7fffffff);
-        db.prepare('INSERT INTO world_meta(id,seed,created_at,layout_version) VALUES(1,?,?,?)').run(seed, Date.now(), WORLD_LAYOUT_VERSION);
+        await DB.run('INSERT INTO world_meta(id,seed,created_at,layout_version) VALUES(1,?,?,?)', seed, Date.now(), WORLD_LAYOUT_VERSION);
         row = { seed, layout_version: WORLD_LAYOUT_VERSION };
     }
-    WSEED = row.seed;
+    worldBuild(row.seed);
+    if (row.layout_version < WORLD_LAYOUT_VERSION) await worldMigrateLayout(row.layout_version);
+    await worldLoadCompanies();
+    houseOwner.clear();
+    for (const h of await DB.all('SELECT h.id, h.owner_id, h.purchased_at, u.username FROM world_houses h LEFT JOIN users u ON u.id = h.owner_id WHERE h.owner_id IS NOT NULL'))
+        houseOwner.set(h.id, { owner_id: h.owner_id, name: h.username || 'Resident', purchased_at: h.purchased_at || 0 });
+    parkedCars.clear();
+    for (const p of await DB.all('SELECT user_id, owned_car, car_x, car_y, car_a FROM world_players WHERE owned_car IS NOT NULL')) {
+        if (!WORLD_CARS.find(c => c.id === p.owned_car)) continue;
+        let pos = (p.car_x != null && p.car_y != null) ? { x: p.car_x, y: p.car_y, a: p.car_a || 0 } : worldFindFreeBay(p.user_id);
+        parkedCars.set(p.user_id, { uid: p.user_id, model: p.owned_car, x: pos.x, y: pos.y, a: pos.a, driven: false, pid: worldPidSeq++ });
+    }
+    return WSEED;
+}
+// Builds the layout and the derived road / airport indexes for a seed. No database access.
+function worldBuild(seed) {
+    WSEED = seed;
     const t0 = Date.now();
     WL = buildWorldLayout(WSEED);
     console.log(`[World] Built ${W_CITIES.length} cities, ${WL.airports.length} airports, ${WL.buildings.length} buildings in ${Date.now() - t0} ms.`);
@@ -4854,18 +4990,6 @@ function ensureWorld() {
     }
     for (const a of roadNodes.values()) a.sort((p, q) => p - q);
     for (const c of WL.pcars) pcarKeys.add(Math.round(c.x) + ',' + Math.round(c.y));
-    if (row.layout_version < WORLD_LAYOUT_VERSION) worldMigrateLayout(row.layout_version);
-    worldLoadCompanies();
-    houseOwner.clear();
-    for (const h of db.prepare('SELECT h.id, h.owner_id, h.purchased_at, u.username FROM world_houses h LEFT JOIN users u ON u.id = h.owner_id WHERE h.owner_id IS NOT NULL').all())
-        houseOwner.set(h.id, { owner_id: h.owner_id, name: h.username || 'Resident', purchased_at: h.purchased_at || 0 });
-    parkedCars.clear();
-    for (const p of db.prepare('SELECT user_id, owned_car, car_x, car_y, car_a FROM world_players WHERE owned_car IS NOT NULL').all()) {
-        if (!WORLD_CARS.find(c => c.id === p.owned_car)) continue;
-        let pos = (p.car_x != null && p.car_y != null) ? { x: p.car_x, y: p.car_y, a: p.car_a || 0 } : worldFindFreeBay(p.user_id);
-        parkedCars.set(p.user_id, { uid: p.user_id, model: p.owned_car, x: pos.x, y: pos.y, a: pos.a, driven: false, pid: worldPidSeq++ });
-    }
-    return WSEED;
 }
 // The road (city street, not highway) on grid line `k` of `axis` that passes position `s` along it.
 function worldRoadFor(axis, k, s) {
@@ -4876,10 +5000,11 @@ function worldRoadFor(axis, k, s) {
 // Layout v3 (bigger organic cities, 8 cities on a wrapping globe): every coordinate changed. Saved players are
 // moved to the same relative spot in their city, owned houses to the nearest free house there, and parked
 // cars back to the dealership car park (they could otherwise end up inside a new building).
-function worldMigrateLayout(fromVersion) {
+async function worldMigrateLayout(fromVersion) {
     const OLD_C = 25200, OLD = { central: [25200, 25200], port: [475200, 25200], highmoor: [25200, 475200], solana: [475200, 475200] };
     const V5 = { gap: 675000, cx: 1012500, cy: 75600 };
     const mapOld = (x, y) => {
+        if (fromVersion >= 6) return { x, y };                         // v6 → v7: same world; only Central City's airport district was rebuilt
         if (fromVersion >= 5) {                                        // v5 (675 000-unit spacing): same spot relative to the nearest city, 1.5x further out
             let best = null, bd = Infinity;
             for (const c of W_CITIES) { const ox = V5.cx + Math.round((c.col - 1) * V5.gap / W_S) * W_S, oy = V5.cy + Math.round(c.row * V5.gap / W_S) * W_S, d = Math.hypot(x - ox, y - oy); if (d < bd) { bd = d; best = [c, ox, oy]; } }
@@ -4895,39 +5020,45 @@ function worldMigrateLayout(fromVersion) {
         const c = W_CITIES.find(q => q.id === best), o = OLD[best], k = c.size / 18000;
         return { x: c.cx + (x - o[0]) * k, y: c.cy + (y - o[1]) * k };
     };
-    const players = db.prepare('SELECT user_id, x, y FROM world_players').all();
-    const oldHouses = db.prepare('SELECT * FROM world_houses WHERE owner_id IS NOT NULL ORDER BY purchased_at').all();
-    const taken = new Set();
-    const ins = db.prepare('INSERT OR REPLACE INTO world_houses(id,owner_id,price,x,y,purchased_at,last_seen) VALUES(?,?,?,?,?,?,?)');
-    const upd = db.prepare('UPDATE world_players SET x=?, y=? WHERE user_id=?');
-    db.transaction(() => {
-        for (const p of players) {
-            if (p.x == null || p.y == null) continue;
-            const n = fromVersion >= 5 ? mapOld(V5.cx + p.x, V5.cy + p.y) : fromVersion >= 3 ? mapOld(450000 / 2 + 450000 + p.x, 50400 + p.y) : mapOld(OLD_C + p.x, OLD_C + p.y);   // v3/v4 stored positions relative to the old Central City
-            upd.run(Math.round(n.x - W_CX), Math.round(n.y - W_CY), p.user_id);
-        }
-        db.prepare('UPDATE world_players SET car_x=NULL, car_y=NULL, car_a=NULL').run();
-        try { db.prepare('UPDATE world_players SET stay_bid=NULL, stay_until=NULL').run(); } catch (e) { }   // hotel stays point at buildings that no longer exist
-        db.prepare('DELETE FROM world_houses').run();
-        for (const h of oldHouses) {
-            const t = fromVersion < 2 ? mapOld(OLD_C + h.x, OLD_C + h.y) : mapOld(h.x, h.y);   // v2+ store absolute positions
-            let best = null, bd = Infinity;
-            for (const b of WL.houses) { if (taken.has(b.hid)) continue; const d = (b.x + b.w / 2 - t.x) ** 2 + (b.y + b.h / 2 - t.y) ** 2; if (d < bd) { bd = d; best = b; } }
-            if (!best) continue;
-            taken.add(best.hid);
-            ins.run(best.hid, h.owner_id, h.price || best.price, best.x + best.w / 2, best.y + best.h / 2, h.purchased_at, h.last_seen);
-        }
-        db.prepare('UPDATE world_meta SET layout_version=? WHERE id=1').run(WORLD_LAYOUT_VERSION);
-    })();
-    console.log(`[World] Migrated to layout v${WORLD_LAYOUT_VERSION}: ${players.length} player(s), ${taken.size} owned house(s); parked cars returned to the dealership.`);
+    const players = await DB.all('SELECT user_id, x, y FROM world_players');
+    const oldHouses = await DB.all('SELECT * FROM world_houses WHERE owner_id IS NOT NULL ORDER BY purchased_at');
+    const taken = new Set(), list = [];                                // the whole migration is one transaction in the worker
+    for (const p of players) {
+        if (p.x == null || p.y == null) continue;
+        const n = fromVersion >= 6 ? mapOld(W_CX + p.x, W_CY + p.y) : fromVersion >= 5 ? mapOld(V5.cx + p.x, V5.cy + p.y) : fromVersion >= 3 ? mapOld(450000 / 2 + 450000 + p.x, 50400 + p.y) : mapOld(OLD_C + p.x, OLD_C + p.y);   // v3/v4 stored positions relative to the old Central City
+        list.push(['UPDATE world_players SET x=?, y=? WHERE user_id=?', [Math.round(n.x - W_CX), Math.round(n.y - W_CY), p.user_id]]);
+    }
+    if (fromVersion >= 6) {                                           // only cars parked in or near the rebuilt airport go back to the dealership
+        const b = WL.airportByCity.get('central').blk, m = 3000;
+        list.push(['UPDATE world_players SET car_x=NULL, car_y=NULL, car_a=NULL WHERE car_x BETWEEN ? AND ? AND car_y BETWEEN ? AND ?', [b.x - m, b.x + b.w + m, b.y - m, b.y + b.h + m]]);
+    } else list.push(['UPDATE world_players SET car_x=NULL, car_y=NULL, car_a=NULL']);
+    list.push(['UPDATE world_players SET stay_bid=NULL, stay_until=NULL']);   // hotel stays point at buildings that no longer exist
+    list.push(['DELETE FROM world_houses']);
+    for (const h of oldHouses) {
+        const t = fromVersion < 2 ? mapOld(OLD_C + h.x, OLD_C + h.y) : mapOld(h.x, h.y);   // v2+ store absolute positions
+        let best = null, bd = Infinity;
+        for (const b of WL.houses) { if (taken.has(b.hid)) continue; const d = (b.x + b.w / 2 - t.x) ** 2 + (b.y + b.h / 2 - t.y) ** 2; if (d < bd) { bd = d; best = b; } }
+        if (!best) continue;
+        taken.add(best.hid);
+        list.push(['INSERT OR REPLACE INTO world_houses(id,owner_id,price,x,y,purchased_at,last_seen) VALUES(?,?,?,?,?,?,?)', [best.hid, h.owner_id, h.price || best.price, best.x + best.w / 2, best.y + best.h / 2, h.purchased_at, h.last_seen]]);
+    }
+    list.push(['UPDATE world_meta SET layout_version=? WHERE id=1', [WORLD_LAYOUT_VERSION]]);
+    await DB.tx(list);
+    console.log(`[World] Migrated to layout v${WORLD_LAYOUT_VERSION}: ${players.length} player(s), ${taken.size} owned house(s); ${fromVersion >= 6 ? 'cars parked at the old Central City airport' : 'parked cars'} returned to the dealership.`);
 }
+// New seed: the layout is rebuilt here and now (no gap without a world); the database catches up in one transaction.
 function worldRegenerate() {
-    db.prepare('DELETE FROM world_meta WHERE id=1').run();
-    db.prepare('DELETE FROM world_houses').run();
-    db.prepare('UPDATE world_players SET car_x=NULL, car_y=NULL, car_a=NULL').run();
+    const seed = crypto.randomInt(1, 0x7fffffff);
+    DB.wtx([['DELETE FROM world_meta WHERE id=1'], ['DELETE FROM world_houses'], ['UPDATE world_players SET car_x=NULL, car_y=NULL, car_a=NULL'],
+        ['INSERT INTO world_meta(id,seed,created_at,layout_version) VALUES(1,?,?,?)', [seed, Date.now(), WORLD_LAYOUT_VERSION]]]);
     for (const c of [...worldClients]) sendWorld(c, 'world_reload');
     worldRoom.entities = worldRoom.entities.filter(e => e.isPlayer);
-    traffic.length = 0; peds.length = 0; WL = null; ensureWorld();
+    traffic.length = 0; peds.length = 0; WL = null;
+    worldBuild(seed); worldAssignBranches();
+    houseOwner.clear();
+    const cars = [...parkedCars.values()]; parkedCars.clear();          // every car goes back to a dealership bay in the new world
+    for (const pc of cars) { const pos = worldFindFreeBay(pc.uid); parkedCars.set(pc.uid, { ...pc, x: pos.x, y: pos.y, a: pos.a, driven: false }); }
+    WORLD_READY = Promise.resolve(WSEED);
 }
 
 // ---- parking ------------------------------------------------------------------------------
@@ -5055,49 +5186,13 @@ function worldSnapshot(client) {
     w.prog = { score: p.score, level: p.level, statPoints: p.statPoints, stats: [...p.stats], tankType: p.tankType };
     const { maxHealth, ...pu } = p.powerups || {}; w.buff = { su: p.worldSpeedUntil || 0, pu, hpf: Math.max(0.05, Math.min(1, p.hp / Math.max(1, p.getEffectiveMaxHp()))) };
 }
-// Persistent-world autosaves run on a dedicated worker so synchronous SQLite
-// work cannot pause the 20 Hz world loop. The worker owns its own SQLite handle.
-const worldSaveWorker = new Worker(`
-    const { parentPort, workerData } = require('worker_threads');
-    const Database = require('better-sqlite3');
-    const db = new Database(workerData.dbPath);
-    db.pragma('busy_timeout = 5000');
-
-    const savePlayer = db.prepare(\`INSERT INTO world_players(user_id,x,y,upgrades,updated_at,last_seen,owned_car,session_coins,score,level,tank_type,stat_points,car_x,car_y,car_a,job,job_last,play_ms,job_cd)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(user_id) DO UPDATE SET x=excluded.x,y=excluded.y,upgrades=excluded.upgrades,updated_at=excluded.updated_at,last_seen=excluded.last_seen,owned_car=excluded.owned_car,
-        session_coins=excluded.session_coins,score=excluded.score,level=excluded.level,tank_type=excluded.tank_type,stat_points=excluded.stat_points,car_x=excluded.car_x,car_y=excluded.car_y,car_a=excluded.car_a,
-        job=excluded.job,job_last=excluded.job_last,play_ms=excluded.play_ms,job_cd=excluded.job_cd\`);
-    const saveExtras = db.prepare('UPDATE world_players SET car_fuel=?, souv=?, stay_bid=?, stay_until=?, job_tasks=? WHERE user_id=?');
-    const saveHouses = db.prepare('UPDATE world_houses SET last_seen=? WHERE owner_id=?');
-    const saveTransaction = db.transaction(data => {
-        savePlayer.run(data.userId, data.x, data.y, data.upgrades, data.now, data.now, data.car, data.sessionCoins,
-            data.score, data.level, data.tankType, data.statPoints, data.carX, data.carY, data.carA, data.job,
-            data.jobLast, data.playMs, data.jobCd);
-        saveExtras.run(data.fuel, data.souv, data.stayBid, data.stayUntil, data.jobTasks, data.userId);
-        saveHouses.run(data.now, data.userId);
-    });
-
-    parentPort.on('message', data => {
-        try {
-            saveTransaction(data);
-        } catch (err) {
-            console.error('[WorldSaveWorker] Save failed for', data.userId, err);
-        }
-    });
-`, { eval: true, workerData: { dbPath } });
-
-worldSaveWorker.on('error', err => console.error('[WorldSaveWorker] Worker error:', err));
-worldSaveWorker.on('exit', code => {
-    if (code !== 0) console.error('[WorldSaveWorker] Worker stopped with exit code', code);
-});
-
+// Persistent-world autosaves are a 'worldSave' transaction in the database worker (message order keeps save order).
 function worldSave(client) {
     const w = client.world; if (!client.dbId || !w) return;
     worldSnapshot(client);
     const now = Date.now(), p = client.player;
     let ex = w.ext; if (p && w.scene === 'ext' && !p.vehicle) ex = { x: p.x, y: p.y };
-    if (p && p.flight) { const B = WL.airportByCity.get(p.flight.ph === 'board' ? p.flight.from : p.flight.to); if (B) ex = { x: B.off.x, y: B.off.y }; }   // leaving mid-flight: you arrive (still at the gate: you stay)
+    if (p && p.flight) { const B = WL.airportByCity.get(p.flight.pilot ? (p.flight.landAp || p.flight.from) : p.flight.ph === 'board' ? p.flight.from : p.flight.to); if (B) ex = { x: B.off.x, y: B.off.y }; }   // pilots who leave mid-flight are back at the airport they flew from (or landed at)   // leaving mid-flight: you arrive (still at the gate: you stay)
     const pc = parkedCars.get(client.dbId); let cx = pc?.x ?? null, cy = pc?.y ?? null, ca = pc?.a ?? null;
     if (p?.vehicle) { cx = p.x; cy = p.y; ca = p.vehicle.a; if (w.scene === 'ext') ex = { x: p.x, y: p.y }; }
     w.ext = ex;
@@ -5119,17 +5214,18 @@ function worldSave(client) {
         jobTasks: w.jobTasks || 0
     };
     try {
-        worldSaveWorker.postMessage(saveData);
+        DB.wop('worldSave', saveData);
         // Mark queued, not completed: prevents enqueueing another save every
         // 50 ms while the worker is processing this one.
         w.lastSave = now;
     } catch (err) {
-        console.error('[WorldSaveWorker] Could not queue save for', client.dbId, err);
+        console.error('[DB] Could not queue world save for', client.dbId, err);
     }
 }
-function worldBankCoins(client) { return db.prepare('SELECT coins FROM users WHERE id=?').get(client.dbId)?.coins || 0; }
-function worldPushProfile(client) { sendWorld(client, 'profile_update', { profile: db.prepare('SELECT * FROM users WHERE id=?').get(client.dbId) }); }
-function worldFirstHouse(uid) { return db.prepare('SELECT id FROM world_houses WHERE owner_id=? ORDER BY purchased_at LIMIT 1').get(uid)?.id || null; }
+// Bank balances, profiles and house ownership come from memory (Users / houseOwner); the database is written through.
+function worldBankCoins(client) { return Users.get(client.dbId)?.coins || 0; }
+function worldPushProfile(client) { const u = Users.get(client.dbId); if (u) sendWorld(client, 'profile_update', { profile: u }); }
+function worldFirstHouse(uid) { let best = null, bt = Infinity; if (uid) for (const [hid, o] of houseOwner) if (o.owner_id === uid && (o.purchased_at || 0) < bt) { bt = o.purchased_at || 0; best = hid; } return best; }
 function worldPushState(client) {
     const w = client.world; if (!w) return;
     const co = w.job ? W_COMPANIES.find(c => c.id === w.job.co) : null, pc = parkedCars.get(client.dbId);
@@ -5147,12 +5243,16 @@ function worldInteriorDef(scene) {
     let d = interiorDefs.get(scene); if (d) return d;
     const [kind, key, lvs] = scene.split(':');
     if (kind === 'work') {
-        const b = WL.buildingById.get(Number(key)); const co = W_COMPANIES.find(c => c.id === (b && worldWorkOf(b))) || W_COMPANIES[0]; d = buildOfficeInterior(co); d.coId = co.id; d.bid = b ? b.id : 0;
+        const b = WL.buildingById.get(Number(key)); const co = W_COMPANIES.find(c => c.id === (b && worldWorkOf(b))) || W_COMPANIES[0]; d = buildOfficeInterior(co); d.coId = co.id; d.bid = b ? b.id : 0; if (co.kind === 'pilot') d.theme.name = 'Central Air · Flight Operations';
         if (b && (b.f || 0) > 3) { const fl = 2 + (b.id * 7) % Math.max(1, b.f - 2); d.theme.name += ' · Floor ' + fl; d.theme.alt = +Math.min(3.6, 1 + fl * 0.03).toFixed(2); d.theme.eh = Math.round(fl * 5.7); }
     }
     else if (kind === 'mall') { const b = WL.buildingById.get(Number(key)); d = buildMallInterior(b || { id: 0, lv: 3 }, Math.max(1, Math.min(b?.lv || 3, Number(lvs) || 1))); furnishMall(d, b); }
     else if (kind === 'stay') { const b = WL.buildingById.get(Number(key)); const tier = b?.k === 'hotel' ? 2 : b?.k === 'inn' ? 1 : 0; d = buildHouseInterior(tier); furnishHouse(d, tier); d.bid = b ? b.id : 0; d.stay = 1; d.theme.name = b?.nm || 'Room'; if (b && b.k === 'hotel') { const fl = 3 + (b.id * 5) % Math.max(1, (b.f || 10) - 3); d.theme.name += ' · Room ' + fl + String(b.id % 40 + 1).padStart(2, '0'); d.theme.alt = +Math.min(3, 1 + fl * 0.05).toFixed(2); d.theme.eh = Math.round(fl * 6.6); } }
-    else if (kind === 'term') { const ap = WL.airportByCity.get(key) || WL.airports[0]; d = buildTerminalInterior(ap); d.bid = ap.term.id; }
+    else if (kind === 'term') {
+        const ap = WL.airportByCity.get(key) || WL.airports[0];
+        if (ap.mega) { const n = Math.max(1, Math.min(ap.terms.length, Number(lvs) || 1)); d = buildMegaTerminalInterior(ap, n); }
+        else { d = buildTerminalInterior(ap); d.bid = ap.term.id; }
+    }
     else { const h = WL.houseById.get(key); const tier = h ? h.tier : 0; d = buildHouseInterior(tier); furnishHouse(d, tier); d.hid = key; }
     d.colliders = interiorColliders(d);
     interiorDefs.set(scene, d); return d;
@@ -5162,7 +5262,7 @@ function worldGetInterior(scene) {
     if (room) { room.emptySince = null; return room; }
     const def = worldInteriorDef(scene);
     room = new Room('INT:' + scene, 'WORLD', { shapeCount: 0, botCount: 0, shapeRespawn: false });
-    room.worldKind = 'interior'; room.worldExtent = INT_EXT; room.grid = new SpatialGrid(INT_EXT, 250);
+    room.worldKind = 'interior'; room.worldExtent = def.ext || INT_EXT; room.grid = new SpatialGrid(def.ext || INT_EXT, 250);
     room.noCombat = true; room.def = def; room.colliders = def.colliders; room.scene = scene; room.emptySince = null;
     interiorRooms[scene] = room; return room;
 }
@@ -5180,7 +5280,7 @@ function worldGoto(client, scene, x, y) {
     if (client.player) worldSnapshot(client);
     worldDetach(client);
     const room = scene === 'ext' ? worldRoom : worldGetInterior(scene);
-    const user = db.prepare('SELECT username, selected_color FROM users WHERE id=?').get(client.dbId);
+    const user = Users.get(client.dbId);
     const ent = new Entity(room, x, y, 'tank', user?.username || 'Player', 0, true, client.ws);
     ent.nameColor = user?.selected_color || '#ffffff';
     worldApplyProgress(ent, w.prog);
@@ -5246,7 +5346,7 @@ function worldSendStatic(client) {
         air: { airlines: AIRLINES, aircraft: AIRCRAFT, legs: airNet().legs.map(l => ({ al: l.al, ac: l.ac, fn: l.fn, from: l.from, to: l.to, mins: l.mins, dur: l.dur, per: l.per, off: l.off })), board: AIR_BOARD, slots: (airAlloc(Date.now() + 40 * 60000), airSlotsNow()), holdDep: AIR_HOLD_DEP, holdArr: AIR_HOLD_ARR },
         center: W_CX, centerY: W_CY, extent: W_CIRC, extentY: W_EXTY, circ: W_CIRC, gap: W_GAP, land: W_LAND, chunk: W_CHUNK, nch: W_NCH, roads: WL.allRoads,
         cities: W_CITIES.map(c => ({ id: c.id, name: c.name, code: c.code, cx: c.cx, cy: c.cy, tz: c.tz, theme: c.theme, style: c.style, culture: c.culture, toll: c.toll, home: !!c.home, size: c.size, border: c.border, bp: c.bp })),
-        airports: WL.airports.map(a => ({ city: a.city, name: a.name, code: a.code, x0: a.x0, x1: a.x1, ry: a.ry, ty: a.ty, endW: a.endW, endE: a.endE, sb: a.sb, door: a.door, design: a.design, stands: a.stands.map(q => [q.x, q.y, q.a, q.g, q.ox, q.oy, q.ex, q.remote]) })),
+        airports: WL.airports.map(a => ({ city: a.city, name: a.name, code: a.code, x0: a.x0, x1: a.x1, ry: a.ry, ty: a.ty, endW: a.endW, endE: a.endE, sb: a.sb, door: a.door, design: a.design, mega: a.mega || 0, stands: a.stands.map(q => [q.x, q.y, q.a, q.g, q.ox, q.oy, q.ex, q.remote, q.t || 0]), rws: a.rws || [], blk: a.blk || null, terms: (a.terms || []).map(t => ({ n: t.n, label: t.label, door: t.door })), crew: a.crew || [] })),
         cars: WORLD_CARS, carColors: WORLD_CAR_COLORS,
         companies: W_COMPANIES, spawn: WL.spawn, bank: bld(WL.bank), dealer: bld(WL.dealer), fireMs: WORLD_FIRE_MS, taskMs: WORLD_TASK_MS, items: WORLD_ITEMS, shopKinds: SHOP_KINDS, stallKinds: STALL_KINDS, ranks: WORLD_RANKS, inflight: INFLIGHT_MENU
     });
@@ -5267,14 +5367,14 @@ function worldPayToll(client, amt) {
     if (cash >= amt) w.sessionCoins = cash - amt;
     else {
         const bank = worldBankCoins(client); if (cash + bank < amt) return false;
-        db.prepare('UPDATE users SET coins=coins-? WHERE id=?').run(amt - cash, client.dbId); w.sessionCoins = 0; w.bankCoins = worldBankCoins(client); worldPushProfile(client);
+        Users.addCoins(client.dbId, -(amt - cash)); w.sessionCoins = 0; w.bankCoins = worldBankCoins(client); worldPushProfile(client);
     }
     worldPushState(client); return true;
 }
 function worldDeposit(client) {
     const w = client.world, amt = Math.max(0, Math.floor(w.sessionCoins || 0));
     if (!amt) { worldNotice(client, 'You have no unbanked cash to deposit.'); return; }
-    db.prepare('UPDATE users SET coins=coins+? WHERE id=?').run(amt, client.dbId);
+    Users.addCoins(client.dbId, amt);
     w.sessionCoins = 0; w.bankCoins = worldBankCoins(client);
     worldSave(client); worldPushProfile(client); worldPushState(client);
     worldNotice(client, `Deposited ${fmtMoney(amt)} coins into your account.`, { level: 'good', sessionCoins: 0 });
@@ -5282,44 +5382,43 @@ function worldDeposit(client) {
 function worldBuyHouse(client, b) {
     const w = client.world;
     if (houseOwner.has(b.hid)) { worldNotice(client, 'Someone already owns this house.'); return; }
-    const price = b.price;
-    let ok = false;
-    try {
-        db.transaction(() => {
-            const u = db.prepare('SELECT coins FROM users WHERE id=?').get(client.dbId);
-            if (!u || u.coins < price) throw new Error('funds');
-            if (db.prepare('SELECT owner_id FROM world_houses WHERE id=? AND owner_id IS NOT NULL').get(b.hid)) throw new Error('taken');
-            const now = Date.now();
-            db.prepare('INSERT OR REPLACE INTO world_houses(id,owner_id,price,x,y,purchased_at,last_seen) VALUES(?,?,?,?,?,?,?)').run(b.hid, client.dbId, price, b.x + b.w / 2, b.y + b.h / 2, now, now);
-            db.prepare('UPDATE users SET coins=coins-? WHERE id=?').run(price, client.dbId);
-            ok = true;
-        })();
-    } catch (err) { worldNotice(client, err.message === 'funds' ? `You need ${fmtMoney(price)} coins in your account. Deposit your cash at the bank first.` : 'That house is no longer available.'); return; }
-    if (!ok) return;
-    const name = db.prepare('SELECT username FROM users WHERE id=?').get(client.dbId)?.username || 'Resident';
-    houseOwner.set(b.hid, { owner_id: client.dbId, name, purchased_at: Date.now() });
+    const price = b.price, u = Users.get(client.dbId);
+    if (!u || (u.coins || 0) < price) { worldNotice(client, `You need ${fmtMoney(price)} coins in your account. Deposit your cash at the bank first.`); return; }
+    // ownership and the balance change in memory right away (the game thread is the only writer); the worker persists both together
+    const now = Date.now(), name = u.username || 'Resident';
+    u.coins -= price;
+    houseOwner.set(b.hid, { owner_id: client.dbId, name, purchased_at: now });
+    DB.wtx([['INSERT OR REPLACE INTO world_houses(id,owner_id,price,x,y,purchased_at,last_seen) VALUES(?,?,?,?,?,?,?)', [b.hid, client.dbId, price, b.x + b.w / 2, b.y + b.h / 2, now, now]],
+        ['UPDATE users SET coins = coins - ? WHERE id = ?', [price, client.dbId]]]);
     w.bankCoins = worldBankCoins(client);
     for (const c of worldClients) sendWorld(c, 'world_house', { hid: b.hid, o: name, m: c.dbId === client.dbId ? 1 : 0 });
     worldPushProfile(client); worldPushState(client);
     worldNotice(client, 'You bought a house! It is now your spawn point. Walk to the door and press F to go inside.', { level: 'good' });
 }
+let worldExpiring = false;
 function worldExpireHouses() {
+    if (worldExpiring) return; worldExpiring = true;
     const cutoff = Date.now() - 7 * 86400000;
-    const expired = db.prepare('SELECT * FROM world_houses WHERE owner_id IS NOT NULL AND COALESCE(last_seen,purchased_at)< ?').all(cutoff);
-    for (const h of expired) {
-        db.transaction(() => { db.prepare('UPDATE users SET coins=coins+? WHERE id=?').run(Math.floor(h.price / 2), h.owner_id); db.prepare('DELETE FROM world_houses WHERE id=?').run(h.id); })();
-        houseOwner.delete(h.id);
-        for (const c of worldClients) sendWorld(c, 'world_house', { hid: h.id, o: null, m: 0 });
-    }
+    DB.all('SELECT * FROM world_houses WHERE owner_id IS NOT NULL AND COALESCE(last_seen,purchased_at)< ?', cutoff).then(expired => {
+        for (const h of expired) {
+            const o = houseOwner.get(h.id); if (o && o.owner_id !== h.owner_id) continue;     // sold again since the query
+            if ([...worldClients].some(c => c.dbId === h.owner_id)) continue;                 // the owner is online right now
+            const refund = Math.floor(h.price / 2), u = Users.get(h.owner_id);
+            if (u) u.coins = (u.coins || 0) + refund;
+            DB.wtx([['UPDATE users SET coins = coins + ? WHERE id = ?', [refund, h.owner_id]], ['DELETE FROM world_houses WHERE id = ? AND owner_id = ?', [h.id, h.owner_id]]]);
+            houseOwner.delete(h.id);
+            for (const c of worldClients) sendWorld(c, 'world_house', { hid: h.id, o: null, m: 0 });
+        }
+    }).catch(err => console.error('[World] house expiry', err.message)).finally(() => { worldExpiring = false; });
 }
 function worldBuyCar(client, model) {
     const w = client.world, spec = WORLD_CARS.find(c => c.id === model);
     if (!spec) return;
     if (w.car === spec.id) { worldNotice(client, `You already own a ${spec.name}.`); return; }
     const old = w.car ? WORLD_CARS.find(c => c.id === w.car) : null, cost = spec.price - (old ? Math.floor(old.price * 0.5) : 0);
-    const u = db.prepare('SELECT coins FROM users WHERE id=?').get(client.dbId);
-    if (!u || u.coins < cost) { worldNotice(client, `The ${spec.name} costs ${fmtMoney(cost)} coins${old ? ' after trade-in' : ''}. Deposit cash at the bank first.`); return; }
-    db.prepare('UPDATE users SET coins=coins-? WHERE id=?').run(cost, client.dbId);
+    const u = Users.get(client.dbId);
+    if (!u || (u.coins || 0) < cost) { worldNotice(client, `The ${spec.name} costs ${fmtMoney(cost)} coins${old ? ' after trade-in' : ''}. Deposit cash at the bank first.`); return; }
+    Users.addCoins(client.dbId, -cost);
     const bay = worldFindFreeBay(client.dbId);
     w.car = spec.id; parkedCars.set(client.dbId, { uid: client.dbId, model: spec.id, x: bay.x, y: bay.y, a: bay.a, driven: false, pid: parkedCars.get(client.dbId)?.pid || worldPidSeq++ });
     w.bankCoins = worldBankCoins(client);
@@ -5546,6 +5645,7 @@ function worldPushFlight(client) {
     sendWorld(client, 'world_flight', { f: { ...w.flightInfo, ph: f.ph, wait: f.ph === 'board' ? Math.max(0, Math.round((f.dep - Date.now()) / 1000)) : 0, rem: Math.round(rem), eta: Math.round(rem / sp + 25 + (f.ph === 'board' ? Math.max(0, f.dep - Date.now()) / 1000 : 0)), alt: Math.round(f.alt * 100) / 100, kmh: Math.round(gs * 60 * 3.6 / 10) } });
 }
 function worldStepFlight(e) {
+    if (e.flight.pilot) return pilotStep(e);
     const f = e.flight, ev = flightStep(f);
     e.x = f.x; e.y = f.y; e.vx = 0; e.vy = 0;
     const c = e.room.clients.find(q => q.player === e);
@@ -5567,7 +5667,7 @@ function worldEndFlight(e, client) {
     if (it && it.legs[it.i] && it.legs[it.i].to === f.to) {
         it.i++;
         if (it.i < it.legs.length) {                                     // a connection: straight to the gate, airside, without going through the city
-            const n = it.legs[it.i], key = 'term:' + B.city, def = worldInteriorDef(key), gs = def.stations.find(q => q.use === 'gate');
+            const n = it.legs[it.i], key = worldTermKey(B.city, apTermOf(B, B.stands[(n.sd || 0) % B.stands.length]) || 1), def = worldInteriorDef(key), gs = def.stations.find(q => q.use === 'gate');
             it.until = Math.max(it.until, Date.now() + 30 * 60000);
             worldGoto(client, key, gs.x, gs.y + 70);
             if (n.dep != null && Date.now() > n.dep - 20000) { worldTicketCheck(client); worldPushState(client); return; }   // ran late: rebooked onto the next one
@@ -5579,6 +5679,278 @@ function worldEndFlight(e, client) {
     }
     worldNotice(client, `Welcome to ${city.name}! Local time ${worldLocalClock(city.tz)} (${worldTzLabel(city.tz)}).`, { level: 'good' });
     worldPushState(client); worldSave(client);
+}
+// ===================== Central Air pilots: fly the aircraft yourself =====================
+// A pilot flight (p.flight.pilot) carries the fields the renderer already uses for airliners (x, y, a, v, alt, q, h, vs),
+// so everyone sees the aircraft, but the cockpit controls drive it instead of the timetable autopilot:
+//   ground: chart coordinates; true speed vs (sphere units/tick; chart speed v = vs·sec φ); nose-wheel steering, brakes
+//   air:    a point q on the sphere with heading h (like the airliners); bank → turn rate, elevator → vertical speed
+// Altitude is in feet. It changes PILOT_ALT_K times faster than the vertical speed shown (the world's time compression),
+// so a 3° glide path is ≈ 172 ft per km to go and ≈ 800 ft/min on final, as in a real airliner.
+// Touching the ground anywhere but a runway – or too hard, too fast, banked, sideways or with the gear up – is a crash:
+// you die and respawn. A safe landing at the destination pays PILOT_PAY coins per 1000 km of route (±5% for the landing).
+const PILOT_PAY = 7400, PILOT_ALT_K = 12, PILOT_KT = 7.5, PILOT_CEIL = 41000, PILOT_FT_KM = 172;
+const PILOT_VS = [17, 15.2, 14, 13];                     // stall speed (true units/tick) with flaps 0, 1, 2, FULL
+const PILOT_TD_MAX = 27, PILOT_SINK_MAX = 1100, PILOT_FLAP_MAX = [99, 42, 34, 28];   // touchdown limits; flap speed limits
+function pilotKm(A, B) { return Math.max(1, Math.round(wGC(A.sb.x, A.sb.y, B.sb.x, B.sb.y).d / 1000)); }
+function pilotPay(km) { return Math.round(km * PILOT_PAY / 1000); }
+function pilotAc(km) { return km > 1150 ? 'wide' : 'narrow'; }
+function pilotIsPilot(w) { const co = worldEmployer(w); return !!co && co.kind === 'pilot'; }
+function pilotAirportAt(x, y, m = 0) {
+    if (!WL) return null;
+    for (const A of WL.airports) { const b = A.blk; if (!b) continue; const dx = wrapDx(x - b.x); if (dx >= -m && dx <= b.w + m && y >= b.y - m && y <= b.y + b.h + m) return A; }
+    return null;
+}
+function pilotRunwayAt(A, x, y, m = 25) {
+    if (!A) return null;
+    for (const r of A.rws || []) { const dx = wrapDx(x - r.x); if (dx >= -m && dx <= r.w + m && y >= r.y - m && y <= r.y + r.h + m) return r; }
+    return null;
+}
+// Runway names as painted: an east-west runway is 09 landing eastbound and 27 westbound, a north-south one 18 / 36.
+function pilotRwName(r, dir) { if (r.v) return dir > 0 ? '18' : '36'; return (dir > 0 ? '09' : '27') + (r.nr ? (dir > 0 ? r.nr : r.nr === 'L' ? 'R' : 'L') : ''); }
+function pilotThresholds(A) {
+    if (A._thr) return A._thr;
+    const out = [];
+    for (const r of A.rws || []) {
+        if (r.v) out.push({ r, x: r.x + r.w / 2, y: r.y + 150, dx: 0, dy: 1, n: pilotRwName(r, 1), len: r.h }, { r, x: r.x + r.w / 2, y: r.y + r.h - 150, dx: 0, dy: -1, n: pilotRwName(r, -1), len: r.h });
+        else out.push({ r, x: r.x + 150, y: r.y + r.h / 2, dx: 1, dy: 0, n: pilotRwName(r, 1), len: r.w }, { r, x: r.x + r.w - 150, y: r.y + r.h / 2, dx: -1, dy: 0, n: pilotRwName(r, -1), len: r.w });
+    }
+    return (A._thr = out);
+}
+// Approach guidance for the destination: a runway end is picked by which final approach fix (PILOT_FAF out on the
+// extended centreline) is nearest, re-picked every 10 s until you're established on the localiser. Distances in true
+// units; cross > 0 means left of the centreline. fd is the flight-director course: to the fix, then an intercept.
+const PILOT_FAF = 22000;
+function pilotApp(f, B) {
+    const ths = pilotThresholds(B); if (!ths.length) return null;
+    const k = wSec(f.y), fafOf = q => ({ x: q.x - q.dx * PILOT_FAF * k, y: q.y - q.dy * PILOT_FAF * k });
+    let A = f.appT && f.appT.ap === B.city ? f.appT : null;
+    if (!A || (!A.loc && f.t - A.at > 600)) {
+        let bi = 0, bd = Infinity;
+        ths.forEach((q, i) => { const p = fafOf(q), d = Math.hypot(wrapDx(p.x - f.x), p.y - f.y) - q.len * 0.3; if (d < bd) { bd = d; bi = i; } });
+        f.appT = A = { ap: B.city, i: bi, at: f.t, loc: A && A.i === bi ? A.loc : 0 };
+    }
+    const t = ths[A.i], rx = wrapDx(f.x - t.x), ry = f.y - t.y, along = -(rx * t.dx + ry * t.dy) / k, cross = (rx * t.dy - ry * t.dx) / k;
+    const crs = Math.atan2(t.dy, t.dx), herr = Math.abs(flAng(f.a - crs)), p = fafOf(t), fafD = Math.hypot(wrapDx(p.x - f.x), p.y - f.y) / k, fafA = Math.atan2(p.y - f.y, wrapDx(p.x - f.x));
+    if (!A.loc && along > 2500 && along < 60000 && Math.abs(cross) < Math.max(1200, along * 0.1) && herr < 0.9) A.loc = 1;
+    if (A.loc && (along < -4000 || Math.abs(cross) > 9000)) A.loc = 0;
+    const toFaf = !A.loc && fafD > 2500 && (along < 6000 || Math.abs(cross) > along * 0.35 + 1500);
+    const fd = toFaf ? fafA : flAng(crs + clamp(cross / 1000 * 0.45, -0.8, 0.8));
+    return { t, along, cross, crs, loc: A.loc, fafD, fafA, toFaf, fd, gp: Math.max(0, along / 1000) * PILOT_FT_KM };
+}
+function pilotNearestThreshold(A, x, y) { let best = null, bd = Infinity; for (const t of pilotThresholds(A)) { const d = Math.hypot(wrapDx(x - t.x), y - t.y); if (d < bd) { bd = d; best = t; } } return best && { t: best, d: bd }; }
+function pilotDeg(a) { return ((a * 180 / Math.PI) % 360 + 360) % 360; }
+function pilotHdg(a) { return pilotDeg(a + Math.PI / 2); }          // chart angle (0 = east, y grows south) → compass heading
+// The destination menu: every other airport, with distance and pay. Pilots can get a flight at any airport.
+function pilotHere(client) {
+    const w = client.world, p = client.player; if (!w || !p || !WL) return null;
+    if (w.scene === 'ext') return pilotAirportAt(p.x, p.y, 600);
+    const def = client.room && client.room.def; if (!def) return null;
+    if (def.ap) return WL.airportByCity.get(def.ap) || null;
+    if (def.coId === 'centralair') return WL.airportByCity.get('central') || null;
+    return null;
+}
+function worldPilotMenu(client) {
+    const w = client.world, p = client.player; if (!w || !p) return;
+    if (!pilotIsPilot(w)) { worldNotice(client, 'Only Central Air pilots can fly. Apply at Central Air Flight Ops, next to Terminal 3 at Central City International.', { level: 'warn' }); return; }
+    if (p.flight || p.vehicle || p.taxiRide) { worldNotice(client, 'Finish what you are doing first.'); return; }
+    const A = pilotHere(client);
+    if (!A) { worldNotice(client, 'Go to an airport to pick up a flight – Central Air Flight Ops is at Central City International, or press J at any airport.', { level: 'warn' }); return; }
+    const list = WL.airports.filter(B => B !== A).map(B => { const km = pilotKm(A, B), c = W_CITIES.find(q => q.id === B.city), ac = pilotAc(km); return { to: B.city, code: B.code, name: c.name, ap: B.name, km, pay: pilotPay(km), ac, acName: AIRCRAFT[ac].name, tz: c.tz }; }).sort((a, b) => a.km - b.km);
+    sendWorld(client, 'world_pilot', { menu: { from: A.city, code: A.code, name: A.name, list, rate: PILOT_PAY } });
+}
+function worldPilotStart(client, toCity) {
+    const w = client.world; let p = client.player; if (!w || !p || w.dead) return;
+    if (!pilotIsPilot(w) || p.flight || p.vehicle || p.taxiRide) return;
+    const A = pilotHere(client), B = WL.airportByCity.get(toCity); if (!A || !B || A === B) return;
+    // where the aircraft waits: the Central Air crew apron at the hub, otherwise a free stand's push-back point, nose to the taxiway
+    const busy = (x, y) => worldRoom.entities.some(e => e.flight && e.flight.pilot && Math.hypot(wrapDx(e.x - x), e.y - y) < 300);
+    let spot = null;
+    for (const c of A.crew || []) if (!busy(c.x, c.y)) { spot = { x: c.x, y: c.y, a: c.a, g: c.g }; break; }
+    if (!spot) for (const S of [...A.stands].sort((p1, p2) => (p2.remote || 0) - (p1.remote || 0))) { if (busy(S.ox, S.oy)) continue; spot = { x: S.ox, y: S.oy, a: S.oy > A.ty ? -Math.PI / 2 : Math.PI / 2, g: S.g }; break; }
+    if (!spot) { const S = A.stands[0]; spot = { x: S.ox, y: S.oy, a: S.oy > A.ty ? -Math.PI / 2 : Math.PI / 2, g: S.g }; }
+    if (w.scene !== 'ext') worldGoto(client, 'ext', spot.x, spot.y);
+    p = client.player; if (!p) return;
+    if (client.room) client.room.drones = client.room.drones.filter(d => d.owner !== p);
+    p.activeDrones = 0; w.task = null; w.mission = null;
+    const km = pilotKm(A, B), ac = pilotAc(km), cB = W_CITIES.find(c => c.id === B.city), cA = W_CITIES.find(c => c.id === A.city);
+    const f = {
+        pilot: 1, from: A.city, to: B.city, km, pay: pilotPay(km), ac, al: 'CA', fn: 'CA' + (900 + airHash(String(client.dbId)) % 90), liv: 0, svc: 'pilot:' + p.id,
+        x: spot.x, y: spot.y, a: spot.a, v: 0, vs: 0, q: null, h: null, alt: 0, ph: 'ground', ft: 0, fpm: 0, bank: 0,
+        thr: 0, flaps: 1, gear: 1, br: 1, apOn: 0, atOn: 0, apAlt: 36000, apSpd: 440,
+        ctl: { thr: 0, el: 0, ai: 0, fl: 1, gr: 1, br: 1, ap: 0, at: 0, alt: 36000, spd: 440, t: 0 },
+        vmax: PLANE_CRUISE * AIRCRAFT[ac].speed * 1.1, t: 0, airT: 0, flown: 0, took: 0, landed: 0, landAp: null, stopT: 0, warn: [], maxAlt: 0, start: Date.now(), stand: spot.g
+    };
+    p.flight = f; p.ghost = true; p.x = f.x; p.y = f.y; p.vx = p.vy = 0;
+    p.inputs = { up: false, down: false, left: false, right: false, shooting: false, angle: p.inputs?.angle || 0, repel: false };
+    const vr = Math.round(PILOT_VS[1] * 1.1 * PILOT_KT);
+    sendWorld(client, 'world_pilot', { start: { fn: f.fn, ac, acName: AIRCRAFT[ac].name, from: { code: A.code, name: cA.name, city: A.city }, to: { code: B.code, name: cB.name, city: B.city, ap: B.name }, km, pay: f.pay,
+        vs: PILOT_VS.map(v => Math.round(v * PILOT_KT)), vr, vmo: Math.round(f.vmax * PILOT_KT), td: Math.round(PILOT_TD_MAX * PILOT_KT), sink: PILOT_SINK_MAX, fmax: PILOT_FLAP_MAX.map(v => Math.round(v * PILOT_KT)), ftkm: PILOT_FT_KM, stand: spot.g } });
+    worldNotice(client, `🧑‍✈️ Captain, you have the aircraft: Central Air ${f.fn} (${AIRCRAFT[ac].name}) at stand ${spot.g}, ${A.code} → ${B.code} ${cB.name}, ${km.toLocaleString()} km. A safe landing pays ≈ ${fmtMoney(f.pay)} coins. Release the brakes (B), taxi to a runway, full throttle and rotate at ${vr} kt.`, { level: 'good' });
+    worldPushState(client);
+}
+function pilotClient(e) { return e.room && e.room.clients.find(q => q.player === e); }
+// One tick (60 Hz) of the aircraft.
+function pilotStep(e) {
+    const f = e.flight, client = pilotClient(e); f.t++;
+    const c = f.ctl, fresh = Date.now() - (c.t || 0) < 700, inp = e.inputs || {};
+    let el = fresh ? c.el : (inp.up ? 1 : 0) - (inp.down ? 1 : 0), ai = fresh ? c.ai : (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
+    el = clamp(el || 0, -1, 1); ai = clamp(ai || 0, -1, 1);
+    f.flaps = c.fl; f.br = c.br; f.atOn = c.at; f.apAlt = c.alt; f.apSpd = c.spd;
+    if (c.ap && !f.apOn && f.ph === 'air') { f.apOn = 1; }
+    if (!c.ap || f.ph !== 'air') f.apOn = 0;
+    if (f.apOn && (Math.abs(el) > 0.35 || Math.abs(ai) > 0.35) && fresh && c.man) { f.apOn = 0; c.ap = 0; if (client) worldNotice(client, '🔔 Autopilot disconnected – you have control.', { level: 'warn' }); }
+    let thrCmd = c.thr;
+    if (f.atOn && f.ph === 'air') thrCmd = clamp(f.thr + (f.apSpd / PILOT_KT - f.vs) * 0.02, 0, 1);    // autothrottle holds the selected speed
+    f.thr += clamp(thrCmd - f.thr, -0.012, 0.012);                    // the engines spool up and down
+    const Vs = PILOT_VS[f.flaps] || PILOT_VS[0], vmax = f.vmax;
+    f.warn = [];
+    if (f.ph === 'ground') {
+        f.gear = 1;                                                    // weight on wheels: the gear stays down
+        const thrust = f.thr * 0.075, roll = f.vs > 0 ? (f.br ? 0.42 : 0.004) : 0, drag = 0.075 / (vmax * vmax) * f.vs * f.vs * (1 + 0.25 * f.flaps);
+        f.vs = Math.max(0, f.vs + thrust - roll - drag);
+        if (f.br && f.vs < 0.45) f.vs = 0;
+        const steer = ai * (f.vs < 6 ? 0.03 : 0.18 / f.vs) * Math.min(1, f.vs / 0.8);
+        f.a = flAng(f.a + steer);
+        f.v = f.vs * wSec(f.y); f.x = wrapX(f.x + Math.cos(f.a) * f.v); f.y += Math.sin(f.a) * f.v;
+        f.fpm = 0; f.ft = 0; f.bank = 0; f.alt = 0;
+        const A = pilotAirportAt(f.x, f.y);
+        if (!A && f.vs > 1.2) return pilotCrash(e, client, f.landed ? 'You ran off the end of the runway' : 'You left the airport and ran onto rough ground');
+        if (f.t % 3 === 0 && f.vs > 0) { const pr = { x: f.x, y: f.y }; if (layoutPushOut(WL, pr, 46)) { if (f.vs > 2.5) return pilotCrash(e, client, 'You crashed into an obstacle on the ground'); f.x = pr.x; f.y = pr.y; f.vs = 0; } }
+        if (A && !pilotRunwayAt(A, f.x, f.y, 0) && f.vs > 4.5) f.warn.push('TAXI SPEED');
+        if (f.vs >= Vs * 1.1 && el > 0.2 && !(f.landed && f.t - f.tdT < 90)) {   // rotate: lift off (not in the first moments after a touchdown)
+            if (!pilotRunwayAt(A, f.x, f.y, 0)) return pilotCrash(e, client, 'You tried to take off without a runway under you');
+            f.ph = 'air'; f.ft = 10; f.fpm = 1200; f.airT = 0; f.q = wVec(f.x, f.y); f.h = wTan(f.q, f.a); f.landed = 0; f.landAp = null; f.stopT = 0;
+            if (!f.took && client) worldNotice(client, `🛫 Positive rate – you're airborne from ${WL.airportByCity.get(f.from).code}. Gear up (G), flaps up (Z) as you accelerate, and climb towards ${Math.round(f.apAlt / 1000)}000 ft.`, { level: 'good' });
+            f.took = 1;
+        }
+        if (f.landed && f.vs < 0.6) { f.stopT++; if (f.stopT > 60 * 30 && client) return pilotFinish(client, true); } else f.stopT = 0;
+    } else {
+        f.airT++;
+        if (c.gr !== f.gear) f.gear = c.gr ? 1 : 0;
+        const s = f.vs, drag = 0.10 / (vmax * vmax) * s * s * (1 + 0.25 * f.flaps + (f.gear ? 0.35 : 0));
+        f.vs = Math.max(5, s + f.thr * 0.10 - drag - f.fpm * 9e-6);
+        // vertical: the stick commands a climb or descent rate; centred, it holds the altitude
+        let tf = el * (el >= 0 ? 4500 : 5000), tb = ai * Math.PI / 6;
+        if (f.apOn) {                                                  // autopilot: NAV (direct, then the approach), ALT hold, APP (localiser + glideslope)
+            const B = WL.airportByCity.get(f.to), dB = wDistV(f.q, wVec(B.sb.x, B.sb.y)), ap = dB < 150000 ? pilotApp(f, B) : null;
+            tf = clamp((f.apAlt - f.ft) * 1.2, -3000, 3000);
+            if (ap) {
+                tb = clamp(flAng(ap.fd - f.a) * 1.4, -Math.PI / 7, Math.PI / 7);
+                if (c.app && ap.loc && f.ft >= ap.gp - 200) {                  // glideslope captured
+                    tf = clamp(-f.vs * 3.6 * PILOT_FT_KM / PILOT_ALT_K + (ap.gp - f.ft) * 1.5, -2000, 500); f.gs = 1;
+                    if (f.ft < 100) { f.apOn = 0; c.ap = 0; c.app = 0; f.gs = 0; if (client) worldNotice(client, '🔔 100 ft – autopilot off. Flare gently (W) and land it!', { level: 'warn' }); }
+                }
+            } else {
+                const T = wVec(B.sb.x, B.sb.y), q = f.q, qt = wDot(q, T);
+                let d = [T[0] - q[0] * qt, T[1] - q[1] * qt, T[2] - q[2] * qt]; d = Math.hypot(d[0], d[1], d[2]) < 1e-9 ? wEN(q).n : wNorm(d);
+                const sg = Math.atan2(wDot(q, wCross(f.h, d)), wDot(f.h, d));  // > 0: the destination is to the left
+                tb = clamp(-sg * 1.6, -Math.PI / 7, Math.PI / 7);
+            }
+        } else f.gs = 0;
+        const margin = clamp((f.vs - Vs) / (Vs * 0.5), 0, 1);
+        if (tf > 0) tf *= margin;                                      // a slow aircraft can't climb
+        tf -= 900 * (1 - Math.cos(f.bank));                            // a steep bank loses lift
+        if (f.vs < Vs) { tf = Math.min(tf, -2500 - (Vs - f.vs) * 900); f.warn.push('STALL'); }
+        f.fpm += clamp(tf - f.fpm, -80, 80);
+        f.ft += f.fpm / 3600 * PILOT_ALT_K;
+        if (f.ft > PILOT_CEIL) { f.ft = PILOT_CEIL; f.fpm = Math.min(0, f.fpm); }
+        f.maxAlt = Math.max(f.maxAlt, f.ft);
+        f.bank += clamp(tb - f.bank, -0.02, 0.02);
+        const tr = Math.tan(f.bank) / Math.tan(Math.PI / 6) * 0.012 * clamp(30 / f.vs, 0.5, 1.6);   // > 0: a right turn
+        const q = f.q, qh = wCross(q, f.h), ct = Math.cos(-tr), st = Math.sin(-tr);
+        const h = [f.h[0] * ct + qh[0] * st, f.h[1] * ct + qh[1] * st, f.h[2] * ct + qh[2] * st];
+        const th = f.vs / W_R, cc = Math.cos(th), sn = Math.sin(th);
+        const nq = wNorm([q[0] * cc + h[0] * sn, q[1] * cc + h[1] * sn, q[2] * cc + h[2] * sn]);
+        let nh = [h[0] * cc - q[0] * sn, h[1] * cc - q[1] * sn, h[2] * cc - q[2] * sn]; const r = wDot(nh, nq);
+        nh = wNorm([nh[0] - nq[0] * r, nh[1] - nq[1] * r, nh[2] - nq[2] * r]);
+        f.q = nq; f.h = nh;
+        const pc = wChart(nq), ox = f.x; f.x = pc.x; f.y = pc.y; f.a = wAng(nq, nh); f.v = f.vs * Math.min(8, wSec(f.y));
+        if (Math.abs(pc.x - ox) > W_CIRC * 0.75 && client) worldNotice(client, pc.x < ox ? '✈ Crossing the International Date Line eastbound.' : '✈ Crossing the International Date Line westbound.', { level: 'warn' });
+        f.alt = clamp(f.ft / 36000, 0, 1); f.flown += f.vs;
+        // warnings
+        if (f.vs > vmax * 1.04) f.warn.push('OVERSPEED');
+        if (f.vs > (PILOT_FLAP_MAX[f.flaps] || 99)) f.warn.push('FLAP SPEED');
+        if (f.ft < 2500 && f.fpm < -2200) f.warn.push('PULL UP');
+        else if (f.ft < 1000 && f.fpm < -1300) f.warn.push('SINK RATE');
+        if (!f.gear && f.ft < 1500 && f.fpm < -200) f.warn.push('GEAR');
+        if (Math.abs(f.bank) > 0.6) f.warn.push('BANK ANGLE');
+        if (f.vs > vmax * 1.3) return pilotCrash(e, client, 'The airframe broke up in an overspeed dive');
+        if (f.ft <= 0) {                                               // touchdown (or not)
+            f.ft = 0;
+            const A = pilotAirportAt(f.x, f.y), rw = pilotRunwayAt(A, f.x, f.y), sink = -f.fpm, bankDeg = Math.abs(f.bank) * 180 / Math.PI;
+            let why = null;
+            if (!rw) why = A ? 'You touched down off the runway' : 'You flew into the ground';
+            else if (!f.gear) why = 'You landed with the gear up';
+            else if (sink > PILOT_SINK_MAX) why = `You slammed into the runway at ${Math.round(sink)} ft/min`;
+            else if (f.vs > PILOT_TD_MAX) why = `You touched down far too fast (${Math.round(f.vs * PILOT_KT)} kt)`;
+            else if (bankDeg > 12) why = 'A wingtip hit the runway – too much bank';
+            else if (Math.abs(Math.sin(f.a - (rw.v ? Math.PI / 2 : 0))) > 0.42) why = 'You touched down across the runway';
+            if (why) return pilotCrash(e, client, why);
+            f.ph = 'ground'; f.q = f.h = null; f.fpm = 0; f.bank = 0; f.alt = 0; f.landed = 1; f.landAp = A.city; f.sink = Math.max(0, Math.round(sink)); f.stopT = 0; f.tdT = f.t; f.apOn = 0; c.ap = 0; c.at = 0;
+            const dir = rw.v ? (Math.sin(f.a) > 0 ? 1 : -1) : (Math.cos(f.a) > 0 ? 1 : -1);
+            f.rwName = pilotRwName(rw, dir);
+            if (client) worldNotice(client, `🛬 Touchdown on runway ${f.rwName} at ${A.code}, ${f.sink} ft/min – ${f.sink < 250 ? 'butter-smooth!' : f.sink < 600 ? 'a good landing.' : 'firm, but safe.'} Brakes (B), throttle idle, then taxi clear and stop.`, { level: 'good' });
+        }
+    }
+    e.x = f.x; e.y = f.y; e.vx = 0; e.vy = 0;
+}
+function pilotLandingFactor(f) { return f.sink < 250 ? 1.05 : f.sink < 600 ? 1 : 0.95; }
+// Disembark: at the destination after a landing you're paid; anywhere else the flight is abandoned (no pay).
+function pilotFinish(client, auto) {
+    const w = client.world, e = client.player, f = e && e.flight; if (!f || !f.pilot || f.ph !== 'ground') return;
+    const A = pilotAirportAt(f.x, f.y) || WL.airportByCity.get(f.from), cA = W_CITIES.find(c => c.id === A.city), co = worldEmployer(w);
+    const atDest = f.landed && f.landAp === f.to && A.city === f.to;
+    e.flight = null; e.ghost = false; e.vx = e.vy = 0;
+    const pos = { x: A.off.x, y: A.off.y }; layoutPushOut(WL, pos, e.radius); e.x = pos.x; e.y = pos.y; w.ext = { x: e.x, y: e.y };
+    let pay = 0;
+    if (atDest && co && co.kind === 'pilot') {
+        const k = pilotLandingFactor(f); pay = Math.round(f.pay * k);
+        w.sessionCoins += pay; w.jobLast = w.playMs; w.jobTasks = (w.jobTasks || 0) + 1; w.warned = Infinity;
+        worldNotice(client, `✅ ${f.fn} complete: ${WL.airportByCity.get(f.from).code} → ${A.code}, ${f.km.toLocaleString()} km, landing ${f.sink} ft/min${k > 1 ? ' (smooth-landing bonus +5%)' : k < 1 ? ' (hard landing −5%)' : ''}. +${fmtMoney(pay)} coins (unbanked – deposit them!). Welcome to ${cA.name}, captain. Press J for your next flight.`, { level: 'good', sessionCoins: w.sessionCoins });
+    } else if (f.landed && f.landAp !== f.from) worldNotice(client, `You diverted to ${A.code}. Central Air only pays for flights that reach their destination.`, { level: 'warn' });
+    else worldNotice(client, f.took ? 'You brought the aircraft back. Flight cancelled – no pay.' : 'Flight cancelled. The ground crew takes the aircraft back.');
+    sendWorld(client, 'world_pilot', { end: { ok: pay > 0, pay, code: A.code, km: f.km, sink: f.sink || 0 } });
+    worldPushState(client); worldSave(client);
+}
+function pilotCrash(e, client, why) {
+    const f = e.flight; if (!f) return;
+    const x = f.x, y = f.y;
+    e.flight = null; e.x = x; e.y = y; e.vx = e.vy = 0; e.ghost = true;
+    for (const c2 of worldClients) { const p2 = c2.player; if (c2.world && c2.world.scene === 'ext' && p2 && (p2 === e || Math.hypot(wrapDx(p2.x - x), p2.y - y) < 25000)) sendWorld(c2, 'world_boom', { x: Math.round(x), y: Math.round(y), big: 1 }); }
+    if (!client || !client.world) return;
+    sendWorld(client, 'world_pilot', { end: { ok: false, crash: why } });
+    worldOnPlayerDeath(client, e, `💥 ${why}. Central Air ${f.fn} was lost and you did not survive. You respawn – unbanked cash lost.`, 3000);
+}
+function worldPilotMsg(client, d) {
+    const w = client.world, p = client.player; if (!w || !p) return;
+    if (d.act === 'menu') return worldPilotMenu(client);
+    if (d.act === 'fly') return worldPilotStart(client, String(d.to || ''));
+    const f = p.flight; if (!f || !f.pilot) return;
+    if (d.act === 'ctl') {
+        const c = f.ctl, num = (v, a, b, def) => { v = Number(v); return Number.isFinite(v) ? clamp(v, a, b) : def; };
+        c.thr = num(d.thr, 0, 1, c.thr); c.el = num(d.el, -1, 1, 0); c.ai = num(d.ai, -1, 1, 0); c.fl = Math.round(num(d.fl, 0, 3, c.fl)); c.gr = d.gr ? 1 : 0; c.br = d.br ? 1 : 0;
+        c.ap = d.ap ? 1 : 0; c.app = d.app ? 1 : 0; c.at = d.at ? 1 : 0; c.alt = Math.round(num(d.alt, 1000, PILOT_CEIL, c.alt) / 100) * 100; c.spd = Math.round(num(d.spd, 120, 560, c.spd)); c.man = d.man ? 1 : 0; c.t = Date.now();
+    } else if (d.act === 'park') pilotFinish(client, false);
+}
+function worldPushPilot(client) {
+    const p = client.player, f = p && p.flight; if (!f || !f.pilot) return;
+    const B = WL.airportByCity.get(f.to), here = f.ph === 'ground' ? pilotAirportAt(f.x, f.y) : null;
+    const g = wGC(f.x, f.y, B.sb.x, B.sb.y), distKm = g.d / 1000, gs = f.vs * 60;   // sphere units per second
+    const o = { ph: f.ph, kt: Math.round(f.vs * PILOT_KT), ft: Math.round(f.ft), fpm: Math.round(f.fpm), hdg: Math.round(pilotHdg(f.a) * 10) / 10, bank: Math.round(f.bank * 1800 / Math.PI) / 10,
+        thr: Math.round(f.thr * 100), fl: f.flaps, gr: f.gear, br: f.br, ap: f.apOn, at: f.atOn, dist: Math.round(distKm), brg: Math.round(pilotDeg(g.brg)), eta: f.vs > 1 ? Math.round(g.d / gs) : 0,
+        warn: f.warn, landed: f.landed, stop: f.ph === 'ground' && f.vs < 0.6 ? 1 : 0, here: here ? here.code : '', dest: here && here.city === f.to ? 1 : 0, stopT: Math.round(f.stopT / 60) };
+    if (f.ph === 'ground' && here) {                                   // taxi guidance: the nearest runway threshold
+        const n = pilotNearestThreshold(here, f.x, f.y), rw = pilotRunwayAt(here, f.x, f.y, 0);
+        if (n) o.rw = { n: n.t.n, km: Math.round(n.d / wSec(f.y)) / 1000, brg: Math.round(pilotHdg(Math.atan2(n.t.y - f.y, wrapDx(n.t.x - f.x)))), on: rw ? 1 : 0, len: Math.round(n.t.len / wSec(f.y)) };
+    }
+    if (f.ph === 'air' && distKm < 150) {                               // approach guidance: fix, localiser and glideslope for the chosen runway
+        const ap = pilotApp(f, B);
+        if (ap) o.app = { n: ap.t.n, km: Math.round(ap.along / 100) / 10, loc: Math.round(ap.cross), gp: Math.round(ap.gp), crs: Math.round(pilotHdg(ap.crs)), est: ap.loc, faf: ap.toFaf ? 1 : 0, fafKm: Math.round(ap.fafD / 100) / 10, fafBrg: Math.round(pilotHdg(ap.fafA)), fd: Math.round(pilotHdg(ap.fd)), gs: f.gs || 0,
+            vref: Math.round(PILOT_VS[f.flaps] * 1.3 * PILOT_KT), gfpm: Math.round(-f.vs * 3.6 * PILOT_FT_KM / PILOT_ALT_K) };
+    }
+    o.app2 = f.ctl.app || 0; o.vref = Math.round(PILOT_VS[3] * 1.3 * PILOT_KT);
+    sendWorld(client, 'world_pilot', { s: o });
 }
 function worldDoRest(client) {
     const p = client.player, w = client.world; if (!p || Date.now() < (w.restUntil || 0)) { worldNotice(client, 'You are already well rested.'); return; }
@@ -5592,6 +5964,13 @@ function worldComputePrompt(client) {
     if (client.world && client.world.itin && (worldTickN % 20 === 0)) worldTicketCheck(client);
     const w = client.world, p = client.player; if (!w || !p || !WL) return null;
     if (w.scene !== 'ext') return worldInteriorPrompt(client);
+    if (p.flight && p.flight.pilot) {                                    // in the cockpit: once stopped on the ground, shut down and get out
+        const f = p.flight; if (f.ph !== 'ground' || f.vs > 0.6) return null;
+        const A = pilotAirportAt(f.x, f.y), atDest = A && f.landed && f.landAp === f.to && A.city === f.to;
+        return { id: 'pilot', kind: 'pilot', ax: f.x, ay: f.y - 170, title: `✈ ${f.fn} · ${A ? A.code : ''}`, mini: !atDest,
+            lines: atDest ? [`Arrived safely – ${f.km.toLocaleString()} km`, `Pay ≈ ${fmtMoney(Math.round(f.pay * pilotLandingFactor(f)))} coins · auto shut-down in ${Math.max(0, 30 - Math.round(f.stopT / 60))} s`] : [f.took ? 'Not at your destination' : 'Parked · brakes set'],
+            actions: [{ a: 'park', label: atDest ? `✅ Shut down & collect ${fmtMoney(Math.round(f.pay * pilotLandingFactor(f)))}` : f.took ? 'Leave the aircraft (no pay)' : 'Cancel the flight', on: true }] };
+    }
     if (p.flight) return null;
     if (p.taxiRide) { const r = p.taxiRide; return { id: 'taxiride', kind: 'taxiride', ax: p.x, ay: p.y - 60, title: '🚕 Taxi to ' + r.dest.label, lines: [`Meter: ${worldTaxiFare(r)} coins`], actions: [{ a: 'stop', label: 'Stop here and pay', on: true }], mini: true }; }
     if (p.vehicle) {
@@ -5622,8 +6001,14 @@ function worldComputePrompt(client) {
             consider(dg - 60, { id: 'gate:' + ap.city, kind: 'gate', ctx: ap, ax: S.x, ay: S.y - 160, title: `✈ ${ap.code} · Gate ${S.g}`,
                 lines: [`${AIRLINES[t.al].name} ${t.fn} · ${ap.code} → ${B.code} ${cB.name}`, open ? `Boarding now – doors close in ${worldMinSec(left)}` : `Boarding opens in ${worldMinSec(left - AIR_BOARD)}`],
                 actions: [{ a: 'board', label: open ? `Board ${t.fn} to ${cB.name}` : `Boarding opens in ${worldMinSec(left - AIR_BOARD)}`, on: open }] });
-        } else if (dd < 160) {
-            consider(dd, { id: 'terminal:' + ap.city, kind: 'terminal', ctx: ap, ax: ap.term.x + ap.term.w / 2, ay: ap.term.y + ap.term.h / 2, title: ap.name, lines: [`Check-in · security · departure lounge · gates 1–${ap.stands.length}`, t ? `Your flight ${t.fn} leaves from Gate ${t.gate} in ${worldMinSec(t.dep - Date.now())}` : `${airItins(ap).size} destinations`], actions: [{ a: 'enter', label: 'Enter the terminal', on: true }] });
+        } else if (!ap.mega && dd < 160) {
+            consider(dd, { id: 'terminal:' + ap.city, kind: 'terminal', ctx: { ap, n: 1 }, ax: ap.term.x + ap.term.w / 2, ay: ap.term.y + ap.term.h / 2, title: ap.name, lines: [`Check-in · security · departure lounge · gates 1–${ap.stands.length}`, t ? `Your flight ${t.fn} leaves from Gate ${t.gate} in ${worldMinSec(t.dep - Date.now())}` : `${airItins(ap).size} destinations`], actions: [{ a: 'enter', label: 'Enter the terminal', on: true }] });
+        } else if (ap.mega) for (const T of ap.terms) {                    // the hub: one entrance per terminal
+            const d2 = dist(T.door); if (d2 > 170) continue;
+            const g = ap.stands.filter(q => (q.t || 0) === T.n).map(q => q.g), mine = t && apTermOf(ap, S) === T.n;
+            consider(d2, { id: 'terminal:' + ap.city + ':' + T.n, kind: 'terminal', ctx: { ap, n: T.n }, ax: T.x + T.w / 2, ay: T.y + T.h / 2, title: `${ap.name} · Terminal ${T.n}`,
+                lines: [`Check-in · security · gates ${g.length ? Math.min(...g) + '–' + Math.max(...g) : ''}${T.n === 1 ? ' · bus gates' : ''} · SkyTrain to the other terminals`, t ? `Your flight ${t.fn} leaves from Gate ${t.gate}${mine ? ' – this terminal' : apTermOf(ap, S) ? ` in Terminal ${apTermOf(ap, S)}` : ''} in ${worldMinSec(t.dep - Date.now())}` : `${airItins(ap).size} destinations from ${ap.code}`],
+                actions: [{ a: 'enter', label: `Enter Terminal ${T.n}`, on: true }] });
         }
     }
     const cx = clamp(Math.floor(p.x / W_CHUNK), 0, W_NCH - 1), cy = clamp(Math.floor(p.y / W_CHUNK), 0, W_NCH - 1);
@@ -5640,7 +6025,7 @@ function worldComputePrompt(client) {
                     actions: [{ a: 'visit', label: `Visit (${price})`, on: true }, ...(co ? [{ a: 'enter', label: 'Staff entrance', on: true }] : [])] });
             } else if (work) {
                 const co = W_COMPANIES.find(c => c.id === work), mine = w.job?.co === co.id, branch = !b.work;
-                consider(d, { id: 'work:' + b.id, kind: 'work', ctx: b, ax, ay, title: co.name + (branch ? ' (branch)' : ''), lines: [mine ? `You work here as ${WORLD_RANKS[worldRank(w)]} ${co.role}` : `Hiring: ${co.role} · ~${worldPayFor(co, b.door)} coins per ${co.kind === 'desk' ? 'task' : co.kind === 'farm' ? '5 crops' : 'job'}`, co.perk ? 'Perk: ' + WORLD_PERKS[co.perk] : 'Staff entrance – reception inside'], actions: [{ a: 'enter', label: 'Go inside', on: true }] });
+                consider(d, { id: 'work:' + b.id, kind: 'work', ctx: b, ax, ay, title: co.name + (branch ? ' (branch)' : ''), lines: [mine ? `You work here as ${WORLD_RANKS[worldRank(w)]} ${co.role}` : co.kind === 'pilot' ? `Hiring: Pilots · ${fmtMoney(co.pay)} coins per 1000 km flown` : `Hiring: ${co.role} · ~${worldPayFor(co, b.door)} coins per ${co.kind === 'desk' ? 'task' : co.kind === 'farm' ? '5 crops' : 'job'}`, co.perk ? 'Perk: ' + WORLD_PERKS[co.perk] : 'Staff entrance – reception inside'], actions: [{ a: 'enter', label: 'Go inside', on: true }] });
             } else if (b.shop) {
                 const sk = SHOP_KINDS[b.shop], sp = worldShopPrompt(client, b.shop, sk.items, city, b.fuel ? 'airport' : 'street');
                 consider(d, { id: 'shop:' + b.id, kind: 'shop', ctx: { city, items: worldCultureItems(b.shop, sk.items, city) }, ax, ay, title: (b.fuel ? '⛽ ' : '') + (b.sn || sk.name), lines: [`${city ? city.name + ' prices' : 'Roadside prices'} · cash ${fmtMoney(cash)} · bank ${fmtMoney(coins)}`, ...(sp.greet ? [sp.greet] : [])], actions: sp.actions, pick: true });
@@ -5689,17 +6074,20 @@ function worldInteriorPrompt(client) {
     if (def.kind === 'office') {
         const co = W_COMPANIES.find(c => c.id === def.coId), emp = worldEmployer(w), mine = emp && emp.id === co.id, now = Date.now();
         if (near(def.reception)) {
-            const lines = [co.name, `${co.role} · ${worldPayFor(co, w.ext)} coins per shift`]; const actions = [];
-            const how = { desk: `Desk tasks take ${co.task}s`, courier: 'Pick up and deliver parcels around town (J: next job)', taxi: 'Drive passengers in your own car (J: next fare)', guide: 'Lead tour groups round the sights (J: next tour)', farm: 'Harvest crops: shoot the shapes in farm fields' }[co.kind];
+            const lines = [co.name, co.kind === 'pilot' ? `${co.role} · ${fmtMoney(co.pay)} coins per 1000 km, paid on a safe landing` : `${co.role} · ${worldPayFor(co, w.ext)} coins per shift`]; const actions = [];
+            const how = { desk: `Desk tasks take ${co.task}s`, courier: 'Pick up and deliver parcels around town (J: next job)', taxi: 'Drive passengers in your own car (J: next fare)', guide: 'Lead tour groups round the sights (J: next tour)', farm: 'Harvest crops: shoot the shapes in farm fields', pilot: 'Fly Central Air jets yourself from any airport (J: flight dispatch). Crash and you die.' }[co.kind];
             lines.push(how); if (co.perk) lines.push('Perk: ' + WORLD_PERKS[co.perk]);
-            lines.push(`Company level ${worldCoLevel(co)} · promotion every ${WORLD_RANK_TASKS} tasks (+15% pay each)`);
+            lines.push(co.kind === 'pilot' ? `${WORLD_RANK_TASKS} flights per promotion · type rating: narrow-body and wide-body jets` : `Company level ${worldCoLevel(co)} · promotion every ${WORLD_RANK_TASKS} tasks (+15% pay each)`);
             if (mine) { lines.push(`${WORLD_RANKS[worldRank(w)]} · shift due in ${worldFmtMs(worldFireMs(co) - (w.playMs - w.jobLast))}`); actions.push({ a: 'quit', label: 'Resign', on: true }); }
             else if (emp) lines.push(`Resign from ${emp.name} first`);
             else if (now < (w.jobCd || 0)) lines.push(`Recently fired – retry in ${worldFmtMs((w.jobCd || 0) - now)}`);
             else { lines.push(`Work at least every ${Math.round(worldFireMs(co) / 60000)} min of play or you will be fired`); actions.push({ a: 'apply', label: 'Apply for the job', on: true }); }
             consider(Math.hypot(def.reception.x - p.x, def.reception.y - p.y) - 60, { id: 'reception', kind: 'reception', ax: def.reception.x, ay: def.reception.y - 90, title: 'Reception', lines, actions });
         }
-        for (const s of def.stations) if (!s.use && near(s)) {
+        for (const s of def.stations) if (!s.use && near(s) && co.kind === 'pilot') {
+            consider(Math.hypot(s.x - p.x, s.y - p.y) - 30, { id: s.id, kind: 'desk', ctx: s, ax: s.x, ay: s.y - 70, title: '🛫 Flight dispatch', lines: mine ? ['Pick a route – your aircraft waits on the crew apron', `${fmtMoney(co.pay)} coins per 1000 km on a safe landing`] : ['Pilots only – apply at reception'], actions: mine ? [{ a: 'dispatch', label: '✈ Open flight dispatch', on: true }] : [] });
+        }
+        for (const s of def.stations) if (!s.use && near(s) && co.kind !== 'pilot') {
             const t = w.task && w.task.desk === s.id;
             const desk = co.kind === 'desk', lines = !mine ? ['You need a job here – apply at reception'] : !desk ? ['Your work is out in the city – press J for the next job'] : (t ? ['Working…'] : [`Earn ~${Math.round(worldPayFor(co, w.ext) * (1 + 0.15 * worldRank(w)))} coins · takes ${co.task}s`, 'Stay at your desk until finished']);
             consider(Math.hypot(s.x - p.x, s.y - p.y) - 30, { id: s.id, kind: 'desk', ctx: s, ax: s.x, ay: s.y - 70, title: 'Work station', lines, actions: mine && desk ? [t ? { a: 'cancel', label: 'Stop', on: true } : { a: 'work', label: 'Start work', on: true }] : [] });
@@ -5738,17 +6126,19 @@ function worldInteract(client, d) {
         }
         case 'reception': {
             const def = client.room.def, co = W_COMPANIES.find(c => c.id === def.coId);
-            if (act.a === 'apply') { w.job = { co: co.id }; w.jobLast = w.playMs; w.jobTasks = 0; w.mission = null; worldNotice(client, `You're hired as ${WORLD_RANKS[0]} ${co.role} at ${co.name}! ${co.kind === 'desk' ? 'Complete a task at any desk' : co.kind === 'farm' ? 'Harvest crops in the fields' : 'Press J outside for your next job'} at least every ${Math.round(worldFireMs(co) / 60000)} minutes of play.`, { level: 'good' }); }
+            if (act.a === 'apply') { w.job = { co: co.id }; w.jobLast = w.playMs; w.jobTasks = 0; w.mission = null; worldNotice(client, co.kind === 'pilot' ? `🧑‍✈️ Welcome to ${co.name}, ${WORLD_RANKS[0]} ${co.role}! Use a dispatch console here (or press J at any airport) to pick a route. You earn ${fmtMoney(co.pay)} coins per 1000 km on a safe landing – a crash costs your life. Fly at least every ${Math.round(worldFireMs(co) / 60000)} minutes of play.` : `You're hired as ${WORLD_RANKS[0]} ${co.role} at ${co.name}! ${co.kind === 'desk' ? 'Complete a task at any desk' : co.kind === 'farm' ? 'Harvest crops in the fields' : 'Press J outside for your next job'} at least every ${Math.round(worldFireMs(co) / 60000)} minutes of play.`, { level: 'good' }); }
             else if (act.a === 'quit') { w.job = null; w.task = null; w.mission = null; w.jobTasks = 0; worldNotice(client, `You resigned from ${co.name}.`); worldPushMission(client); }
             worldPushState(client); worldSave(client); break;
         }
         case 'desk':
+            if (act.a === 'dispatch') { worldPilotMenu(client); break; }
             if (act.a === 'work') { w.task = { desk: pr.id, start: Date.now(), x: p.x, y: p.y }; }
             else w.task = null;
             break;
         case 'bed': worldDoRest(client); break;
-        case 'gate': if (act.a === 'board') worldBoardWithTicket(client, pr.ctx); else if (act.a === 'enter') { const def = worldInteriorDef('term:' + pr.ctx.city); worldGoto(client, 'term:' + pr.ctx.city, def.spawn.x, def.spawn.y); } break;
-        case 'terminal': if (act.a === 'enter') { const def = worldInteriorDef('term:' + pr.ctx.city); worldGoto(client, 'term:' + pr.ctx.city, def.spawn.x, def.spawn.y); } break;
+        case 'pilot': pilotFinish(client, false); break;
+        case 'gate': if (act.a === 'board') worldBoardWithTicket(client, pr.ctx); else if (act.a === 'enter') { const key = worldTermKey(pr.ctx.city, 1), def = worldInteriorDef(key); worldGoto(client, key, def.spawn.x, def.spawn.y); } break;
+        case 'terminal': if (act.a === 'enter') { const key = worldTermKey(pr.ctx.ap.city, pr.ctx.n || 1), def = worldInteriorDef(key); worldGoto(client, key, def.spawn.x, def.spawn.y); } break;
         case 'use': case 'tickets': worldUse(client, pr.ctx, act.a, d); break;
         case 'shop': case 'stall': if (act.a.startsWith('buy:')) worldBuyItem(client, act.a.slice(4), pr.ctx.city); break;
         case 'attraction': if (act.a === 'visit') worldVisit(client, pr.ctx); else if (act.a === 'enter') { const def = worldInteriorDef('work:' + pr.ctx.id); worldGoto(client, 'work:' + pr.ctx.id, def.spawn.x, def.spawn.y); } break;
@@ -5801,17 +6191,17 @@ function worldCompleteWork(client, co, basePay, what, xpGain = 1) {
 
 // ---- company expansion: shared progress of every player's work; growing companies open branch offices -------------
 const companyState = new Map();                            // id -> { xp, level }
-function worldLoadCompanies() {
-    db.prepare('CREATE TABLE IF NOT EXISTS world_companies (id TEXT PRIMARY KEY, xp INTEGER NOT NULL DEFAULT 0, level INTEGER NOT NULL DEFAULT 1)').run();
+async function worldLoadCompanies() {
+    const rows = await DB.all('SELECT * FROM world_companies');
     companyState.clear();
-    for (const r of db.prepare('SELECT * FROM world_companies').all()) companyState.set(r.id, { xp: r.xp, level: r.level });
+    for (const r of rows) companyState.set(r.id, { xp: r.xp, level: r.level });
     for (const co of W_COMPANIES) if (!companyState.has(co.id)) companyState.set(co.id, { xp: 0, level: 1 });
     worldAssignBranches();
 }
 function worldCompanyXp(co, n) {
     const st = companyState.get(co.id); st.xp += n;
     let lv = 1; while (lv < COMPANY_LEVEL_XP.length && st.xp >= COMPANY_LEVEL_XP[lv]) lv++;
-    db.prepare('INSERT INTO world_companies(id,xp,level) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET xp=excluded.xp, level=excluded.level').run(co.id, st.xp, lv);
+    DB.w('INSERT INTO world_companies(id,xp,level) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET xp=excluded.xp, level=excluded.level', co.id, st.xp, lv);
     if (lv > st.level) {
         st.level = lv; worldAssignBranches();
         const list = [...WL.branch];
@@ -5842,6 +6232,7 @@ function worldDoorsNear(x, y, rmin, rmax, filter) {
 function worldGigLabel(b) { const c = W_CITIES.find(q => q.id === b.city); return (b.sn || b.nm || b.sign || ({ house: 'a house', old: 'a townhouse', apt: 'an apartment block', farmhouse: 'a farmhouse', mid: 'an office block', tower: 'a tower', terminal: 'the airport' }[b.k]) || 'an address') + (c ? ' (' + c.name + ')' : ''); }
 function worldStartGig(client) {
     const w = client.world, p = client.player, co = worldEmployer(w);
+    if (co && co.kind === 'pilot') { worldPilotMenu(client); return; }      // pilots: flight dispatch, at any airport (inside or out)
     if (!w || !p || w.scene !== 'ext') { worldNotice(client, 'Go outside to take a job.'); return; }
     if (!co || !['courier', 'taxi', 'guide'].includes(co.kind)) { worldNotice(client, 'Your job has no gigs – work at your desk instead.'); return; }
     if (w.mission) { worldNotice(client, 'Finish (or cancel) your current job first.'); return; }
@@ -5951,7 +6342,7 @@ function worldBuyItem(client, id, city) {
     if (it.pu) { const [t, secs] = it.pu; p.powerups[t] = Math.max(Date.now(), p.powerups[t] || 0) + secs * 1000; msg.push(`${WORLD_PU_NAMES[t] || t} for ${secs >= 120 ? Math.round(secs / 60) + ' min' : secs + 's'}`); }
     if (it.souvenir) {
         w.souv.add(city.id); msg.push(`souvenir ${w.souv.size}/${W_CITIES.length}`);
-        if (w.souv.size === W_CITIES.length && !w.souvDone) { w.souvDone = true; db.prepare('UPDATE users SET coins=coins+? WHERE id=?').run(2500, client.dbId); worldPushProfile(client); worldNotice(client, '🏆 World traveller! You collected a souvenir from every city: +2,500 coins in the bank.', { level: 'good' }); }
+        if (w.souv.size === W_CITIES.length && !w.souvDone) { w.souvDone = true; Users.addCoins(client.dbId, 2500); worldPushProfile(client); worldNotice(client, '🏆 World traveller! You collected a souvenir from every city: +2,500 coins in the bank.', { level: 'good' }); }
     }
     worldNotice(client, `Bought ${it.souvenir ? city.name + ' souvenir' : it.name} (-${price})${msg.length ? ': ' + msg.join(', ') : ''}`, { level: 'good' });
     worldPushState(client); worldSave(client);
@@ -6208,15 +6599,26 @@ function buildCasinoFloor(D, b) {
 }
 
 // ---- join / leave / message router ---------------------------------------------------------
-function worldJoin(client) {
+// The saved state is fetched from the database worker first (after queueing a save of the current state, so a rejoin
+// reads it back); everything after the await is synchronous, so the client is never half-joined.
+async function worldJoin(client) {
     if (!client.dbId) { sendWorld(client, 'world_error', { message: 'Log in to play World Mode.' }); return; }
-    ensureWorld();
-    if (client.world) { worldSave(client); worldDetach(client); worldClients.delete(client); }
+    if (client.worldJoining) return;
+    client.worldJoining = true;
+    let saved;
+    try {
+        await ensureWorld();
+        await Users.load(client.dbId);
+        if (client.world) worldSave(client);
+        saved = await DB.get('SELECT * FROM world_players WHERE user_id=?', client.dbId);
+    } catch (err) { console.error('[World] join failed', err); sendWorld(client, 'world_error', { message: 'World Mode is unavailable right now – try again in a moment.' }); return; }
+    finally { client.worldJoining = false; }
+    if (client.closed || !client.dbId) return;
+    if (client.world) { worldDetach(client); worldClients.delete(client); }
     else {
         if (client.room) client.room.clients = client.room.clients.filter(c => c !== client);
         if (client.player) { const old = client.player; if (client.room) { client.room.entities = client.room.entities.filter(e => e !== old); client.room.drones = client.room.drones.filter(d => d.owner !== old); } old.markedForDeletion = true; client.player = null; }
     }
-    const saved = db.prepare('SELECT * FROM world_players WHERE user_id=?').get(client.dbId);
     let stats = [0, 0, 0, 0, 0, 0, 0, 0];
     try { const u = JSON.parse(saved?.upgrades || '{}'); if (Array.isArray(u.stats) && u.stats.length === 8) stats = u.stats; } catch { }
     const car = saved?.owned_car && WORLD_CARS.find(c => c.id === saved.owned_car) ? saved.owned_car : null;
@@ -6240,7 +6642,7 @@ function worldJoin(client) {
     else if (saved) worldGoto(client, 'ext', client.world.ext.x, client.world.ext.y);
     else worldGoto(client, 'ext', WL.spawn.x + (Math.random() - 0.5) * 60, WL.spawn.y);
     worldRoom.worldKind = 'exterior';
-    db.prepare('UPDATE world_houses SET last_seen=? WHERE owner_id=?').run(Date.now(), client.dbId);
+    DB.w('UPDATE world_houses SET last_seen=? WHERE owner_id=?', Date.now(), client.dbId);
 }
 function worldOnDisconnect(client) {
     const w = client.world; if (!w) return;
@@ -6255,6 +6657,7 @@ function worldHandle(client, d) {
     else if (d.type === 'world_leave') { worldOnDisconnect(client); }
     else if (d.type === 'world_nav') worldNav(client, String(d.t), d);
     else if (d.type === 'world_inflight') worldInflightOrder(client, String(d.item || ''));
+    else if (d.type === 'world_pilot') worldPilotMsg(client, d);
     else if (d.type === 'world_casino') worldCasino(client, d);
     else if (d.type === 'world_phone') worldPhone(client, d);
     else if (d.type === 'world_gig') { if (d.act === 'cancel') { if (w.mission) { w.mission = null; worldNotice(client, 'Job cancelled.'); worldPushMission(client); } } else worldStartGig(client); }
@@ -6381,14 +6784,14 @@ function worldNav(client, t, d = {}) {
     const tgt = worldResolveTarget(client, t, d);
     sendWorld(client, 'world_nav', { t, tgt, route: tgt ? worldRoute({ x: p.x, y: p.y }, tgt) : null });
 }
-function worldOnPlayerDeath(owner, e) {
+function worldOnPlayerDeath(owner, e, reason, delay) {
     const w = owner.world; if (!w || w.dead) return;
     w.dead = true; w.task = null; w.sessionCoins = 0; w.buff = null;
     if (e.vehicle) { e.vehicle = null; e.ghost = false; const pc = parkedCars.get(owner.dbId); if (pc) pc.driven = false; }
     // Progress resets on death (permanent stat upgrades are kept, as before); unbanked cash is lost.
     w.prog = { score: 0, level: 1, statPoints: 0, stats: [...e.stats], tankType: 'Basic' };
-    w.respawnAt = Date.now() + 60;
-    sendWorld(owner, 'world_death', { reason: 'Your tank was destroyed. Unbanked cash lost.' });
+    w.respawnAt = Date.now() + (delay || 60);
+    sendWorld(owner, 'world_death', { reason: reason || 'Your tank was destroyed. Unbanked cash lost.' });
 }
 
 // ---- farms: shapes only exist inside designated fields ------------------------------------------
@@ -6609,18 +7012,18 @@ setInterval(() => {
         if (co && worldTickN % 20 === 0) {
             const left = worldFireMs(co) - (w.playMs - w.jobLast);
             if (left <= 0) worldFire(c);
-            else for (const th of WORLD_WARN_MS) if (left <= th && (w.warned || Infinity) > th) { w.warned = th; worldNotice(c, `Warning: you will be fired from ${co.name} in ${worldFmtMs(left)} unless you ${co.kind === 'desk' ? 'complete a task at your desk' : co.kind === 'farm' ? 'harvest some crops' : 'finish a job (press J)'}.`, { level: 'warn' }); }
+            else for (const th of WORLD_WARN_MS) if (left <= th && (w.warned || Infinity) > th) { w.warned = th; worldNotice(c, `Warning: you will be fired from ${co.name} in ${worldFmtMs(left)} unless you ${co.kind === 'desk' ? 'complete a task at your desk' : co.kind === 'farm' ? 'harvest some crops' : co.kind === 'pilot' ? 'complete a flight (press J at an airport)' : 'finish a job (press J)'}.`, { level: 'warn' }); }
             if (left > WORLD_WARN_MS[0]) w.warned = Infinity;
         }
         if (worldTickN % 20 === 0) { w.bankCoins = worldBankCoins(c); worldPushState(c); }
         if (w.scene === 'ext' && !p.vehicle && !p.flight) w.ext = { x: p.x, y: p.y };
         if (w.scene === 'ext' && worldTickN % (p.flight ? 2 : 10) === 0) worldStreamChunks(c);
-        if (p.flight && worldTickN % 10 === 0) worldPushFlight(c);
+        if (p.flight && p.flight.pilot) worldPushPilot(c);
+        else if (p.flight && worldTickN % 10 === 0) worldPushFlight(c);
         if (w.mission && worldTickN % 4 === 0) { worldMissionTick(c); if (w.mission && worldTickN % 20 === 0) worldPushMission(c); }
         if (now - w.lastSave > WORLD_SAVE_MS) worldSave(c);
     }
 }, 50);
-ensureWorld();
 
 // ===================== WEBSOCKET CONNECTION HANDLER =====================
 
@@ -6628,8 +7031,7 @@ wss.on('connection', (ws, req) => {
     const rawIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     const ipHash = rawIp
 
-    const isBanned = db.prepare("SELECT * FROM banned_ips_v2 WHERE ip_hash = ?").get(ipHash);
-    if (isBanned) {
+    if (bannedIps.has(ipHash)) {
         ws.close(4000, "Banned");
         return;
     }
@@ -6699,7 +7101,7 @@ wss.on('connection', (ws, req) => {
     if (!data) return;
 
 
-        if (data.type === 'world_join') { worldJoin(client); return; }
+        if (data.type === 'world_join') { afterAuth(client, () => worldJoin(client)); return; }
         if (data.type && data.type.startsWith('world_') && data.type !== 'world_join') { worldHandle(client,data); return; }
         if(data.type === 'ping') {
             wsSendObj(ws, ({ type: 'pong', time: data.time, locationl: SERVER_LOCATION }));
@@ -6746,7 +7148,7 @@ wss.on('connection', (ws, req) => {
             }
             client.spectatingId = null;
             if (client.dbId) {
-                let user = db.prepare("SELECT selected_color FROM users WHERE id = ?").get(client.dbId);
+                let user = Users.get(client.dbId);
                 if (user) {
                     client.player.nameColor = user.selected_color;
                 }
@@ -6778,45 +7180,45 @@ wss.on('connection', (ws, req) => {
             if (client.room?.mode === 'WORLD' && client.world) worldSave(client);
         }
         if (data.type === 'auth_login') {
-            let user = db.prepare("SELECT * FROM users WHERE session_token = ?").get(data.token);
-            if (user) {
+            // looked up by the database worker; world_join / shop messages that arrive meanwhile wait for it (afterAuth)
+            client.authPending = true;
+            const p = client.authP = Users.byToken(data.token).then(user => {
+                if (!user || client.closed) return;
+                if (client.dbId !== user.id) { Users.unref(client.dbId); Users.ref(user.id); }
                 client.dbId = user.id;
                 if (client.player) client.player.nameColor = user.selected_color;
                 wsSendObj(client.ws, ({ type: 'profile_update', profile: user }));
-            }
+            }).catch(err => console.error('[Auth]', err.message)).finally(() => { if (client.authP === p) client.authPending = false; });
         }
 
-        if (data.type === 'buy_item') {
-            if (!client.dbId) return;
-            let user = db.prepare("SELECT * FROM users WHERE id = ?").get(client.dbId);
-            let unlocked = JSON.parse(user.unlocked_colors);
-            
+        if (data.type === 'buy_item') afterAuth(client, () => {
+            const user = Users.get(client.dbId); if (!user) return;
+            let unlocked; try { unlocked = JSON.parse(user.unlocked_colors || '["#ffffff"]'); } catch (e) { unlocked = ['#ffffff']; }
             if (data.category === 'colors') {
                 let item = SHOP_ITEMS.colors.find(i => i.id === data.itemId);
                 if (item && user.coins >= item.cost && !unlocked.includes(item.id)) {
                     unlocked.push(item.id);
-                    db.prepare("UPDATE users SET coins = coins - ?, unlocked_colors = ? WHERE id = ?")
-                      .run(item.cost, JSON.stringify(unlocked), client.dbId);
-                    wsSendObj(client.ws, ({ type: 'profile_update', profile: db.prepare("SELECT * FROM users WHERE id = ?").get(client.dbId) }));
+                    Users.addCoins(client.dbId, -item.cost); Users.set(client.dbId, { unlocked_colors: JSON.stringify(unlocked) });
+                    wsSendObj(client.ws, ({ type: 'profile_update', profile: Users.get(client.dbId) }));
                 }
             }
-        }
+        });
 
-        if (data.type === 'equip_item') {
-            if (!client.dbId) return;
-            let user = db.prepare("SELECT * FROM users WHERE id = ?").get(client.dbId);
-            let unlocked = JSON.parse(user.unlocked_colors);
-            
+        if (data.type === 'equip_item') afterAuth(client, () => {
+            const user = Users.get(client.dbId); if (!user) return;
+            let unlocked; try { unlocked = JSON.parse(user.unlocked_colors || '["#ffffff"]'); } catch (e) { unlocked = ['#ffffff']; }
             if (data.category === 'colors' && unlocked.includes(data.itemId)) {
-                db.prepare("UPDATE users SET selected_color = ? WHERE id = ?").run(data.itemId, client.dbId);
+                Users.set(client.dbId, { selected_color: data.itemId });
                 if (client.player) client.player.nameColor = data.itemId;
-                wsSendObj(client.ws, ({ type: 'profile_update', profile: db.prepare("SELECT * FROM users WHERE id = ?").get(client.dbId) }));
+                wsSendObj(client.ws, ({ type: 'profile_update', profile: Users.get(client.dbId) }));
             }
-        }
+        });
     });
 
     ws.on('close', () => {
+        client.closed = true;
         if (client.world) { worldOnDisconnect(client); }
+        if (client.dbId) Users.unref(client.dbId);
         if (client.player) {
             // Immediately remove the player entity from the room so it leaves no hitbox
             // and doesn't appear in broadcasts or the room-players API
@@ -7020,13 +7422,13 @@ async function updateLeaderboard() {
         const channel = await discordClient.channels.fetch(LEADERBOARD_CHANNEL_ID);
         if (!channel) return;
 
-        const topUsers = db.prepare(`
+        const topUsers = await DB.all(`
             SELECT id, username, high_score 
             FROM users 
             WHERE provider = 'discord' AND high_score > 0 
             ORDER BY high_score DESC 
             LIMIT 10
-        `).all();
+        `);
 
         const embed = new EmbedBuilder()
             .setColor('#FFD700')
@@ -7044,7 +7446,7 @@ async function updateLeaderboard() {
             embed.addFields({ name: 'Top 10 Players', value: boardText });
         }
 
-        const msgRecord = "1494846178263568547" || db.prepare("SELECT value FROM bot_config WHERE key = 'leaderboard_msg_id'").get();
+        const msgRecord = "1494846178263568547";        // pinned leaderboard message (bot_config.leaderboard_msg_id is only written as a fallback)
         
         if (msgRecord) {
             try {
@@ -7057,7 +7459,7 @@ async function updateLeaderboard() {
         }
 
         const newMsg = await channel.send({ embeds: [embed] });
-        db.prepare("INSERT OR REPLACE INTO bot_config (key, value) VALUES ('leaderboard_msg_id', ?)").run(newMsg.id);
+        DB.w("INSERT OR REPLACE INTO bot_config (key, value) VALUES ('leaderboard_msg_id', ?)", newMsg.id);
 
     } catch (err) {
         console.error('failed to update leaderboard ', err);
@@ -7070,33 +7472,8 @@ async function createDatabaseBackup() {
         const channel = await discordClient.channels.fetch(BACKUP_CHANNEL_ID);
         if (!channel) return;
 
-        db.pragma('wal_checkpoint(FULL)');
-
-        const backupFolder = path.join(__dirname, 'backups');
-
-        if (!fs.existsSync(backupFolder)) {
-            fs.mkdirSync(backupFolder);
-        }
-
-        const timestamp = new Date()
-            .toISOString()
-            .replace(/[:.]/g, '-');
-
-        const tempDbPath = path.join(
-            backupFolder,
-            `game-${timestamp}.db`
-        );
-
-        const zipPath = path.join(
-            backupFolder,
-            `backup-${timestamp}.zip`
-        );
-
-        fs.copyFileSync(dbPath, tempDbPath);
-
-        const zip = new AdmZip();
-        zip.addLocalFile(tempDbPath);
-        zip.writeZip(zipPath);
+        // the database worker takes a consistent online copy and zips it (no file work on the game thread)
+        const { zipPath } = await DB.op('backup', { folder: path.join(__dirname, 'backups') });
 
         const embed = new EmbedBuilder()
             .setColor(EMBED_COLOR)
@@ -7114,8 +7491,7 @@ async function createDatabaseBackup() {
             files: [zipPath]
         });
 
-        fs.unlinkSync(tempDbPath);
-        fs.unlinkSync(zipPath);
+        await fs.promises.unlink(zipPath).catch(() => {});
 
         console.log('Backup uploaded successfully');
 
@@ -7153,8 +7529,6 @@ discordClient.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'world-regenerate') {
         const allowed=(process.env.ADMIN_DISCORD_IDS||'').split(',').map(v=>v.trim()).filter(Boolean);
         if (!allowed.includes(interaction.user.id)) return interaction.reply({content:'Not authorized.',ephemeral:true});
-        db.prepare('DELETE FROM world_meta WHERE id=1').run();
-        db.prepare('DELETE FROM world_houses').run();
         worldRegenerate();
         return interaction.reply({content:'World regenerated with a new seed. Player progress, levels and balances were preserved; all house ownership was cleared. Connected players were told to reload.',ephemeral:true});
     }
@@ -7167,9 +7541,7 @@ discordClient.on('interactionCreate', async interaction => {
 
         const dbId = `discord_${interaction.user.id}`;
 
-        const user = db.prepare(
-            "SELECT * FROM users WHERE id = ?"
-        ).get(dbId);
+        const user = await Users.load(dbId);
 
         if (!user) {
 
@@ -7347,55 +7719,15 @@ discordClient.on('interactionCreate', async interaction => {
 
         try {
 
-            const tempFolder = path.join(__dirname, 'temp_restore');
-
-            if (!fs.existsSync(tempFolder)) {
-                fs.mkdirSync(tempFolder);
-            }
-
-            const zipFilePath = path.join(
-                tempFolder,
-                attachment.name
-            );
-
+            // download here (async I/O); unzip, validate, swap the file and reopen in the database worker
+            const dlFolder = path.join(__dirname, 'temp_restore_dl');
+            await fs.promises.mkdir(dlFolder, { recursive: true });
+            const zipFilePath = path.join(dlFolder, path.basename(attachment.name));
             const response = await fetch(attachment.url);
-
-            fs.writeFileSync(
-                zipFilePath,
-                Buffer.from(await response.arrayBuffer())
-            );
-
-            const zip = new AdmZip(zipFilePath);
-
-            zip.extractAllTo(tempFolder, true);
-
-            const dbFile = fs.readdirSync(tempFolder)
-                .find(f => f.endsWith('.db'));
-
-            if (!dbFile) {
-                throw new Error(
-                    'No .db file found inside zip'
-                );
-            }
-
-            const extractedDbPath = path.join(
-                tempFolder,
-                dbFile
-            );
-
-            const sourceDb = new Database(
-                extractedDbPath,
-                { readonly: true }
-            );
-
-            await sourceDb.backup(dbPath);
-
-            sourceDb.close();
-
-            fs.rmSync(tempFolder, {
-                recursive: true,
-                force: true
-            });
+            await fs.promises.writeFile(zipFilePath, Buffer.from(await response.arrayBuffer()));
+            try { await DB.op('restore', { zipPath: zipFilePath, tempFolder: path.join(__dirname, 'temp_restore') }); }
+            finally { await fs.promises.rm(dlFolder, { recursive: true, force: true }).catch(() => {}); }
+            await reloadAfterRestore();
 
             const successEmbed = new EmbedBuilder()
                 .setColor('#57F287')
@@ -7439,6 +7771,7 @@ discordClient.on('interactionCreate', async interaction => {
 // LOGIN
 // ======================
 
+function discordLogin() {
 if (process.env.DISCORD_BOT_TOKEN) {
 
     discordClient.login(
@@ -7451,12 +7784,41 @@ if (process.env.DISCORD_BOT_TOKEN) {
         );
     });
 }
+}
 
-// ===================== SERVER LISTEN =====================
+// ===================== STARTUP & SHUTDOWN =====================
+// Nothing is served until the database worker has the schema ready and the persistent state is in memory.
+async function reloadAfterRestore() {
+    await Users.reloadAll();
+    bannedIps.clear(); for (const r of await DB.all('SELECT ip_hash FROM banned_ips_v2')) bannedIps.add(r.ip_hash);
+    houseOwner.clear();
+    for (const h of await DB.all('SELECT h.id, h.owner_id, h.purchased_at, u.username FROM world_houses h LEFT JOIN users u ON u.id = h.owner_id WHERE h.owner_id IS NOT NULL'))
+        houseOwner.set(h.id, { owner_id: h.owner_id, name: h.username || 'Resident', purchased_at: h.purchased_at || 0 });
+    await worldLoadCompanies();
+}
+async function serverStart() {
+    const t0 = Date.now();
+    await DB.op('seedAchievements', ACHIEVEMENTS);
+    for (const r of await DB.all('SELECT ip_hash FROM banned_ips_v2')) bannedIps.add(r.ip_hash);
+    for (const [id, mode] of DEFAULT_ROOMS) rooms[id] = new Room(id, mode, await loadLobbyConfig(id));
 
-server.listen(8000, '0.0.0.0', () => {
-    const protocol = process.env.RAILWAY_STATIC_URL ? 'wss' : 'ws';
-    const httpProtocol = process.env.RAILWAY_STATIC_URL ? 'https' : 'http';
+    await ensureWorld();
+    console.log(`[Startup] Database and world ready in ${Date.now() - t0} ms.`);
+    discordLogin();
+    server.listen(8000, '0.0.0.0', () => {
+        console.log(`server is live`);
+    });
+}
+serverStart().catch(err => { console.error('[Startup] failed:', err); process.exit(1); });
 
-    console.log(`server is live`);
-});
+// On shutdown, queue a final save for everyone in World Mode and wait for the database worker to finish every
+// pending write before exiting.
+async function serverShutdown(sig) {
+    if (shuttingDown) return; shuttingDown = true;
+    console.log(`[Shutdown] ${sig}: saving and flushing the database…`);
+    try { for (const c of [...worldClients]) { try { worldSave(c); } catch (e) { } } await Promise.race([DB.barrier(), new Promise(r => setTimeout(r, 8000))]); }
+    catch (err) { console.error('[Shutdown]', err.message); }
+    process.exit(0);
+}
+process.on('SIGTERM', () => serverShutdown('SIGTERM'));
+process.on('SIGINT', () => serverShutdown('SIGINT'));
