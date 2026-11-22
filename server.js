@@ -225,7 +225,7 @@ const LEVEL_REQUIREMENTS = [ 0, 0, 22, 100, 210, 355, 470, 600, 775, 930, 1100, 
 // bot_config so it survives restarts, but read from this in-memory
 // variable on every spawn so toggling it takes effect immediately.
 const SANDBOX_SPAWN_SCORE = 24000;
-let sandboxMode = true;
+let sandboxMode = false;
 // ===================== GAME DATA =====================
 let BOT_NAMES = [];
 try {
