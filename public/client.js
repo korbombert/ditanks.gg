@@ -2157,6 +2157,8 @@ function handleWorldMessage(d) {
         case 'world_nav': WC.nav = d.tgt ? { t: d.t, ...d.tgt, route: d.route } : null; if (!d.tgt) wcToast({ work: 'No workplace found.', home: 'You do not own a house yet.', car: 'Your car is not parked anywhere.', pin: 'Cannot route there.' }[d.t] || 'No destination.', 'bad'); return true;
         case 'world_death': wcToast(d.reason || 'You died.', 'bad'); return true;
         case 'world_flight': wcFlight = d.f; wcRenderFlight(); wcIfeRender(); return true;
+        case 'world_pilot': pilMsg(d); return true;
+        case 'world_boom': PIL.booms.push({ x: d.x, y: d.y, t: performance.now(), r: Math.random() * 6 }); return true;
         case 'world_furn': if (d.key === WC.intKey) WC.fstate = d.s || {}; return true;
         case 'casino_open': casOpen(d); return true;
         case 'phone': phOnMsg(d); return true;
@@ -2216,7 +2218,7 @@ function wcRenderChip() {
     const chip = document.getElementById('world-chip'); if (!chip) return;
     const j = worldState.job, left = j ? Math.max(0, wcJobBase.left - (performance.now() - wcJobBase.t)) : 0;
     let html = `<div class="wc-row"><span class="wc-ico">🪙</span><span><small>UNBANKED</small><b>${numberWithCommas(Math.floor(worldState.sessionCoins || 0))}</b></span></div>`;
-    if (j) html += `<div class="wc-row${left < 180000 ? ' wc-warn' : ''}"><span class="wc-ico">💼</span><span><small>${escapeHTML(j.name)} · ${escapeHTML(j.rank || '')} ${escapeHTML(j.role || '')}</small><b>Shift due ${wcFmtMs(left)}</b></span>${['courier', 'taxi', 'guide'].includes(j.kind) ? `<button class="wc-btn" data-act="gig">${wcMission ? '✖ Cancel job' : '▶ Next job'} <kbd>J</kbd></button>` : ''}</div>`;
+    if (j) html += `<div class="wc-row${left < 180000 ? ' wc-warn' : ''}"><span class="wc-ico">💼</span><span><small>${escapeHTML(j.name)} · ${escapeHTML(j.rank || '')} ${escapeHTML(j.role || '')}</small><b>${j.kind === 'pilot' ? 'Fly within' : 'Shift due'} ${wcFmtMs(left)}</b></span>${j.kind === 'pilot' ? `<button class="wc-btn" data-act="gig">✈ Flights <kbd>J</kbd></button>` : ['courier', 'taxi', 'guide'].includes(j.kind) ? `<button class="wc-btn" data-act="gig">${wcMission ? '✖ Cancel job' : '▶ Next job'} <kbd>J</kbd></button>` : ''}</div>`;
     if (worldState.car) { const fu = worldState.car.fuel ?? 100; html += `<div class="wc-row${fu < 15 ? ' wc-warn' : ''}"><span class="wc-ico">🚗</span><span><small>CAR · FUEL</small><b>${worldState.car.driven ? 'Driving' : 'Parked'} · ${Math.round(fu)}%</b><i class="wc-fuel"><i style="width:${Math.max(0, Math.min(100, fu))}%;background:${fu < 15 ? '#ff6b5a' : fu < 35 ? '#ffb000' : '#5fd38a'}"></i></i></span></div>`; }
     if (worldState.souv) html += `<div class="wc-row"><span class="wc-ico">🎁</span><span><small>SOUVENIRS</small><b>${worldState.souv.length}/${worldState.souvTotal || 8}</b></span></div>`;
     if (worldState.stay) html += `<div class="wc-row"><span class="wc-ico">🏨</span><span><small>${escapeHTML(worldState.stay.name)}</small><b>Room ${wcFmtMs(worldState.stay.left - (performance.now() - (wcJobBase.st || performance.now())))}</b></span></div>`;
@@ -2595,7 +2597,7 @@ function wcPaintTerminal(g, b) {
     else if (dk === 'lodge') { g.fillStyle = 'rgba(0,0,0,.18)'; g.fillRect(5, h / 2 - 2, w - 10, 4); for (let y = 10; y < h - 6; y += 12) { g.fillStyle = y < h / 2 ? 'rgba(0,0,0,.07)' : 'rgba(255,255,255,.06)'; g.fillRect(5, y, w - 10, 5); } }   // shingles and a ridge
     else { g.fillStyle = 'rgba(0,0,0,.12)'; for (let i = 0; i < 6; i++) { g.fillRect(20 + rnd() * (w - 80), 14 + rnd() * (h - 50), 40, 26); } g.fillStyle = gl; g.globalAlpha = 0.6; g.fillRect(w * 0.3, h * 0.3, w * 0.4, h * 0.4); g.globalAlpha = 1; }   // flat roof, plant, a big skylight
     const gy = landTop ? 5 : h - 23; g.fillStyle = gl; g.fillRect(5, gy, w - 10, 18); g.strokeStyle = 'rgba(255,255,255,.45)'; g.lineWidth = 1; for (let x = 12; x < w - 10; x += 18) { g.beginPath(); g.moveTo(x, gy); g.lineTo(x, gy + 18); g.stroke(); }
-    if (!b.part) wcBanner(g, `✈ ${(b.nm || '').toUpperCase()} · ${b.code || ''}`, w / 2, h / 2, Math.min(w * 0.8, 900), 40, acc);
+    if (!b.part) wcBanner(g, b.tn ? `✈ ${b.tn} · ${(b.nm || '').toUpperCase()} · ${b.code || ''}` : `✈ ${(b.nm || '').toUpperCase()} · ${b.code || ''}`, w / 2, h / 2, Math.min(w * 0.8, 1100), b.tn ? 46 : 40, acc);
     if (!b.part) wcDoorMark(g, b, acc);
 }
 function wcPaintPier(g, b) {
@@ -2684,6 +2686,268 @@ function wcRenderFlight() {
         + `<div style="color:#9fd8ff;margin:3px 0 6px">${escapeHTML(ph)} · to ${escapeHTML(f.toName)} (${wcTzLabel(f.tz)}) · ${Math.round(f.alt * 11000).toLocaleString()} m · ${f.kmh.toLocaleString()} km/h</div>`
         + `<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.15);overflow:hidden"><div style="height:100%;width:${(prog * 100).toFixed(1)}%;background:linear-gradient(90deg,#2fa8f0,#7fe0ff)"></div></div>`;
     wcFlightEl.style.display = 'block';
+}
+
+// ===================== Central Air: the cockpit (you fly the aircraft) =====================
+// The server flies the physics; this sends the controls 20 times a second and draws the instruments:
+//   PFD: attitude, speed and altitude tapes, vertical speed, flight director, localiser / glideslope diamonds
+//   ND:  heading-up compass with the destination, the approach course, the final approach fix and the runway
+//   panel: throttle, flaps, gear, parking brake, autopilot (AP · A/THR · APP) with altitude and speed selectors
+// Keyboard: W/S climb·descend (sets a vertical speed that holds when you let go; C levels off), A/D bank / steer,
+// E/Q throttle, G gear, Z/X flaps up/down, B brakes, H autopilot, T autothrottle, L approach, [ ] altitude, , . speed.
+const PIL = { on: false, st: null, info: null, sm: null, ctl: null, vsCmd: 0, bank: 0, lastSend: 0, lastTick: 0, el: null, menuEl: null, booms: [], yoke: null, wasAir: false };
+function pilReset() { PIL.ctl = { thr: 0, fl: 1, gr: 1, br: 1, ap: 0, at: 0, app: 0, alt: 36000, spd: 440 }; PIL.vsCmd = 0; PIL.bank = 0; PIL.sm = null; PIL.wasAir = false; }
+pilReset();
+function pilMsg(d) {
+    if (d.menu) { pilMenu(d.menu); return; }
+    if (d.start) { PIL.info = d.start; PIL.on = true; PIL.st = null; pilReset(); pilMenuClose(); pilBuild(); document.body.classList.add('pil-on'); return; }
+    if (d.end) { PIL.on = false; PIL.st = null; document.body.classList.remove('pil-on'); if (PIL.el) PIL.el.style.display = 'none'; return; }
+    if (d.s) {
+        const s = d.s, c = PIL.ctl; PIL.st = s;
+        if (s.ph === 'air' && !PIL.wasAir) { PIL.vsCmd = Math.max(s.fpm, 1500); }
+        if (s.ph !== 'air' && PIL.wasAir) { PIL.vsCmd = 0; c.ap = 0; c.app = 0; c.at = 0; }
+        if (c.ap && !s.ap && s.ph === 'air' && PIL.apSince && performance.now() - PIL.apSince > 600) { c.ap = 0; c.app = 0; PIL.vsCmd = s.fpm; }   // the server disconnected it
+        if (s.ap) PIL.vsCmd = s.fpm;
+        PIL.wasAir = s.ph === 'air';
+    }
+}
+function pilKeyDown(e) {
+    if (!PIL.on || !isWorldMode) return false;
+    const k = e.key.toLowerCase(), c = PIL.ctl, s = PIL.st || {};
+    const tog = { g: () => { c.gr = c.gr ? 0 : 1; }, z: () => { c.fl = Math.max(0, c.fl - 1); }, x: () => { c.fl = Math.min(3, c.fl + 1); }, b: () => { c.br = c.br ? 0 : 1; },
+        h: () => pilAp(), t: () => pilAt(), l: () => { c.app = c.app ? 0 : 1; if (c.app && !c.ap && s.ph === 'air') pilAp(); }, c: () => { PIL.vsCmd = 0; },
+        '[': () => { c.alt = Math.max(1000, c.alt - 1000); }, ']': () => { c.alt = Math.min(41000, c.alt + 1000); }, ',': () => { c.spd = Math.max(120, c.spd - 10); }, '.': () => { c.spd = Math.min(560, c.spd + 10); } };
+    if (tog[k]) { if (!e.repeat) tog[k](); pilSend(true); e.preventDefault(); return true; }
+    if ('eq=-+'.includes(k) || k === 'pageup' || k === 'pagedown' || (k >= '0' && k <= '9')) { keys[k] = true; e.preventDefault(); return true; }
+    if (k.startsWith('arrow')) e.preventDefault();
+    return false;
+}
+function pilAp() { const c = PIL.ctl, s = PIL.st || {}; if (s.ph !== 'air') { wcToast('The autopilot can only be engaged in the air.', 'warn'); return; } c.ap = c.ap ? 0 : 1; if (c.ap) { PIL.apSince = performance.now(); if (Math.abs(c.alt - s.ft) > 60000) c.alt = Math.round(s.ft / 1000) * 1000; } else { c.app = 0; PIL.vsCmd = s.fpm || 0; } }
+function pilAt() { const c = PIL.ctl, s = PIL.st || {}; c.at = c.at ? 0 : 1; if (c.at && s.kt > 100) c.spd = Math.max(120, Math.round(s.kt / 10) * 10); }
+// 20 Hz: keys (and the on-screen joystick, which drives the same keys) → elevator / ailerons / throttle
+function pilTick() {
+    const now = performance.now(), dt = Math.min(0.1, (now - (PIL.lastTick || now)) / 1000); PIL.lastTick = now;
+    if (!PIL.on || !isWorldMode) return;
+    const c = PIL.ctl, s = PIL.st || {}, up = keys.w || keys.arrowup, dn = keys.s || keys.arrowdown, lf = keys.a || keys.arrowleft, rt = keys.d || keys.arrowright;
+    if (keys.e || keys['='] || keys['+'] || keys.pageup) c.thr = Math.min(1, c.thr + 0.6 * dt);
+    if (keys.q || keys['-'] || keys.pagedown) c.thr = Math.max(0, c.thr - 0.6 * dt);
+    let el, ai, man = !!(up || dn || lf || rt);
+    if (PIL.yoke) { el = PIL.yoke.y; ai = PIL.yoke.x; man = true; PIL.vsCmd = el >= 0 ? el * 4500 : el * 5000; }
+    else {
+        if (s.ph === 'air') { if (up) PIL.vsCmd = Math.min(4500, PIL.vsCmd + 2400 * dt); if (dn) PIL.vsCmd = Math.max(-5000, PIL.vsCmd - 2400 * dt); el = PIL.vsCmd >= 0 ? PIL.vsCmd / 4500 : PIL.vsCmd / 5000; }
+        else el = up ? 1 : dn ? -0.3 : 0;
+        const tb = rt ? 1 : lf ? -1 : 0; PIL.bank += Math.max(-4 * dt, Math.min(4 * dt, tb - PIL.bank)); ai = PIL.bank;
+    }
+    PIL.out = { el, ai, man };
+    if (now - PIL.lastSend > 50) pilSend(false);
+}
+function pilSend(force) {
+    const c = PIL.ctl, o = PIL.out || { el: 0, ai: 0, man: false }; PIL.lastSend = performance.now();
+    worldSend('world_pilot', { act: 'ctl', thr: +c.thr.toFixed(3), el: +o.el.toFixed(3), ai: +o.ai.toFixed(3), fl: c.fl, gr: c.gr, br: c.br, ap: c.ap, app: c.app, at: c.at, alt: c.alt, spd: c.spd, man: o.man ? 1 : 0 });
+}
+setInterval(pilTick, 25);
+// ---- DOM ----
+function pilBuild() {
+    if (!PIL.el) {
+        const el = document.createElement('div'); el.id = 'pil-cockpit';
+        el.innerHTML = `<div class="pil-top"><span class="pil-route"></span><span class="pil-warn"></span></div>
+            <div class="pil-row">
+              <canvas class="pil-pfd" width="300" height="236"></canvas>
+              <canvas class="pil-nd" width="236" height="236"></canvas>
+              <div class="pil-panel">
+                <div class="pil-col pil-thr"><small>THRUST</small><div class="pil-track"><div class="pil-fill"></div><div class="pil-knob"></div></div><b class="pil-thrv">0%</b><div class="pil-mini"><button data-c="idle">IDLE</button><button data-c="toga">TOGA</button></div></div>
+                <div class="pil-col pil-flaps"><small>FLAPS</small>${['FULL', '2', '1', 'UP'].map((t, i) => `<button data-fl="${3 - i}">${t}</button>`).join('')}</div>
+                <div class="pil-col pil-sys">
+                  <small>GEAR</small><button class="pil-gear" data-c="gear"></button><div class="pil-lights"><i></i><i></i><i></i></div>
+                  <button class="pil-brk" data-c="brk">PARK BRK</button>
+                </div>
+                <div class="pil-ap">
+                  <div class="pil-aprow"><button data-c="ap">AP</button><button data-c="at">A/THR</button><button data-c="app">APP</button></div>
+                  <div class="pil-sel"><span>ALT</span><button data-c="alt-">−</button><b class="pil-alt"></b><button data-c="alt+">+</button></div>
+                  <div class="pil-sel"><span>SPD</span><button data-c="spd-">−</button><b class="pil-spd"></b><button data-c="spd+">+</button></div>
+                  <div class="pil-sel"><span>V/S</span><b class="pil-vs"></b><button data-c="lvl" title="Level off (C)">LVL</button></div>
+                </div>
+              </div>
+            </div>
+            <div class="pil-help">W/S climb·descend · A/D bank/steer · E/Q thrust · G gear · Z/X flaps · B brakes · H autopilot · T auto-thrust · L approach · C level off · F park</div>`;
+        document.body.appendChild(el); PIL.el = el;
+        el.addEventListener('pointerdown', ev => ev.stopPropagation()); el.addEventListener('mousedown', ev => ev.stopPropagation()); el.addEventListener('touchstart', ev => ev.stopPropagation(), { passive: true });
+        el.querySelectorAll('button').forEach(b => b.addEventListener('click', ev => {
+            ev.stopPropagation(); const c = PIL.ctl, a = b.dataset.c;
+            if (b.dataset.fl != null) c.fl = Number(b.dataset.fl);
+            else if (a === 'gear') c.gr = c.gr ? 0 : 1; else if (a === 'brk') c.br = c.br ? 0 : 1; else if (a === 'ap') pilAp(); else if (a === 'at') pilAt();
+            else if (a === 'app') { c.app = c.app ? 0 : 1; if (c.app && !c.ap && (PIL.st || {}).ph === 'air') pilAp(); }
+            else if (a === 'alt-') c.alt = Math.max(1000, c.alt - 1000); else if (a === 'alt+') c.alt = Math.min(41000, c.alt + 1000);
+            else if (a === 'spd-') c.spd = Math.max(120, c.spd - 10); else if (a === 'spd+') c.spd = Math.min(560, c.spd + 10);
+            else if (a === 'lvl') PIL.vsCmd = 0; else if (a === 'idle') c.thr = 0; else if (a === 'toga') c.thr = 1;
+            pilSend(true); b.blur();
+        }));
+        const track = el.querySelector('.pil-track'), setThr = ev => { const r = track.getBoundingClientRect(); PIL.ctl.thr = Math.max(0, Math.min(1, 1 - (ev.clientY - r.top) / r.height)); };
+        track.addEventListener('pointerdown', ev => { ev.stopPropagation(); track.setPointerCapture(ev.pointerId); setThr(ev); track._drag = 1; });
+        track.addEventListener('pointermove', ev => { if (track._drag) setThr(ev); });
+        track.addEventListener('pointerup', () => { track._drag = 0; pilSend(true); });
+        // the ND doubles as a yoke pad for mouse / touch: drag up to climb, sideways to bank
+        const nd = el.querySelector('.pil-nd'), yk = ev => { const r = nd.getBoundingClientRect(); PIL.yoke = { x: Math.max(-1, Math.min(1, ((ev.clientX - r.left) / r.width - 0.5) * 2.4)), y: Math.max(-1, Math.min(1, -((ev.clientY - r.top) / r.height - 0.5) * 2.4)) }; };
+        nd.addEventListener('pointerdown', ev => { ev.stopPropagation(); nd.setPointerCapture(ev.pointerId); yk(ev); });
+        nd.addEventListener('pointermove', ev => { if (PIL.yoke) yk(ev); });
+        const yEnd = () => { if (PIL.yoke) { PIL.yoke = null; if ((PIL.st || {}).ph === 'air') PIL.vsCmd = (PIL.st || {}).fpm || 0; } };
+        nd.addEventListener('pointerup', yEnd); nd.addEventListener('pointercancel', yEnd);
+    }
+    PIL.el.style.display = 'block';
+}
+function pilFmt(n) { return Math.round(n).toLocaleString(); }
+function pilFrame() {
+    if (!PIL.el || PIL.el.style.display === 'none') return;
+    if (!PIL.on || !isWorldMode) { PIL.el.style.display = 'none'; document.body.classList.remove('pil-on'); return; }
+    const s = PIL.st, I = PIL.info; if (!s || !I) return;
+    if (!PIL.kT || performance.now() - PIL.kT > 500) {                  // fit the cockpit to narrow screens
+        PIL.kT = performance.now(); const ui = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1, k2 = Math.min(ui, (innerWidth - 12) / (PIL.el.offsetWidth || 980), (innerHeight * 0.42) / (PIL.el.offsetHeight || 300));
+        if (Math.abs((PIL.k || 0) - k2) > 0.005) { PIL.k = k2; PIL.el.style.transform = `translateX(-50%) scale(${k2.toFixed(3)})`; }
+    }
+    // smooth the 20 Hz state for the instruments
+    const sm = PIL.sm || (PIL.sm = { ...s }), k = 0.25, ang = (a, b) => a + ((((b - a) % 360) + 540) % 360 - 180) * k;
+    for (const key of ['kt', 'ft', 'fpm', 'bank', 'thr']) sm[key] = sm[key] + (s[key] - sm[key]) * k;
+    sm.hdg = (ang(sm.hdg, s.hdg) + 360) % 360;
+    const c = PIL.ctl, el = PIL.el;
+    el.querySelector('.pil-route').textContent = `${I.fn} · ${I.from.code} → ${I.to.code} ${I.to.name} · ${pilFmt(I.km)} km · ≈${pilFmt(I.pay)} coins · ${s.ph === 'air' ? `${pilFmt(s.dist)} km to go${s.eta ? ` · ${Math.floor(s.eta / 60)}:${String(s.eta % 60).padStart(2, '0')}` : ''}` : s.landed ? (s.dest ? 'ARRIVED – stop and shut down (F)' : 'landed') : s.here ? `on the ground at ${s.here}` : ''}`;
+    const W = s.warn || [], red = W.filter(w => ['STALL', 'PULL UP', 'OVERSPEED', 'GEAR'].includes(w)), wEl = el.querySelector('.pil-warn');
+    wEl.textContent = W.join(' · '); wEl.className = 'pil-warn' + (red.length ? ' red' : W.length ? ' amb' : '') + (red.length && (performance.now() / 250 | 0) % 2 ? ' blink' : '');
+    el.querySelector('.pil-fill').style.height = (s.thr) + '%'; el.querySelector('.pil-knob').style.bottom = `calc(${c.thr * 100}% - 9px)`; el.querySelector('.pil-thrv').textContent = Math.round(s.thr) + '%' + (s.at ? ' A' : '');
+    el.querySelectorAll('.pil-flaps button').forEach(b => b.classList.toggle('on', Number(b.dataset.fl) === c.fl));
+    const gb = el.querySelector('.pil-gear'); gb.textContent = c.gr ? '▼ DOWN' : '▲ UP'; gb.classList.toggle('up', !c.gr);
+    const lightCol = s.gr && c.gr ? 'g' : s.gr !== c.gr ? 'r' : ''; el.querySelectorAll('.pil-lights i').forEach(i => i.className = lightCol);
+    el.querySelector('.pil-brk').classList.toggle('on', !!c.br);
+    el.querySelector('[data-c="ap"]').classList.toggle('on', !!s.ap); el.querySelector('[data-c="at"]').classList.toggle('on', !!s.at); el.querySelector('[data-c="app"]').classList.toggle('on', !!c.app);
+    el.querySelector('.pil-alt').textContent = pilFmt(c.alt); el.querySelector('.pil-spd').textContent = c.spd + ' kt'; el.querySelector('.pil-vs').textContent = (s.ap ? 'AP ' : '') + (PIL.vsCmd > 0 ? '+' : '') + pilFmt(s.ap ? s.fpm : PIL.vsCmd);
+    pilPfd(el.querySelector('.pil-pfd'), s, sm, I); pilNd(el.querySelector('.pil-nd'), s, sm, I);
+}
+function pilPfd(cv, s, sm, I) {
+    const g = cv.getContext('2d'), W = cv.width, H = cv.height, cx = 150, cy = 112, R = 92, c = PIL.ctl;
+    g.clearRect(0, 0, W, H); g.fillStyle = '#05080c'; g.fillRect(0, 0, W, H);
+    const pitch = s.ph === 'air' ? sm.fpm / 380 + (sm.kt < 260 ? 3 : 1.5) : (PIL.out && PIL.out.el > 0.2 && sm.kt > I.vr - 10 ? 6 : 0), ppd = 4.2, bank = sm.bank * Math.PI / 180;
+    g.save(); g.beginPath(); g.rect(cx - R, cy - R, 2 * R, 2 * R); g.clip();
+    g.translate(cx, cy); g.rotate(-bank); g.translate(0, pitch * ppd);
+    g.fillStyle = '#2f7fd0'; g.fillRect(-400, -400, 800, 400); g.fillStyle = '#7a5226'; g.fillRect(-400, 0, 800, 400);
+    g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.moveTo(-400, 0); g.lineTo(400, 0); g.stroke();
+    g.font = '10px Ubuntu, sans-serif'; g.fillStyle = '#fff'; g.textAlign = 'right'; g.lineWidth = 1.4;
+    for (let p = -30; p <= 30; p += 5) { if (!p) continue; const y = -p * ppd, w = p % 10 ? 14 : 28; g.beginPath(); g.moveTo(-w, y); g.lineTo(w, y); g.stroke(); if (!(p % 10)) { g.fillText(Math.abs(p), -w - 3, y + 3); } }
+    g.restore();
+    // bank scale
+    g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.beginPath(); g.arc(cx, cy, R - 6, -Math.PI / 2 - 1.05, -Math.PI / 2 + 1.05); g.stroke();
+    for (const d of [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60]) { const a = -Math.PI / 2 + d * Math.PI / 180, r2 = R - 6 - (d % 30 ? 5 : 10); g.beginPath(); g.moveTo(cx + Math.cos(a) * (R - 6), cy + Math.sin(a) * (R - 6)); g.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2); g.stroke(); }
+    { const a = -Math.PI / 2 - bank; g.fillStyle = Math.abs(sm.bank) > 33 ? '#ffb000' : '#fff'; g.beginPath(); g.moveTo(cx + Math.cos(a) * (R - 18), cy + Math.sin(a) * (R - 18)); g.lineTo(cx + Math.cos(a + 0.07) * (R - 28), cy + Math.sin(a + 0.07) * (R - 28)); g.lineTo(cx + Math.cos(a - 0.07) * (R - 28), cy + Math.sin(a - 0.07) * (R - 28)); g.fill(); }
+    // flight director (magenta): vertical bar = turn towards the FD course, horizontal = climb/descend to the target
+    const ap = s.app, wrap = d => ((d + 540) % 360) - 180;
+    let fdx = null, fdy = null;
+    if (s.ph === 'air') {
+        const tgtHdg = ap ? ap.fd : s.brg, tfpm = ap && ap.est && s.ft >= ap.gp - 300 ? ap.gfpm + (ap.gp - s.ft) * 1.5 : (s.ap || c.ap ? (c.alt - s.ft) * 1.2 : null);
+        fdx = Math.max(-1, Math.min(1, wrap(tgtHdg - sm.hdg) / 25)); if (tfpm != null) fdy = Math.max(-1, Math.min(1, (Math.max(-2500, Math.min(2500, tfpm)) - sm.fpm) / 1500));
+        g.strokeStyle = '#ff4fd8'; g.lineWidth = 3; g.beginPath(); g.moveTo(cx + fdx * 50, cy - 50); g.lineTo(cx + fdx * 50, cy + 50); if (fdy != null) { g.moveTo(cx - 50, cy - fdy * 45); g.lineTo(cx + 50, cy - fdy * 45); } g.stroke();
+    }
+    // aircraft symbol
+    g.strokeStyle = '#000'; g.fillStyle = '#ffd23d'; g.lineWidth = 1;
+    for (const sx of [-1, 1]) { g.beginPath(); g.rect(cx + sx * 22 - (sx < 0 ? 38 : 0), cy - 3, 38, 6); g.fill(); g.stroke(); }
+    g.fillRect(cx - 3, cy - 3, 6, 6);
+    // localiser / glideslope
+    if (ap && ap.est !== undefined) {
+        g.fillStyle = 'rgba(0,0,0,.45)'; g.fillRect(cx - 70, cy + R - 14, 140, 10); g.fillRect(cx + R - 12, cy - 70, 10, 140);
+        g.fillStyle = '#fff'; for (const d of [-2, -1, 1, 2]) { g.beginPath(); g.arc(cx + d * 30, cy + R - 9, 2.5, 0, 7); g.fill(); g.beginPath(); g.arc(cx + R - 7, cy + d * 30, 2.5, 0, 7); g.fill(); }
+        const ld = Math.max(-2.3, Math.min(2.3, ap.loc / 400)), gd = Math.max(-2.3, Math.min(2.3, (s.ft - ap.gp) / 250));
+        g.fillStyle = '#ff4fd8'; const dia = (x, y) => { g.beginPath(); g.moveTo(x, y - 6); g.lineTo(x + 6, y); g.lineTo(x, y + 6); g.lineTo(x - 6, y); g.closePath(); g.fill(); };
+        dia(cx + ld * 30, cy + R - 9); if (ap.km < 40) dia(cx + R - 7, cy + gd * 30);
+    }
+    // speed tape (left)
+    const tape = (x, w, val, step, px, fmt, bugs, bands) => {
+        g.save(); g.beginPath(); g.rect(x, cy - R, w, 2 * R); g.clip(); g.fillStyle = 'rgba(40,48,58,.92)'; g.fillRect(x, cy - R, w, 2 * R);
+        for (const b of bands || []) { g.fillStyle = b.c; const y0 = cy - (b.hi - val) * px, y1 = cy - (b.lo - val) * px; g.fillRect(x + w - 6, y0, 6, y1 - y0); }
+        g.strokeStyle = '#cfd8df'; g.fillStyle = '#cfd8df'; g.font = '10px Ubuntu, sans-serif'; g.textAlign = 'center'; g.lineWidth = 1;
+        const v0 = Math.floor((val - R / px) / step) * step;
+        for (let v = v0; v <= val + R / px; v += step) { const y = cy - (v - val) * px; g.beginPath(); g.moveTo(x + w - 8, y); g.lineTo(x + w - 14, y); g.stroke(); if (Math.round(v / step) % 2 === 0 && v >= 0) g.fillText(fmt(v), x + w / 2 - 4, y + 3); }
+        for (const b of bugs || []) { const y = cy - (b.v - val) * px; g.fillStyle = b.c; g.beginPath(); g.moveTo(x + w, y); g.lineTo(x + w - 8, y - 5); g.lineTo(x + w - 8, y + 5); g.fill(); }
+        g.restore();
+        g.fillStyle = '#000'; g.strokeStyle = '#fff'; g.fillRect(x - 2, cy - 11, w + 4, 22); g.strokeRect(x - 2, cy - 11, w + 4, 22); g.fillStyle = '#fff'; g.font = 'bold 13px Ubuntu, sans-serif'; g.textAlign = 'center'; g.fillText(fmt(val), x + w / 2, cy + 5);
+    };
+    const vs = I.vs[c.fl] || I.vs[0];
+    tape(4, 46, Math.max(0, sm.kt), 10, 2.2, v => Math.round(v), [...(s.ph === 'ground' && !s.landed ? [{ v: I.vr, c: '#3cff8a' }] : []), { v: Math.round(vs * 1.3), c: '#7fd4ff' }, ...(s.at ? [{ v: c.spd, c: '#ff4fd8' }] : [])],
+        [{ lo: 0, hi: vs, c: '#e0302a' }, { lo: I.fmax[c.fl] || 999, hi: 999, c: '#ffb000' }, { lo: I.vmo, hi: 999, c: '#e0302a' }]);
+    tape(W - 60, 50, Math.max(0, sm.ft), 100, 0.32, v => v >= 10000 ? (v / 1000).toFixed(1) + 'k' : Math.round(v), [{ v: c.alt, c: '#25e0ff' }, ...(ap && ap.km < 40 ? [{ v: ap.gp, c: '#ff4fd8' }] : [])]);
+    // vertical speed (narrow strip right of the altitude tape)
+    { const x = W - 8, f = Math.max(-6000, Math.min(6000, sm.fpm)), y = cy - Math.sign(f) * Math.sqrt(Math.abs(f) / 6000) * (R - 10);
+      g.fillStyle = 'rgba(40,48,58,.92)'; g.fillRect(x - 2, cy - R, 8, 2 * R); g.strokeStyle = f < -1500 && s.ft < 2500 ? '#ff5a4f' : '#3cff8a'; g.lineWidth = 3; g.beginPath(); g.moveTo(x + 2, cy); g.lineTo(x + 2, y); g.stroke(); }
+    g.fillStyle = '#fff'; g.font = 'bold 11px Ubuntu, sans-serif'; g.textAlign = 'right'; g.fillText((sm.fpm > 0 ? '+' : '') + Math.round(sm.fpm / 10) * 10, W - 12, cy + R + 14);
+    // heading box + mode annunciator
+    g.textAlign = 'center'; g.fillStyle = '#000'; g.strokeStyle = '#fff'; g.fillRect(cx - 26, H - 22, 52, 18); g.strokeRect(cx - 26, H - 22, 52, 18); g.fillStyle = '#fff'; g.font = 'bold 13px Ubuntu, sans-serif'; g.fillText(String(Math.round(sm.hdg) % 360).padStart(3, '0') + '°', cx, H - 8);
+    const modes = [s.at ? `SPD ${c.spd}` : 'MAN THR', s.ap ? (ap && ap.gs ? 'G/S' : `ALT ${pilFmt(c.alt)}`) : s.ph === 'air' ? `V/S ${Math.round(PIL.vsCmd / 100) * 100}` : s.ph.toUpperCase(), s.ap ? (ap ? (ap.est ? 'LOC' : 'NAV FAF') : 'NAV') : (c.app ? 'APP ARM' : '')];
+    g.font = 'bold 10px Ubuntu, sans-serif'; g.fillStyle = '#3cff8a'; modes.forEach((m, i) => g.fillText(m, 62 + i * 88, 11));
+    g.fillStyle = '#9fb4c4'; g.font = '10px Ubuntu, sans-serif'; g.textAlign = 'left'; g.fillText(`FLAPS ${['UP', '1', '2', 'FULL'][c.fl]}`, 6, H - 8); g.textAlign = 'right'; g.fillText(`GEAR ${s.gr ? 'DN' : 'UP'}`, W - 6, H - 8);
+}
+function pilNd(cv, s, sm, I) {
+    const g = cv.getContext('2d'), W = cv.width, H = cv.height, cx = W / 2, cy = H / 2 + 22, R = 92, hdg = sm.hdg * Math.PI / 180;
+    g.clearRect(0, 0, W, H); g.fillStyle = '#05080c'; g.fillRect(0, 0, W, H);
+    const ap = s.app, toXY = (brgDeg, km, scale) => { const a = brgDeg * Math.PI / 180 - hdg; return [cx + Math.sin(a) * km * scale, cy - Math.cos(a) * km * scale]; };
+    const range = s.ph === 'ground' ? (s.rw ? Math.max(2, Math.ceil(s.rw.km * 1.4)) : 4) : ap ? (ap.km > 45 || ap.faf ? Math.min(160, Math.max(20, Math.ceil(Math.max(ap.km, ap.fafKm) * 1.25 / 10) * 10)) : 20) : Math.min(640, Math.max(40, Math.ceil(s.dist / 80) * 80)), sc = R / range;
+    // compass rose
+    g.strokeStyle = '#cfd8df'; g.fillStyle = '#cfd8df'; g.lineWidth = 1; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.stroke();
+    g.font = '10px Ubuntu, sans-serif'; g.textAlign = 'center';
+    for (let d = 0; d < 360; d += 10) { const a = d * Math.PI / 180 - hdg, r2 = R - (d % 30 ? 5 : 9); g.beginPath(); g.moveTo(cx + Math.sin(a) * R, cy - Math.cos(a) * R); g.lineTo(cx + Math.sin(a) * r2, cy - Math.cos(a) * r2); g.stroke(); if (!(d % 30)) g.fillText(d === 0 ? 'N' : d === 90 ? 'E' : d === 180 ? 'S' : d === 270 ? 'W' : d / 10, cx + Math.sin(a) * (R - 17), cy - Math.cos(a) * (R - 17) + 4); }
+    g.strokeStyle = 'rgba(207,216,223,.35)'; g.setLineDash([3, 4]); g.beginPath(); g.arc(cx, cy, R / 2, 0, 7); g.stroke(); g.setLineDash([]);
+    g.fillStyle = '#9fb4c4'; g.font = '9px Ubuntu, sans-serif'; g.fillText(range / 2 + ' km', cx + R / 2 * 0.72 + 12, cy - R / 2 * 0.72);
+    // destination / runway / approach
+    g.save(); g.beginPath(); g.arc(cx, cy, R, 0, 7); g.clip();
+    if (s.ph === 'ground' && s.rw && !s.landed) {
+        const [x, y] = toXY(s.rw.brg, s.rw.km, sc); g.fillStyle = '#3cff8a'; g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); g.font = 'bold 10px Ubuntu, sans-serif'; g.fillText('RWY ' + s.rw.n, x, y - 8);
+        g.strokeStyle = 'rgba(60,255,138,.5)'; g.setLineDash([4, 4]); g.beginPath(); g.moveTo(cx, cy); g.lineTo(x, y); g.stroke(); g.setLineDash([]);
+    }
+    if (ap) {
+        const crs = ap.crs * Math.PI / 180, ux = Math.sin(crs - hdg), uy = -Math.cos(crs - hdg), rx = -uy, ry = ux;   // course unit vector and its right-hand normal (screen)
+        const cross = ap.loc / 1000, tx = cx + (ux * ap.km + rx * cross) * sc, ty = cy + (uy * ap.km + ry * cross) * sc;
+        g.strokeStyle = '#ff4fd8'; g.lineWidth = 2; g.setLineDash([6, 4]); g.beginPath(); g.moveTo(tx, ty); g.lineTo(tx - ux * 60 * sc, ty - uy * 60 * sc); g.stroke(); g.setLineDash([]);
+        g.strokeStyle = '#fff'; g.lineWidth = Math.max(3, 4 * sc); g.beginPath(); g.moveTo(tx, ty); g.lineTo(tx + ux * Math.max(3, 3 * sc), ty + uy * Math.max(3, 3 * sc)); g.stroke();
+        const fx = tx - ux * 22 * sc, fy = ty - uy * 22 * sc; g.strokeStyle = '#25e0ff'; g.lineWidth = 2; g.beginPath(); g.moveTo(fx, fy - 6); g.lineTo(fx + 6, fy); g.lineTo(fx, fy + 6); g.lineTo(fx - 6, fy); g.closePath(); g.stroke();
+        g.fillStyle = '#25e0ff'; g.font = 'bold 9px Ubuntu, sans-serif'; g.fillText('FAF', fx, fy - 9); g.fillStyle = '#fff'; g.fillText(ap.n, tx + ux * 14, ty + uy * 14 + 3);
+    } else if (s.ph === 'air') {
+        const [x, y] = toXY(s.brg, Math.min(s.dist, range * 0.98), sc); g.strokeStyle = '#3cff8a'; g.lineWidth = 2; g.beginPath(); g.moveTo(cx, cy); g.lineTo(x, y); g.stroke();
+        g.fillStyle = '#3cff8a'; g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill();
+    }
+    g.restore();
+    // destination pointer on the rose, FD heading bug, selected heading
+    const tick = (brg, col, txt) => { const a = brg * Math.PI / 180 - hdg; g.fillStyle = col; g.beginPath(); g.moveTo(cx + Math.sin(a) * (R + 1), cy - Math.cos(a) * (R + 1)); g.lineTo(cx + Math.sin(a + 0.06) * (R + 10), cy - Math.cos(a + 0.06) * (R + 10)); g.lineTo(cx + Math.sin(a - 0.06) * (R + 10), cy - Math.cos(a - 0.06) * (R + 10)); g.fill(); if (txt) { g.font = 'bold 9px Ubuntu, sans-serif'; g.fillText(txt, cx + Math.sin(a) * (R + 18), cy - Math.cos(a) * (R + 18) + 3); } };
+    tick(s.brg, '#3cff8a', I.to.code); if (ap) tick(ap.fd, '#ff4fd8');
+    // own aircraft
+    g.fillStyle = '#ffd23d'; g.beginPath(); g.moveTo(cx, cy - 10); g.lineTo(cx + 8, cy + 7); g.lineTo(cx, cy + 3); g.lineTo(cx - 8, cy + 7); g.closePath(); g.fill();
+    g.fillStyle = '#fff'; g.font = 'bold 12px Ubuntu, sans-serif'; g.textAlign = 'center'; g.fillText(String(Math.round(sm.hdg) % 360).padStart(3, '0'), cx, 14);
+    g.font = '10px Ubuntu, sans-serif'; g.textAlign = 'left'; g.fillStyle = '#9fb4c4';
+    g.fillText(`GS ${Math.round(sm.kt)}`, 6, 14); g.fillText(`${I.to.code} ${pilFmt(s.dist)} km`, 6, 27);
+    g.textAlign = 'right';
+    if (ap) { g.fillStyle = ap.est ? '#3cff8a' : '#ff4fd8'; g.fillText(ap.faf ? `FAF ${ap.fafKm} km` : `RWY ${ap.n} ${ap.km} km`, W - 6, 14); g.fillStyle = '#9fb4c4'; g.fillText(`CRS ${String(ap.crs).padStart(3, '0')} · VREF ${ap.vref}`, W - 6, 27); if (ap.km < 40 && ap.est) { const dv = s.ft - ap.gp; g.fillStyle = Math.abs(dv) < 300 ? '#3cff8a' : '#ffb000'; g.fillText(`G/P ${dv > 0 ? '+' : ''}${Math.round(dv)} ft`, W - 6, 40); } }
+    else if (s.ph === 'ground' && s.rw) { g.fillStyle = s.rw.on ? '#3cff8a' : '#ffb000'; g.fillText(s.rw.on ? `ON RWY · ${pilFmt(s.rw.len)} m` : `RWY ${s.rw.n} ${s.rw.km} km`, W - 6, 14); g.fillStyle = '#9fb4c4'; g.fillText(`VR ${I.vr} kt`, W - 6, 27); }
+    else if (s.ph === 'air' && s.dist < 600) { g.fillStyle = '#9fb4c4'; g.fillText(`T/D ≈ ${pilFmt(Math.max(0, (s.ft - 3000) / I.ftkm + 45))} km`, W - 6, 14); }
+    g.fillStyle = 'rgba(159,180,196,.6)'; g.font = '9px Ubuntu, sans-serif'; g.textAlign = 'center'; g.fillText('drag here to fly with mouse / touch', cx, H - 4);
+}
+// ---- flight dispatch (J at an airport, or a console at Central Air Flight Ops) ----
+function pilMenu(m) {
+    pilMenuClose();
+    const el = document.createElement('div'); el.id = 'pil-menu';
+    el.innerHTML = `<div class="pm-box"><div class="pm-head"><b>🛫 Central Air dispatch · ${escapeHTML(m.code)}</b><button class="pm-x" aria-label="Close">✕</button></div>
+        <div class="pm-sub">${escapeHTML(m.name)} · pay ${pilFmt(m.rate)} coins per 1000 km on a safe landing · a crash costs your life</div>
+        <div class="pm-list">${m.list.map(r => `<button class="pm-row" data-to="${escapeHTML(r.to)}"><span class="pm-code">${escapeHTML(r.code)}</span><span class="pm-name">${escapeHTML(r.name)}<small>${escapeHTML(r.acName)} · ${pilFmt(r.km)} km</small></span><b>${pilFmt(r.pay)} 🪙</b></button>`).join('')}</div>
+        <div class="pm-foot">Taxi to a runway · full thrust · rotate at Vr · gear up · autopilot (H) to cruise · descend about 172 ft per km to go · APP (L) for the approach · gear down, flaps FULL · touch down gently on the runway and stop.</div></div>`;
+    document.body.appendChild(el); PIL.menuEl = el;
+    el.addEventListener('pointerdown', ev => ev.stopPropagation()); el.addEventListener('mousedown', ev => ev.stopPropagation());
+    el.querySelector('.pm-x').addEventListener('click', ev => { ev.stopPropagation(); pilMenuClose(); });
+    el.addEventListener('click', ev => { if (ev.target === el) pilMenuClose(); });
+    el.querySelectorAll('.pm-row').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); worldSend('world_pilot', { act: 'fly', to: b.dataset.to }); pilMenuClose(); }));
+}
+function pilMenuClose() { if (PIL.menuEl) { PIL.menuEl.remove(); PIL.menuEl = null; } }
+// ---- crashes: a fireball and smoke where the aircraft came down ----
+function wcDrawBooms(s) {
+    const now = performance.now(); PIL.booms = PIL.booms.filter(b => now - b.t < 9000);
+    for (const b of PIL.booms) {
+        const t = (now - b.t) / 1000, x = worldToScreenX(b.x), y = worldToScreenY(b.y), r = Math.min(1, t / 0.6);
+        for (let i = 0; i < 9; i++) { const a = i * 0.7 + b.r, d = (120 + i * 30) * r * s, rr = (90 + (i % 3) * 40) * s * (0.6 + 0.6 * r), sm = Math.min(1, t / 2.5);
+            ctx.fillStyle = `rgba(${Math.round(255 - 180 * sm)},${Math.round(150 - 90 * sm)},${Math.round(40 + 40 * sm)},${Math.max(0, 0.75 - t / 12)})`; ctx.beginPath(); ctx.arc(x + Math.cos(a) * d, y + Math.sin(a) * d - t * 30 * s, rr, 0, 7); ctx.fill(); }
+        if (t < 0.5) { ctx.fillStyle = `rgba(255,245,200,${1 - t * 2})`; ctx.beginPath(); ctx.arc(x, y, 260 * s * (0.4 + t), 0, 7); ctx.fill(); }
+    }
 }
 
 const WC_PAINTERS = { tower: (g, b) => wcPaintTower(g, b, false), mid: (g, b) => wcPaintTower(g, b, true), shop: wcPaintShop, apt: wcPaintApt, mall: wcPaintMall, bank: wcPaintBank, dealer: wcPaintDealer, hall: wcPaintHall, house: wcPaintHouse, farmhouse: wcPaintHouse, barn: wcPaintBarn, shed: wcPaintShed, school: wcPaintSchool, terminal: wcPaintTerminal, pier: wcPaintPier, satellite: wcPaintSatellite, ctower: wcPaintCTower, hangar: wcPaintHangar };
@@ -3135,7 +3399,7 @@ function wcDrawExterior() {
     for (const c of list) for (const p of c.props) if (p.k === 'tree' && p.x > vx0 - 60 && p.x < vx1 + 60 && p.y > vy0 - 60 && p.y < vy1 + 60) { if (s < 0.22) { ctx.fillStyle = (p.v >> 2) & 1 ? '#3a7e46' : '#5a9c46'; const tr = 24 + (p.v % 4) * 6; ctx.fillRect(worldToScreenX(p.x) - tr * s, worldToScreenY(p.y) - tr * s, 2 * tr * s, 2 * tr * s); } else wcDrawTree25(p, s, cam); }
     wcDrawBorder(s, W, H); wcDrawWater(s, W, H);
     const meF = myId != null ? gameState.entities.find(e => e.id === myId) : null;
-    wcDrawAiTraffic(s, vx0, vy0, vx1, vy1);
+    wcDrawAiTraffic(s, vx0, vy0, vx1, vy1); wcDrawBooms(s);
     if (meF && meF.fl && !WC.viewMode) wcDrawClouds(W, H, renderEntities.get(meF.id)?.flAlt ?? meF.fl.alt);
     wcDrawDayNight(W, H); wcDrawFestival(s, W, H); if (!WC.viewMode) wcDrawNav(s, W, H);
 }
@@ -3532,14 +3796,14 @@ function wcPaintFurniture2(g, f, D) {
         case 'photobooth': g.fillStyle = '#a8293a'; g.fillRect(x, y, w, h); g.fillStyle = '#f4efe4'; g.fillRect(x + 10, y + 10, w - 20, 30); g.fillStyle = '#a8293a'; g.font = 'bold 15px Ubuntu'; g.textAlign = 'center'; g.fillText('PHOTO', x + w / 2, y + 31); g.fillStyle = '#3a0f16'; g.fillRect(x + 10, y + 50, w / 2 - 14, h - 60); return true;
         case 'vending': g.fillStyle = '#c0392b'; g.fillRect(x, y, w, h); g.fillStyle = '#e8edf0'; g.fillRect(x + 6, y + 6, w - 22, h - 12); for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) { g.fillStyle = ['#2c7a5b', '#f2b233', '#1d6fa5'][i]; g.fillRect(x + 10 + j * 18, y + 10 + i * 13, 12, 8); } return true;
         case 'atmi': g.fillStyle = '#2e7a4a'; g.fillRect(x, y, w, h); g.fillStyle = '#d9f2e0'; g.fillRect(x + 8, y + 8, w - 16, 16); g.fillStyle = '#fff'; g.font = 'bold 10px Ubuntu'; g.textAlign = 'center'; g.fillText('ATM', x + w / 2, y + h - 10); return true;
-        case 'checkin': g.fillStyle = '#e9ecef'; g.fillRect(x, y, w, h); g.fillStyle = f.col || '#1d6fa5'; g.fillRect(x, y, w, 12); g.fillStyle = '#2d3a46'; for (let i = 0; i < 2; i++) g.fillRect(x + 30 + i * 110, y + 20, 50, 22); g.fillStyle = '#fff'; g.font = 'bold 11px Ubuntu'; g.textAlign = 'center'; g.fillText('CHECK-IN ' + (f.n || ''), x + w / 2, y + 10); return true;
+        case 'checkin': g.fillStyle = '#e9ecef'; g.fillRect(x, y, w, h); g.fillStyle = f.col || '#1d6fa5'; g.fillRect(x, y, w, 12); g.fillStyle = '#2d3a46'; for (let i = 0; i < 2; i++) g.fillRect(x + 30 + i * 110, y + 20, 50, 22); g.fillStyle = '#fff'; g.font = 'bold 11px Ubuntu'; g.textAlign = 'center'; g.fillText(f.lbl ? `${f.lbl} · CHECK-IN ${f.n || ''}` : 'CHECK-IN ' + (f.n || ''), x + w / 2, y + 10); return true;
         case 'post': g.fillStyle = '#c3cbd1'; g.beginPath(); g.arc(x, y, f.r, 0, 7); g.fill(); return true;
         case 'board': g.fillStyle = '#14181c'; g.fillRect(x, y, w, h); return true;
         case 'arch': g.strokeStyle = '#8a959c'; g.lineWidth = 8; g.strokeRect(x + 4, y + 4, w - 8, h - 8); g.fillStyle = 'rgba(80,200,120,.35)'; g.fillRect(x + 8, y + 8, w - 16, h - 16); return true;
         case 'scanner': g.fillStyle = '#495560'; g.fillRect(x, y, w, h); g.fillStyle = '#2b3138'; g.fillRect(x + 6, y + 10, w - 12, h - 20); g.fillStyle = '#ffb000'; g.fillRect(x + 6, y + h / 2 - 12, w - 12, 24); return true;
         case 'window': { const gr = g.createLinearGradient(x, y, x, y + h); gr.addColorStop(0, '#9fd3ff'); gr.addColorStop(1, '#4f8fbf'); g.fillStyle = gr; g.fillRect(x, y, w, h); g.fillStyle = 'rgba(255,255,255,.35)'; for (let i = 0; i < w; i += 90) g.fillRect(x + i, y, 6, h); return true; }
         case 'seats': g.fillStyle = '#2a3a52'; g.fillRect(x, y, w, h); g.fillStyle = '#3d5578'; for (let i = 0; i < 6; i++) wcRR(g, x + 4 + i * (w - 8) / 6, y + 4, (w - 8) / 6 - 4, h - 8, 4), g.fill(); return true;
-        case 'gatedesk': g.fillStyle = '#e9ecef'; g.fillRect(x, y, w, h); g.fillStyle = '#1d4f7a'; g.fillRect(x, y + h - 12, w, 12); g.fillStyle = '#fff'; g.font = 'bold 11px Ubuntu'; g.textAlign = 'center'; g.fillText('GATE 2', x + w / 2, y + h - 2); return true;
+        case 'gatedesk': g.fillStyle = '#e9ecef'; g.fillRect(x, y, w, h); g.fillStyle = '#1d4f7a'; g.fillRect(x, y + h - 12, w, 12); g.fillStyle = '#fff'; g.font = 'bold 11px Ubuntu'; g.textAlign = 'center'; g.fillText(f.label || 'GATE 2', x + w / 2, y + h - 2); return true;
         case 'jetway': g.fillStyle = '#8d99a1'; g.fillRect(x, y, w, h); g.fillStyle = '#c9d1d6'; g.fillRect(x + 6, y + 4, w - 12, h - 8); return true;
     }
     return false;
@@ -3554,7 +3818,7 @@ function wcFurnSprite(f, D, i) {
 }
 function wcGetInterior() {
     if (wcIntCache && wcIntCache.key === WC.intKey) return wcIntCache;
-    const D = WC.interior, fl = D.floor, M = 90, sc = Math.min(wcSPR, 1.25);
+    const D = WC.interior, fl = D.floor, M = 90, sc = Math.min(wcSPR, 1.25, Math.sqrt(1.4e7 / ((fl.w + 2 * M) * (fl.h + 2 * M))));   // big terminals: keep the floor canvas inside mobile limits
     wcFurnSpr = new Map();
     const c = document.createElement('canvas'); c.width = Math.ceil((fl.w + 2 * M) * sc); c.height = Math.ceil((fl.h + 2 * M) * sc);
     const g = c.getContext('2d'); g.scale(sc, sc); g.translate(M - fl.x, M - fl.y);
@@ -3569,7 +3833,7 @@ function wcGetInterior() {
         else if (r.c === 'office' || r.c === 'lounge') { g.strokeStyle = 'rgba(0,0,0,.08)'; for (let x = r.x; x < r.x + r.w; x += 48) { g.beginPath(); g.moveTo(x, r.y); g.lineTo(x, r.y + r.h); g.stroke(); } for (let y = r.y; y < r.y + r.h; y += 48) { g.beginPath(); g.moveTo(r.x, y); g.lineTo(r.x + r.w, y); g.stroke(); } }
         else { g.fillStyle = 'rgba(255,255,255,.04)'; for (let i = 0; i < 300; i++) g.fillRect(r.x + (i * 97 % r.w), r.y + (i * 53 % r.h), 3, 3); }
     }
-    if (D.kind === 'terminal') { g.fillStyle = '#1d4f7a'; for (const x of [D.door.px - 260, D.door.px + 260]) { g.fillRect(x - 3, fl.y + 520, 6, fl.h - 520); } }
+    if (D.kind === 'terminal') { g.fillStyle = '#1d4f7a'; const y0 = D.secY || fl.y + 520; for (const x of D.lanes || [D.door.px - 260, D.door.px + 260]) { g.fillRect(x - 3, y0, 6, fl.y + fl.h - y0); } }
     if (D.kind === 'mall' || D.kind === 'office' || D.kind === 'terminal') { g.save(); g.fillStyle = D.theme.accent; g.fillRect(fl.x, fl.y - 26, fl.w, 26); g.fillStyle = '#fff'; g.font = 'bold 17px Ubuntu, Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(D.theme.name.toUpperCase(), fl.x + fl.w / 2, fl.y - 12); g.restore(); }
     if (D.kind === 'office') { g.fillStyle = D.theme.accent; g.fillRect(fl.x, fl.y + fl.h - 304, fl.w, 5); }
     // flat things stay in the floor layer; everything with height is drawn live in 2.5D
@@ -3986,8 +4250,8 @@ function wcPaintFloor(g, r, D) {
     }
     return false;
 }
-const WC_FH4 = { cart: 40, mannequin: 58, ledwall: 96, vrbooth: 84, petpen: 26, shelf: 74, statue: 92, foodtable: 22, slot: 74, bjtable: 24, roulette: 24, casinobar: 36, stage: 20, patron: 30 };
-const WC_FSIDE4 = { cart: '#7a4f2c', mannequin: '#c9c3bb', ledwall: '#16181d', vrbooth: '#252a3a', petpen: '#8a6238', shelf: '#6a4a2c', statue: '#a8a49a', foodtable: '#7a5a3a', slot: '#3a1d3f', bjtable: '#3b2412', roulette: '#3b2412', casinobar: '#4a2a14', stage: '#2b1b12', patron: 'rgba(0,0,0,0)' };
+const WC_FH4 = { skytrain: 60, carousel: 14, cart: 40, mannequin: 58, ledwall: 96, vrbooth: 84, petpen: 26, shelf: 74, statue: 92, foodtable: 22, slot: 74, bjtable: 24, roulette: 24, casinobar: 36, stage: 20, patron: 30 };
+const WC_FSIDE4 = { skytrain: '#3b4c5c', carousel: '#5d6870', cart: '#7a4f2c', mannequin: '#c9c3bb', ledwall: '#16181d', vrbooth: '#252a3a', petpen: '#8a6238', shelf: '#6a4a2c', statue: '#a8a49a', foodtable: '#7a5a3a', slot: '#3a1d3f', bjtable: '#3b2412', roulette: '#3b2412', casinobar: '#4a2a14', stage: '#2b1b12', patron: 'rgba(0,0,0,0)' };
 Object.assign(WC_FH, WC_FH4); Object.assign(WC_FSIDE, WC_FSIDE4);
 const WC_SLOT_COL = [['#7a1f2b', '#f2b233'], ['#1d3f7a', '#00e5ff'], ['#4a1d6b', '#ff2bd6'], ['#1f6b3a', '#9dff00'], ['#7a5a12', '#ffd23d'], ['#6b1d4a', '#ff8a3d']];
 const WC_SLOT_SYM = ['🍒', '🍋', '🔔', '🍉', '⭐', '7', '💎'];
@@ -3996,6 +4260,19 @@ function wcSym(g, i, x, y, sz) { if (i === 5) { g.fillStyle = '#e52b2b'; g.font 
 function wcPaintFurniture4(g, f, D) {
     const x = f.x, y = f.y, w = f.w, h = f.h;
     switch (f.k) {
+        case 'skytrain': {                                               // a platform with a two-car people mover in its glass tube
+            g.fillStyle = '#2b3a48'; g.fillRect(x, y, w, h); g.fillStyle = 'rgba(160,215,245,.35)'; g.fillRect(x + 6, y + 6, w - 12, h - 12);
+            const cw = w - 30; for (let i = 0; i < 2; i++) { const cy = y + 18 + i * (h - 36) / 2; g.fillStyle = '#e9eef2'; wcRR(g, x + 15, cy, cw, (h - 36) / 2 - 6, 10); g.fill(); g.fillStyle = '#25e0ff'; for (let q = 0; q < 4; q++) g.fillRect(x + 22, cy + 14 + q * ((h - 36) / 2 - 30) / 4, cw - 14, 8); }
+            g.fillStyle = '#ffd23d'; g.fillRect(x + w - 6, y, 6, h); g.save(); g.translate(x + w / 2, y + h / 2); g.rotate(-Math.PI / 2); g.fillStyle = '#fff'; g.font = 'bold 15px Ubuntu'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('🚝 SKYTRAIN · T1 · T2 · T3', 0, 0); g.restore(); return true;
+        }
+        case 'carousel': {                                               // baggage reclaim belt
+            g.fillStyle = '#4b555d'; wcRR(g, x, y, w, h, h / 2); g.fill(); g.fillStyle = '#20262b'; wcRR(g, x + 14, y + 14, w - 28, h - 28, (h - 28) / 2); g.fill();
+            g.fillStyle = '#7e8a93'; wcRR(g, x + 34, y + 34, w - 68, h - 68, (h - 68) / 2); g.fill();
+            const r = wcRng(Math.round(x)); for (let i = 0; i < 14; i++) { g.fillStyle = ['#c0392b', '#2f6fb0', '#2c7a5b', '#d68a1c', '#6b4f8a', '#333'][i % 6]; const t = i / 14, px = x + 24 + t * (w - 48), py = r() < 0.5 ? y + 6 : y + h - 22; g.fillRect(px, py, 22 + r() * 10, 15); }
+            return true;
+        }
+        case 'sign': { g.fillStyle = '#1d2a36'; wcRR(g, x, y, w, h, 6); g.fill(); g.fillStyle = '#ffd23d'; g.font = 'bold 16px Ubuntu'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(f.txt || '', x + w / 2, y + h / 2 + 1); g.textBaseline = 'alphabetic'; return true; }
+        case 'travelator': { g.fillStyle = '#5b6670'; wcRR(g, x, y, w, h, 10); g.fill(); g.fillStyle = '#8e99a2'; for (let i = 10; i < w - 10; i += 18) g.fillRect(x + i, y + 8, 9, h - 16); g.fillStyle = '#ffd23d'; g.fillRect(x, y, w, 3); g.fillRect(x, y + h - 3, w, 3); g.fillStyle = '#fff'; g.font = 'bold 13px Ubuntu'; g.textAlign = 'center'; g.fillText('◀ ◀  MOVING WALKWAY  ▶ ▶', x + w / 2, y + h / 2 + 5); return true; }
         case 'cart': {
             g.fillStyle = '#9a6a3c'; wcRR(g, x, y + 8, w, h - 8, 6); g.fill(); g.fillStyle = '#5a3a1e'; g.beginPath(); g.arc(x + 14, y + h, 7, 0, 7); g.arc(x + w - 14, y + h, 7, 0, 7); g.fill();
             for (let i = 0; i < 6; i++) { g.fillStyle = i % 2 ? '#fff' : ['#e84393', '#e17055', '#00b894', '#0984e3', '#fdcb6e', '#6c5ce7'][(f.col || 0) % 6]; g.fillRect(x + i * w / 6, y, w / 6 + 0.5, 12); }
@@ -5101,7 +5378,7 @@ function phRender() {
             break;
         case 'work': {
             const j = st.job; h = phHead('Work');
-            h += j ? `<div class="ph-card"><small>${escapeHTML(j.name)}</small><big>${escapeHTML(j.rank)} ${escapeHTML(j.role)}</big><small>${j.tasks} tasks done · next promotion in ${j.next || '—'} · pay ${j.pay} per task</small></div><button class="ph-btn" data-nav="work">🧭 Navigate to work</button>` : '<div class="ph-empty">You are not employed. Walk into any office, shop or farm with a "Hiring" sign.</div>';
+            h += j ? `<div class="ph-card"><small>${escapeHTML(j.name)}</small><big>${escapeHTML(j.rank)} ${escapeHTML(j.role)}</big><small>${j.kind === 'pilot' ? `${j.tasks} flights flown · next promotion in ${j.next || '—'} · ${Number(j.pay).toLocaleString()} coins per 1000 km` : `${j.tasks} tasks done · next promotion in ${j.next || '—'} · pay ${j.pay} per task`}</small></div>${j.kind === 'pilot' ? '<button class="ph-btn" data-nav="airport">🧭 Navigate to the nearest airport</button>' : '<button class="ph-btn" data-nav="work">🧭 Navigate to work</button>'}` : '<div class="ph-empty">You are not employed. Walk into any office, shop or farm with a "Hiring" sign.</div>';
             break;
         }
         case 'settings':
@@ -5138,7 +5415,7 @@ function drawWorldEnvironment() {
     if (WC.scene === 'ext') { if (WC.G) wcDrawGlobe(); else wcDrawExteriorWrapped(); } else wcDrawInterior();
     ctx.restore();
     if (WC.scene === 'ext' && !WC.G) wcCityWelcome(canvas.width, canvas.height);
-    wcIfeTick();
+    wcIfeTick(); pilFrame();
     wcPositionPrompt();                                                   // keep the bubble glued to its building / car
     const now = performance.now(); if (now - wcChipT > 400) { wcChipT = now; wcRenderChip(); }   // shift countdown
 }
@@ -7267,6 +7544,7 @@ function isTypingInField(e) {
 window.onkeydown = e => { 
 
     if (isTypingInField(e)) return;
+    if (pilKeyDown(e)) return;                                           // in the cockpit: throttle, gear, flaps, autopilot…
     if (typeof CAS !== 'undefined' && CAS.open) { if (e.key === 'Escape') casClose(); return; }
     if (isWorldMode && (e.key === 'p' || e.key === 'P')) { phToggle(); return; }
     if (isWorldMode && PH.open && e.key === 'Escape') { phToggle(false); return; }
