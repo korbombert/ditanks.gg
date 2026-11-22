@@ -2132,9 +2132,11 @@ function beginWorldMode() {
 }
 function handleWorldMessage(d) {
     switch (d.type) {
+        case 'world_air_slots': if (!WC.airSlots) WC.airSlots = new Map(); for (const [k, a, b] of d.s || []) WC.airSlots.set(k, [a, b]); break;
         case 'world_static':
-            WC.inflight = d.inflight || {};
-            Object.assign(WC, { globe: d.globe, cultures: d.cultures, air: d.air, dayMs: d.dayMs, center: d.center, centerY: d.centerY, extent: d.extent, extentY: d.extentY, circ: d.circ, gap: d.gap, land: d.land, airports: d.airports || [], chunk: d.chunk, nch: d.nch, roads: d.roads, cities: d.cities, cars: d.cars, carColors: d.carColors, companies: d.companies, spawn: d.spawn, bank: d.bank, dealer: d.dealer, fireMs: d.fireMs, taskMs: d.taskMs }); WC.cityById = new Map((d.cities || []).map(c => [c.id, c])); WC._aiPaths = new Map(); WC._dep = null; phEl();
+            WC.inflight = d.inflight || {}; WC.itemDefs = d.items || {};
+            if (d.now) WC.clockSkew = d.now - Date.now();
+        Object.assign(WC, { globe: d.globe, cultures: d.cultures, air: d.air, dayMs: d.dayMs, center: d.center, centerY: d.centerY, extent: d.extent, extentY: d.extentY, circ: d.circ, gap: d.gap, land: d.land, airports: d.airports || [], chunk: d.chunk, nch: d.nch, roads: d.roads, cities: d.cities, cars: d.cars, carColors: d.carColors, companies: d.companies, spawn: d.spawn, bank: d.bank, dealer: d.dealer, fireMs: d.fireMs, taskMs: d.taskMs }); WC.cityById = new Map((d.cities || []).map(c => [c.id, c])); WC._aiPlans = new Map(); WC._apBy = null; WC._dep = null; WC.airSlots = new Map(((d.air && d.air.slots) || []).map(([k, a, b]) => [k, [a, b]])); phEl();
             wcBuildGates();
             beginWorldMode(); if (!wcMapEl) wcMapBuild(); return true;
         case 'world_houses': WC.houses = new Map(d.list.map(([h, o, m]) => [h, { o, m }])); return true;
@@ -2503,36 +2505,6 @@ function wcPaintSchool(g, b) {
 }
 
 // ---- airports: terminal / control tower / hangar painters, runway decals and airliners ---------------------------
-function wcPaintTerminal(g, b) {
-    const w = b.w, h = b.h, glassTop = b.door.dir === 'N';
-    wcShadow(g, w, h, 22);
-    g.fillStyle = '#7f8a92'; g.fillRect(0, 0, w, h); g.fillStyle = '#d7dde0'; g.fillRect(5, 5, w - 10, h - 10);
-    // saw-tooth skylights across the roof
-    for (let x = 30; x < w - 40; x += 70) { g.fillStyle = '#9fc4d6'; g.fillRect(x, h * 0.28, 34, h * 0.44); g.fillStyle = 'rgba(255,255,255,.35)'; g.fillRect(x, h * 0.28, 34, 5); }
-    // glass curtain wall on the landside (door) face, airside piers on the other
-    const gy = glassTop ? 5 : h - 23; g.fillStyle = '#4f86a3'; g.fillRect(5, gy, w - 10, 18); g.strokeStyle = 'rgba(255,255,255,.45)'; g.lineWidth = 1; for (let x = 12; x < w - 10; x += 18) { g.beginPath(); g.moveTo(x, gy); g.lineTo(x, gy + 18); g.stroke(); }
-    const py = glassTop ? h - 5 : 5, dir = glassTop ? 1 : -1;
-    for (const px of [w / 2 - 380, w / 2 + 380]) { g.fillStyle = '#b9c2c7'; g.fillRect(px - 16, Math.min(py, py + dir * 40), 32, 40); g.strokeStyle = 'rgba(0,0,0,.25)'; g.strokeRect(px - 16, Math.min(py, py + dir * 40), 32, 40); }
-    wcBanner(g, `✈ ${b.nm || ''} AIRPORT · ${b.code || ''}`, w / 2, h / 2, w * 0.62, 40, '#1d4f7a');
-    wcDoorMark(g, b, '#1d4f7a');
-}
-function wcPaintCTower(g, b) {
-    const r = Math.min(b.w, b.h) / 2;
-    g.fillStyle = 'rgba(8,12,16,.3)'; g.beginPath(); g.ellipse(r + 34, r + 40, r, r * 0.9, 0, 0, 7); g.fill();
-    g.fillStyle = '#e9ecef'; g.beginPath(); g.arc(r, r, r, 0, 7); g.fill();
-    g.fillStyle = '#2b4f66'; g.beginPath(); g.arc(r, r, r * 0.82, 0, 7); g.fill();
-    g.strokeStyle = 'rgba(160,220,255,.6)'; g.lineWidth = 2; for (let a = 0; a < 12; a++) { g.beginPath(); g.moveTo(r, r); g.lineTo(r + Math.cos(a / 12 * 6.283) * r * 0.82, r + Math.sin(a / 12 * 6.283) * r * 0.82); g.stroke(); }
-    g.fillStyle = '#d9dde0'; g.beginPath(); g.arc(r, r, r * 0.42, 0, 7); g.fill(); g.fillStyle = '#c0392b'; g.beginPath(); g.arc(r, r, 6, 0, 7); g.fill();
-}
-function wcPaintHangar(g, b) {
-    const w = b.w, h = b.h; wcShadow(g, w, h, 20);
-    g.fillStyle = '#5f6b73'; g.fillRect(0, 0, w, h);
-    const gr = g.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, '#8d99a1'); gr.addColorStop(0.5, '#c9d1d6'); gr.addColorStop(1, '#8d99a1');
-    g.fillStyle = gr; g.fillRect(4, 4, w - 8, h - 8);
-    g.strokeStyle = 'rgba(0,0,0,.16)'; g.lineWidth = 1.2; for (let x = 16; x < w - 6; x += 16) { g.beginPath(); g.moveTo(x, 4); g.lineTo(x, h - 4); g.stroke(); }
-    const dy = b.door.dir === 'N' ? 0 : h - 10; g.fillStyle = '#e1b53a'; g.fillRect(20, dy, w - 40, 10);
-    wcBanner(g, 'HANGAR', w / 2, h / 2, w * 0.5, 30, '#3a4650');
-}
 const WC_LIVERY = [['#1d6fa5', '#f2b233', 'DITANKS AIR'], ['#c0392b', '#f4efe4', 'REDLINE'], ['#2c7a5b', '#e9e2c9', 'EVERGREEN'], ['#7a3f8f', '#f1c40f', 'VIOLET JET'], ['#d68a1c', '#2b3138', 'SUNWING'], ['#1f7f8c', '#f4efe4', 'TEAL SKY']];
 // Top-down airliner facing +x, centred on (0,0): 230 long, 210 wingspan.
 function wcPlanePath(g) {
@@ -2542,24 +2514,39 @@ function wcPlanePath(g) {
     g.lineTo(30, 14); g.lineTo(-40, 104); g.lineTo(-62, 104); g.lineTo(-34, 12); g.lineTo(-80, 10); g.lineTo(-90, 40); g.lineTo(-104, 40); g.lineTo(-100, 9); g.lineTo(-112, 6); g.lineTo(-112, -6); g.lineTo(-100, -9);
     g.closePath();
 }
-// Draws an airliner at world (x, y) or, with `screen`, at the current context origin (entity renderer).
-// A player's flight: the plane, with the tank riding on top of the fuselage.
+// ---- airports: runways (asphalt, concrete, grass, gravel; parallel and crosswind), taxiways, aprons with numbered stands ----
+function wcRunwaySurf(surf, x, y, w, h) {
+    if (surf === 'turf') { ctx.fillStyle = '#6fa257'; ctx.fillRect(worldToScreenX(x), worldToScreenY(y), w / fov, h / fov); ctx.fillStyle = 'rgba(255,255,255,.07)'; for (let i = 0; i < w; i += 160) ctx.fillRect(worldToScreenX(x + i), worldToScreenY(y), 80 / fov, h / fov); return; }
+    if (surf === 'gravel') { ctx.fillStyle = '#b9a586'; ctx.fillRect(worldToScreenX(x), worldToScreenY(y), w / fov, h / fov); return; }
+    wcFillTex(surf === 'concrete' ? 'concrete' : 'asphalt', x, y, w, h, surf === 'concrete' ? 128 : 110);
+}
 function wcDrawAirProp(p, s) {
     const X = v => worldToScreenX(v), Y = v => worldToScreenY(v), night = wcNightLevel();
     if (p.k === 'runway') {
-        wcFillTex('asphalt', p.x, p.y, p.w, p.h, 110);
-        const x0 = X(p.x), y0 = Y(p.y), w = p.w * s, h = p.h * s, cy = y0 + h / 2;
-        ctx.fillStyle = 'rgba(245,245,240,.9)'; ctx.fillRect(x0, y0 + 6 * s, w, 3 * s); ctx.fillRect(x0, y0 + h - 9 * s, w, 3 * s);
-        for (let x = 260; x < p.w - 260; x += 110) ctx.fillRect(X(p.x + x), cy - 2 * s, 60 * s, 4 * s);                     // centreline
-        for (const end of [0, 1]) {                                                                                       // threshold bars + numbers
-            const ex = end ? p.x + p.w - 70 : p.x + 20;
-            for (let i = 0; i < 6; i++) { ctx.fillRect(X(ex), y0 + (14 + i * 18) * s, 50 * s, 9 * s); }
-            if (s > 0.2) { ctx.save(); ctx.translate(X(end ? p.x + p.w - 120 : p.x + 120), cy); ctx.rotate(end ? -Math.PI / 2 : Math.PI / 2); ctx.font = `bold ${Math.max(6, 34 * s)}px Ubuntu`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(end ? '27' : '09', 0, 0); ctx.restore(); }
+        wcRunwaySurf(p.surf, p.x, p.y, p.w, p.h);
+        const vert = !!p.vert, len = vert ? p.h : p.w, wid = vert ? p.w : p.h, soft = p.surf === 'turf' || p.surf === 'gravel';
+        ctx.save(); ctx.translate(X(p.x), Y(p.y)); if (vert) { ctx.translate(p.w * s, 0); ctx.rotate(Math.PI / 2); }
+        const W = len * s, Hh = wid * s, cy = Hh / 2;
+        ctx.fillStyle = soft ? 'rgba(255,255,255,.95)' : 'rgba(245,245,240,.9)';
+        if (soft) { for (let x = 0; x <= len; x += 300) for (const yy of [6 * s, Hh - 14 * s]) ctx.fillRect(x * s, yy, 26 * s, 8 * s); }   // a grass strip is marked by white boards
+        else {
+            ctx.fillRect(0, 6 * s, W, 3 * s); ctx.fillRect(0, Hh - 9 * s, W, 3 * s);
+            for (let x = 260; x < len - 260; x += 120) ctx.fillRect(x * s, cy - 2 * s, 64 * s, 4 * s);                     // centreline
+            for (const end of [0, 1]) {                                                                                 // threshold piano keys, aiming points, numbers
+                const ex = end ? len - 90 : 24, n = Math.max(4, Math.floor((wid - 30) / 22));
+                for (let i = 0; i < n; i++) ctx.fillRect(ex * s, (14 + i * (wid - 28) / n) * s, 60 * s, (wid - 28) / n * 0.55 * s);
+                const ax = end ? len - 520 : 400; ctx.fillRect(ax * s, cy - wid * 0.32 * s, 120 * s, 10 * s); ctx.fillRect(ax * s, cy + wid * 0.32 * s - 10 * s, 120 * s, 10 * s);
+                if (s > 0.18) { ctx.save(); ctx.translate((end ? len - 150 : 150) * s, cy); ctx.rotate(end ? -Math.PI / 2 : Math.PI / 2); ctx.font = `bold ${Math.max(6, wid * 0.24 * s)}px Ubuntu`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    const L = p.nr === 'L' ? (end ? 'R' : 'L') : p.nr === 'R' ? (end ? 'L' : 'R') : ''; ctx.fillText((vert ? (end ? '36' : '18') : (end ? '27' : '09')) + L, 0, 0); ctx.restore(); }
+            }
         }
         const lc = night > 0.15 ? `rgba(255,236,160,${0.6 + night * 0.4})` : 'rgba(255,240,190,.75)', lr = Math.max(1.2, (night > 0.15 ? 5 : 3) * s);
-        ctx.fillStyle = lc; for (let x = 0; x <= p.w; x += 120) for (const yy of [y0 + 2 * s, y0 + h - 2 * s]) { ctx.beginPath(); ctx.arc(X(p.x + x), yy, lr, 0, 7); ctx.fill(); }
-        if (s > 0.15) { ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = `bold ${Math.max(7, 22 * s)}px Ubuntu`; ctx.textAlign = 'center'; ctx.fillText(p.code || '', X(p.x + p.w / 2), cy + 32 * s); }
+        ctx.fillStyle = lc; for (let x = 0; x <= len; x += 120) for (const yy of [2 * s, Hh - 2 * s]) { ctx.beginPath(); ctx.arc(x * s, yy, lr, 0, 7); ctx.fill(); }
+        if (night > 0.15) for (const end of [0, 1]) { ctx.fillStyle = end ? 'rgba(255,60,60,.9)' : 'rgba(80,255,120,.9)'; for (let y = 0; y <= wid; y += 24) { ctx.beginPath(); ctx.arc((end ? len : 0) * s, y * s, lr, 0, 7); ctx.fill(); } }
+        if (p.code && s > 0.15 && !soft) { ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = `bold ${Math.max(7, 22 * s)}px Ubuntu`; ctx.textAlign = 'center'; ctx.fillText(p.code, W / 2, cy + wid * 0.25 * s); }
+        ctx.restore();
     } else if (p.k === 'taxiway') {
+        const soft = p.surf === 'turf' || p.surf === 'gravel'; if (soft) { ctx.fillStyle = p.surf === 'turf' ? '#86b26a' : '#c7b595'; ctx.fillRect(X(p.x), Y(p.y), p.w * s, p.h * s); return; }
         wcFillTex('asphalt', p.x, p.y, p.w, p.h, 110);
         const horiz = p.w >= p.h; ctx.strokeStyle = '#e6c23a'; ctx.lineWidth = Math.max(1, 3 * s); ctx.beginPath();
         if (horiz) { ctx.moveTo(X(p.x), Y(p.y + p.h / 2)); ctx.lineTo(X(p.x + p.w), Y(p.y + p.h / 2)); } else { ctx.moveTo(X(p.x + p.w / 2), Y(p.y)); ctx.lineTo(X(p.x + p.w / 2), Y(p.y + p.h)); }
@@ -2569,14 +2556,91 @@ function wcDrawAirProp(p, s) {
     } else if (p.k === 'apron') {
         wcFillTex('concrete', p.x, p.y, p.w, p.h, 128);
         ctx.strokeStyle = 'rgba(60,60,55,.5)'; ctx.lineWidth = Math.max(1, 2 * s); ctx.strokeRect(X(p.x), Y(p.y), p.w * s, p.h * s);
-        const cy = p.y + p.h / 2 + (p.flip ? 5 : -5);
-        ctx.strokeStyle = '#e6c23a'; ctx.lineWidth = Math.max(1, 3 * s);
-        for (const [i, sx] of [[1, p.x + p.w / 2 - 380], [2, p.x + p.w / 2 + 380]]) {
-            ctx.beginPath(); ctx.moveTo(X(sx), Y(p.flip ? p.y + p.h : p.y)); ctx.lineTo(X(sx), Y(cy)); ctx.moveTo(X(sx - 140), Y(cy)); ctx.lineTo(X(sx + 140), Y(cy)); ctx.stroke();
-            if (s > 0.2) { ctx.fillStyle = '#e6c23a'; ctx.font = `bold ${Math.max(7, 30 * s)}px Ubuntu`; ctx.textAlign = 'center'; ctx.fillText(String(i), X(sx + 170), Y(cy + 10)); }
+        for (const [sx, sy, a, g] of p.stands || []) {                       // lead-in line, stop bar, safety box and the stand number
+            const c = Math.cos(a), sn = Math.sin(a);
+            ctx.strokeStyle = '#e6c23a'; ctx.lineWidth = Math.max(1, 3 * s); ctx.beginPath(); ctx.moveTo(X(sx - c * 520), Y(sy - sn * 520)); ctx.lineTo(X(sx + c * 250), Y(sy + sn * 250)); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(X(sx + c * 250 - sn * 60), Y(sy + sn * 250 + c * 60)); ctx.lineTo(X(sx + c * 250 + sn * 60), Y(sy + sn * 250 - c * 60)); ctx.stroke();
+            if (s > 0.12) { ctx.save(); ctx.translate(X(sx), Y(sy)); ctx.rotate(a); ctx.setLineDash([10 * s, 8 * s]); ctx.strokeStyle = 'rgba(220,60,50,.55)'; ctx.lineWidth = Math.max(1, 2 * s); ctx.strokeRect(-300 * s, -280 * s, 600 * s, 560 * s); ctx.restore(); }
+            if (s > 0.16) { ctx.fillStyle = '#e6c23a'; ctx.font = `bold ${Math.max(8, 46 * s)}px Ubuntu`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(g), X(sx - c * 420 + sn * 90), Y(sy - sn * 420 - c * 90)); ctx.textBaseline = 'alphabetic'; }
         }
+    } else if (p.k === 'curb') {                                              // the drop-off road in front of the terminal
+        wcFillTex('asphalt', p.x, p.y, p.w, p.h, 110);
+        ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = Math.max(1, 2 * s); ctx.setLineDash([24 * s, 18 * s]); ctx.beginPath(); ctx.moveTo(X(p.x), Y(p.y + p.h / 2)); ctx.lineTo(X(p.x + p.w), Y(p.y + p.h / 2)); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,255,255,.8)'; for (const fx of [0.25, 0.5, 0.75]) for (let i = 0; i < 6; i++) ctx.fillRect(X(p.x + p.w * fx - 60 + i * 22), Y(p.y), 12 * s, p.h * s);
+        ctx.fillStyle = '#f2c014'; ctx.font = `bold ${Math.max(7, 26 * s)}px Ubuntu`; ctx.textAlign = 'center'; if (s > 0.15) { ctx.fillText('DEPARTURES', X(p.x + p.w * 0.38), Y(p.y + p.h * 0.32)); ctx.fillText('ARRIVALS', X(p.x + p.w * 0.62), Y(p.y + p.h * 0.32)); }
+    } else if (p.k === 'tunnel') {                                            // people mover under the apron, out to the satellite
+        ctx.strokeStyle = 'rgba(40,60,80,.45)'; ctx.lineWidth = Math.max(2, 22 * s); ctx.setLineDash([30 * s, 20 * s]); ctx.beginPath(); ctx.moveTo(X(p.x + p.w / 2), Y(p.y)); ctx.lineTo(X(p.x + p.w / 2), Y(p.y + p.h)); ctx.stroke(); ctx.setLineDash([]);
+    } else if (p.k === 'fueltank') {
+        const r = (p.r || 100) * s, x = X(p.x), y = Y(p.y); ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(x + 12 * s, y + 14 * s, r, 0, 7); ctx.fill();
+        ctx.fillStyle = '#eef1f3'; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); ctx.strokeStyle = '#9aa4ab'; ctx.lineWidth = Math.max(1, 4 * s); ctx.stroke(); ctx.beginPath(); ctx.arc(x, y, r * 0.6, 0, 7); ctx.stroke();
     }
 }
+function wcDrawJetbridge(p, s) {                                          // a telescopic bridge from the terminal wall towards the aircraft door
+    const x = worldToScreenX(p.x + p.w / 2), y = worldToScreenY(p.y + p.h / 2), L = (p.len || 220) * s;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(p.a || 0);
+    ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fillRect(6 * s, 6 * s, L, 34 * s);
+    ctx.fillStyle = '#c9d0d5'; ctx.fillRect(0, -17 * s, L, 34 * s); ctx.fillStyle = '#aab3ba'; ctx.fillRect(L * 0.45, -19 * s, L * 0.04, 38 * s);
+    ctx.fillStyle = '#7d8a93'; ctx.beginPath(); ctx.arc(0, 0, 22 * s, 0, 7); ctx.fill(); ctx.fillStyle = '#5e6b74'; ctx.fillRect(L - 10 * s, -22 * s, 26 * s, 44 * s);
+    ctx.restore();
+}
+// Terminal buildings: one painter, with the plan, colours and roof varying per airport.
+function wcPaintTerminal(g, b) {
+    const w = b.w, h = b.h, landTop = b.door.dir === 'N', rc = b.rc || '#d7dde0', wc = b.wc || '#7f8a92', gl = b.gl || '#4f86a3', acc = b.acc || '#1d4f7a', dk = b.dk || 'linear';
+    wcShadow(g, w, h, 22);
+    g.fillStyle = wc; g.fillRect(0, 0, w, h); g.fillStyle = rc; g.fillRect(5, 5, w - 10, h - 10);
+    const rnd = wcRng(b.s || 1);
+    if (dk === 'satellite' || dk === 'linear') { for (let x = 30; x < w - 40; x += 70) { g.fillStyle = gl; g.fillRect(x, h * 0.26, 34, h * 0.48); g.fillStyle = 'rgba(255,255,255,.35)'; g.fillRect(x, h * 0.26, 34, 5); } }   // saw-tooth skylights
+    else if (dk === 'piers') { g.strokeStyle = 'rgba(0,0,0,.14)'; g.lineWidth = 2; for (let x = 20; x < w; x += 40) { g.beginPath(); g.moveTo(x, 6); g.lineTo(x, h - 6); g.stroke(); } g.fillStyle = gl; g.fillRect(6, h * 0.45, w - 12, h * 0.1); }   // ribbed steel roof with a glass spine
+    else if (dk === 'curve') { g.strokeStyle = 'rgba(0,0,0,.12)'; g.lineWidth = 3; for (let y = 12; y < h - 8; y += 22) { g.beginPath(); g.moveTo(6, y); for (let x = 6; x <= w - 6; x += 20) g.lineTo(x, y + Math.sin(x / w * Math.PI * 2 + y * 0.05) * 7); g.stroke(); } }   // a wave roof
+    else if (dk === 'lodge') { g.fillStyle = 'rgba(0,0,0,.18)'; g.fillRect(5, h / 2 - 2, w - 10, 4); for (let y = 10; y < h - 6; y += 12) { g.fillStyle = y < h / 2 ? 'rgba(0,0,0,.07)' : 'rgba(255,255,255,.06)'; g.fillRect(5, y, w - 10, 5); } }   // shingles and a ridge
+    else { g.fillStyle = 'rgba(0,0,0,.12)'; for (let i = 0; i < 6; i++) { g.fillRect(20 + rnd() * (w - 80), 14 + rnd() * (h - 50), 40, 26); } g.fillStyle = gl; g.globalAlpha = 0.6; g.fillRect(w * 0.3, h * 0.3, w * 0.4, h * 0.4); g.globalAlpha = 1; }   // flat roof, plant, a big skylight
+    const gy = landTop ? 5 : h - 23; g.fillStyle = gl; g.fillRect(5, gy, w - 10, 18); g.strokeStyle = 'rgba(255,255,255,.45)'; g.lineWidth = 1; for (let x = 12; x < w - 10; x += 18) { g.beginPath(); g.moveTo(x, gy); g.lineTo(x, gy + 18); g.stroke(); }
+    if (!b.part) wcBanner(g, `✈ ${(b.nm || '').toUpperCase()} · ${b.code || ''}`, w / 2, h / 2, Math.min(w * 0.8, 900), 40, acc);
+    if (!b.part) wcDoorMark(g, b, acc);
+}
+function wcPaintPier(g, b) {
+    const w = b.w, h = b.h; wcShadow(g, w, h, 14);
+    g.fillStyle = b.wc || '#7f8a92'; g.fillRect(0, 0, w, h); g.fillStyle = b.rc || '#d7dde0'; g.fillRect(4, 4, w - 8, h - 8);
+    g.fillStyle = b.gl || '#4f86a3'; g.fillRect(w / 2 - 10, 8, 20, h - 16); g.strokeStyle = 'rgba(0,0,0,.12)'; g.lineWidth = 1.5; for (let y = 20; y < h; y += 30) { g.beginPath(); g.moveTo(4, y); g.lineTo(w - 4, y); g.stroke(); }
+}
+function wcPaintSatellite(g, b) {
+    const w = b.w, h = b.h, r = Math.min(w, h) / 2; wcShadow(g, w, h, 18);
+    g.fillStyle = b.wc || '#7f8a92'; wcRR(g, 0, 0, w, h, r); g.fill(); g.fillStyle = b.rc || '#d7dde0'; wcRR(g, 5, 5, w - 10, h - 10, r - 5); g.fill();
+    g.strokeStyle = b.gl || '#4f86a3'; g.lineWidth = 14; wcRR(g, 30, 30, w - 60, h - 60, Math.max(4, r - 30)); g.stroke();
+    wcBanner(g, 'SATELLITE · GATES', w / 2, h / 2, w * 0.5, 30, b.acc || '#1d4f7a');
+}
+function wcPaintCTower(g, b) {
+    const r = Math.min(b.w, b.h) / 2, ts = b.ts || 'cyl', wc = b.wc || '#e9ecef', acc = b.acc || '#c0392b';
+    g.fillStyle = 'rgba(8,12,16,.3)'; g.beginPath(); g.ellipse(r + 30, r + 36, r, r * 0.9, 0, 0, 7); g.fill();
+    if (ts === 'square' || ts === 'stone') {
+        g.fillStyle = ts === 'stone' ? '#a39a8a' : '#e9ecef'; g.fillRect(0, 0, 2 * r, 2 * r); g.fillStyle = '#2b4f66'; g.fillRect(r * 0.25, r * 0.25, r * 1.5, r * 1.5);
+        if (ts === 'stone') { g.fillStyle = '#8a8172'; for (let i = 0; i < 6; i++) { g.fillRect(i * r / 3, 0, r / 6, r * 0.18); g.fillRect(i * r / 3, 2 * r - r * 0.18, r / 6, r * 0.18); } }
+    } else if (ts === 'pagoda') {
+        for (let i = 0; i < 3; i++) { const k = 1 - i * 0.27; g.fillStyle = i % 2 ? '#7a2335' : wc; g.beginPath(); g.moveTo(r, r - r * k); g.lineTo(r + r * k, r); g.lineTo(r, r + r * k); g.lineTo(r - r * k, r); g.closePath(); g.fill(); }
+        g.fillStyle = '#2b4f66'; g.beginPath(); g.arc(r, r, r * 0.25, 0, 7); g.fill();
+    } else if (ts === 'lattice') {
+        g.strokeStyle = '#c0392b'; g.lineWidth = 4; g.strokeRect(4, 4, 2 * r - 8, 2 * r - 8); g.beginPath(); g.moveTo(4, 4); g.lineTo(2 * r - 4, 2 * r - 4); g.moveTo(2 * r - 4, 4); g.lineTo(4, 2 * r - 4); g.stroke();
+        g.fillStyle = '#2b4f66'; g.beginPath(); g.arc(r, r, r * 0.45, 0, 7); g.fill();
+    } else if (ts === 'beacon') {
+        g.fillStyle = '#d9dde0'; g.beginPath(); g.arc(r, r, r * 0.5, 0, 7); g.fill(); g.fillStyle = '#2e7d32'; g.beginPath(); g.moveTo(r, r); g.arc(r, r, r * 0.5, 0, Math.PI); g.fill(); g.fillStyle = '#fff'; g.beginPath(); g.moveTo(r, r); g.arc(r, r, r * 0.5, Math.PI, 2 * Math.PI); g.fill();
+    } else {                                                              // cylinder / needle / adobe: a round cab
+        g.fillStyle = ts === 'adobe' ? '#c8693b' : '#e9ecef'; g.beginPath(); g.arc(r, r, r, 0, 7); g.fill();
+        g.fillStyle = '#2b4f66'; g.beginPath(); g.arc(r, r, r * (ts === 'needle' ? 0.6 : 0.82), 0, 7); g.fill();
+        g.strokeStyle = 'rgba(160,220,255,.6)'; g.lineWidth = 2; for (let a = 0; a < 12; a++) { g.beginPath(); g.moveTo(r, r); g.lineTo(r + Math.cos(a / 12 * 6.283) * r * 0.8, r + Math.sin(a / 12 * 6.283) * r * 0.8); g.stroke(); }
+        g.fillStyle = '#d9dde0'; g.beginPath(); g.arc(r, r, r * 0.38, 0, 7); g.fill();
+    }
+    g.fillStyle = acc; g.beginPath(); g.arc(r, r, 6, 0, 7); g.fill();
+}
+function wcPaintHangar(g, b) {
+    const w = b.w, h = b.h; wcShadow(g, w, h, 20);
+    g.fillStyle = '#5f6b73'; g.fillRect(0, 0, w, h);
+    const gr = g.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, '#8d99a1'); gr.addColorStop(0.5, '#c9d1d6'); gr.addColorStop(1, '#8d99a1');
+    g.fillStyle = gr; g.fillRect(4, 4, w - 8, h - 8);
+    g.strokeStyle = 'rgba(0,0,0,.16)'; g.lineWidth = 1.2; for (let x = 16; x < w - 6; x += 16) { g.beginPath(); g.moveTo(x, 4); g.lineTo(x, h - 4); g.stroke(); }
+    const dy = b.door.dir === 'N' ? 0 : h - 10; g.fillStyle = '#e1b53a'; g.fillRect(20, dy, w - 40, 10);
+    wcBanner(g, b.lbl || 'HANGAR', w / 2, h / 2, w * 0.5, 30, '#3a4650');
+}
+
 function wcDrawStaticPlane(p, s) {
     if (p.gate) for (const en of gameState.entities) if (en.fl && en.x != null && Math.abs(en.x - p.cx) < 400 && Math.abs(en.y - p.cy) < 400) return;   // the flight using this gate is drawn instead
     wcDrawPlane(ctx, worldToScreenX(p.cx), worldToScreenY(p.cy), p.a || 0, 0, p.liv || 0);
@@ -2612,7 +2676,7 @@ function wcRenderFlight() {
     }
     const f = wcFlight;
     if (!f || !isWorldMode) { wcFlightEl.style.display = 'none'; return; }
-    const PH = { taxi: 'Taxiing to the runway', lineup: 'Lining up', roll: 'Take-off roll', final: 'Final approach', rollout: 'Landing', taxiin: 'Taxiing to the gate', park: 'Arriving at the gate' };
+    const PH = { board: `Boarding at Gate ${f.gate || ''} · push-back in ${Math.floor((f.wait || 0) / 60)}:${String((f.wait || 0) % 60).padStart(2, '0')}`, taxi: 'Taxiing to the runway', lineup: 'Lining up', roll: 'Take-off roll', final: 'Final approach', rollout: 'Landing', taxiin: 'Taxiing to the gate', park: 'Arriving at the gate' };
     const ph = f.ph === 'air' ? (f.alt >= 0.99 ? 'Cruising' : f.rem > f.total * 0.5 ? 'Climbing' : 'Descending') : PH[f.ph] || '';
     const prog = Math.max(0, Math.min(1, 1 - f.rem / (f.total || 1)));
     const eta = Math.max(0, f.eta), m = Math.floor(eta / 60), sec = String(eta % 60).padStart(2, '0');
@@ -2622,7 +2686,7 @@ function wcRenderFlight() {
     wcFlightEl.style.display = 'block';
 }
 
-const WC_PAINTERS = { tower: (g, b) => wcPaintTower(g, b, false), mid: (g, b) => wcPaintTower(g, b, true), shop: wcPaintShop, apt: wcPaintApt, mall: wcPaintMall, bank: wcPaintBank, dealer: wcPaintDealer, hall: wcPaintHall, house: wcPaintHouse, farmhouse: wcPaintHouse, barn: wcPaintBarn, shed: wcPaintShed, school: wcPaintSchool, terminal: wcPaintTerminal, ctower: wcPaintCTower, hangar: wcPaintHangar };
+const WC_PAINTERS = { tower: (g, b) => wcPaintTower(g, b, false), mid: (g, b) => wcPaintTower(g, b, true), shop: wcPaintShop, apt: wcPaintApt, mall: wcPaintMall, bank: wcPaintBank, dealer: wcPaintDealer, hall: wcPaintHall, house: wcPaintHouse, farmhouse: wcPaintHouse, barn: wcPaintBarn, shed: wcPaintShed, school: wcPaintSchool, terminal: wcPaintTerminal, pier: wcPaintPier, satellite: wcPaintSatellite, ctower: wcPaintCTower, hangar: wcPaintHangar };
 
 // ===================== CITY STYLES, SHOPS, HOTELS, FUEL, GIGS, TAXIS (client) =====================
 const WC_NEON = ['#ff2bd6', '#00e5ff', '#9dff00', '#ffb000', '#7a5cff'];
@@ -2987,7 +3051,7 @@ function wcDrawDyn(vx0, vy0, vx1, vy1, s) {
 function wcDrawBuildingLod(b, s) {
     const x = worldToScreenX(b.x), y = worldToScreenY(b.y), w = b.w * s, h = b.h * s;
     ctx.fillStyle = 'rgba(8,12,16,.3)'; ctx.fillRect(x + 3, y + 4, w, h);
-    ctx.fillStyle = b.k === 'house' || b.k === 'farmhouse' ? WC_HOUSE_ROOF[(b.r || 0) % 6] : b.work ? b.col : b.k === 'terminal' ? '#d7dde0' : b.k === 'barn' ? '#a63d33' : WC_ROOF[(b.t || 0) % 6];
+    ctx.fillStyle = b.k === 'house' || b.k === 'farmhouse' ? WC_HOUSE_ROOF[(b.r || 0) % 6] : b.work ? b.col : b.k === 'terminal' || b.k === 'pier' || b.k === 'satellite' ? (b.rc || '#d7dde0') : b.k === 'barn' ? '#a63d33' : WC_ROOF[(b.t || 0) % 6];
     ctx.fillRect(x, y, w, h);
 }
 // ---- organic city outlines ------------------------------------------------------------------------------------------
@@ -3044,7 +3108,7 @@ function wcDrawExterior() {
     for (const c of list) for (const l of c.lots) if (vis(l.x, l.y, l.w, l.h) && once('l' + l.id)) wcDrawLot(l, s);
     for (const c of list) for (const p of c.props) if (p.k === 'pave' || p.k === 'lake') { if (vis(p.x, p.y, p.w, p.h) && once('g' + p.k + p.x + ',' + p.y)) wcDrawGroundProp(p, s); }
     for (const c of list) for (const p of c.props) if (p.k === 'meadow' || p.k === 'green' || p.k === 'fence') { if (vis(p.x - 20, p.y - 20, p.w + 40, p.h + 40) && once('g' + p.k + p.x + ',' + p.y)) wcDrawCountryGround(p, s); }
-    for (const c of list) for (const p of c.props) if (p.k === 'apron' || p.k === 'taxiway' || p.k === 'runway') { if (vis(p.x, p.y, p.w, p.h) && once('p' + p.k + p.x + ',' + p.y)) wcDrawAirProp(p, s); }
+    for (const c of list) for (const p of c.props) if (p.k === 'apron' || p.k === 'taxiway' || p.k === 'runway' || p.k === 'curb' || p.k === 'tunnel' || p.k === 'fueltank') { if (vis(p.x - (p.r || 0), p.y - (p.r || 0), p.w + 2 * (p.r || 0), p.h + 2 * (p.r || 0)) && once('p' + p.k + p.x + ',' + p.y)) wcDrawAirProp(p, s); }
     for (const c of list) for (const p of c.props) if (p.k === 'path' || p.k === 'yard' || p.k === 'fountain') { if (vis(p.x, p.y, p.w, p.h) && once('p' + p.k + p.x + ',' + p.y)) wcDrawProp(p, s, 0); }
     if (!lod) for (const c of list) for (const q of c.pcars) {
         if (!vis(q.x - 40, q.y - 40, 80, 80)) continue;
@@ -3061,7 +3125,7 @@ function wcDrawExterior() {
     blds.sort((p, q) => wcBHeight(p) - wcBHeight(q));                    // taller buildings overlap lower ones
     for (const b of blds) wcDrawBuilding25(b, s, cam, nightL, b._lod);
     if (!lod) for (const c of list) for (const p of c.props) if ((p.k === 'rock' || p.k === 'hay' || p.k === 'well' || p.k === 'turbine') && vis(p.x - 200, p.y - 200, p.w + 400, p.h + 400) && once('cp' + p.k + p.x + ',' + p.y)) wcDrawCountryProp(p, s, cam);
-    for (const c of list) for (const p of c.props) if (p.k === 'plane' && vis(p.x - 60, p.y - 60, p.w + 120, p.h + 120) && once('pl' + p.cx + ',' + p.cy)) wcDrawStaticPlane(p, s);
+    for (const c of list) for (const p of c.props) if (p.k === 'jetbridge' && vis(p.x - 300, p.y - 300, p.w + 600, p.h + 600) && once('jb' + p.x + ',' + p.y)) wcDrawJetbridge(p, s);
     for (const c of list) for (const p of c.props) if (p.k === 'silo' && vis(p.x, p.y, p.w, p.h) && once('s' + p.x + ',' + p.y)) wcDrawProp(p, s, 0);
     for (const c of list) for (const p of c.props) if ((p.k === 'pump' || p.k === 'stall' || p.k === 'billboard') && vis(p.x - 20, p.y - 20, p.w + 40, p.h + 40) && once('sp' + p.k + p.x + ',' + p.y)) wcDrawStreetProp(p, s, nightL);
     if (!WC.viewMode) { wcUpdateDyn(); wcDrawDyn(vx0, vy0, vx1, vy1, s); }
@@ -3166,131 +3230,173 @@ function wcSetNav(mode, pin) {
     wcToast('Satnav: ' + (pin ? pin.label : { work: 'nearest workplace', home: 'home', car: 'your car', atm: 'nearest ATM', bank: 'Central Bank', dealer: 'Car Dealership', airport: 'nearest airport', mission: 'your job', fuel: 'nearest fuel station', hotel: 'hotel', shop: 'nearest grocery', mall: 'nearest mall' }[mode]));
 }
 let wcMapEl = null, wcMapSel = null;
+// ===================== the world map: a globe you can spin and zoom =====================
+// Drag to rotate, scroll to zoom (towards the cursor), click to pick a place. Land, sea ice, day and night are painted
+// per pixel into a small buffer (only when the view changes); roads, cities, airports, air routes and aircraft are drawn
+// as vectors on top, with more detail the closer you zoom.
+function wcGmFrame(v) { const c = wcVecLL(v.lat, v.lon), { e, n } = wcEN(c); return { c, e, n }; }
+function wcGmProj(F, Rp, N, q) { return [N / 2 + wcDot(q, F.e) * Rp, N / 2 - wcDot(q, F.n) * Rp, wcDot(q, F.c)]; }
+function wcGmUnproj(F, Rp, N, sx, sy) {
+    const x = (sx - N / 2) / Rp, y = -(sy - N / 2) / Rp, r2 = x * x + y * y; if (r2 > 1) return null;
+    const z = Math.sqrt(1 - r2); return [F.e[0] * x + F.n[0] * y + F.c[0] * z, F.e[1] * x + F.n[1] * y + F.c[1] * z, F.e[2] * x + F.n[2] * y + F.c[2] * z];
+}
+function wcGmSun() { const C = WC.circ, lon = ((wcServerNow() % (WC.dayMs || WC_DAY_MS)) / (WC.dayMs || WC_DAY_MS)) * -Math.PI * 2 + Math.PI / 2 + WC.center / C * Math.PI * 2; return wcVecLL(0, lon); }
+function wcGmRaster(M, N, F, Rp, D) {
+    D = D || 3; const bw = Math.ceil(N / D), L = WC.land, C = WC.circ, sun = wcGmSun();
+    if (!M.buf || M.buf.width !== bw) { M.buf = document.createElement('canvas'); M.buf.width = M.buf.height = bw; M.bg = M.buf.getContext('2d'); M.img = M.bg.createImageData(bw, bw); }
+    const P = M.img.data, R = wcR(), f1 = 7, f2 = 26;
+    for (let j = 0, i4 = 0; j < bw; j++) for (let i = 0; i < bw; i++, i4 += 4) {
+        const q = wcGmUnproj(F, Rp, N, (i + 0.5) * D, (j + 0.5) * D);
+        if (!q) { P[i4 + 3] = 0; continue; }
+        const lat = Math.asin(Math.max(-1, Math.min(1, q[2]))), lon = Math.atan2(q[1], q[0]), al = Math.abs(lat);
+        const x = ((lon / (Math.PI * 2) * C) % C + C) % C, y = wcYeq() - R * Math.log(Math.tan(Math.PI / 4 + Math.max(-1.49, Math.min(1.49, lat)) / 2));
+        const n = wcNoise3(q[0] * f1, q[1] * f1, q[2] * f1) * 0.6 + wcNoise3(q[0] * f2, q[1] * f2, q[2] * f2) * 0.4;
+        let r, g, b;
+        if (x > L.x0 && x < L.x1 && y > L.y0 && y < L.y1) { const k = 0.85 + 0.25 * n; r = 104 * k; g = 152 * k; b = 82 * k; }
+        else if (al > 1.12 + (n - 0.5) * 0.12) { const k = 0.9 + 0.1 * n; r = 228 * k; g = 238 * k; b = 244 * k; }
+        else { const k = 0.86 + 0.2 * n; r = 36 * k; g = 96 * k; b = 150 * k; }
+        const lit = wcDot(q, sun), day = Math.max(0, Math.min(1, lit * 6 + 0.5)), shade = 0.42 + 0.58 * day, limb = 0.75 + 0.25 * wcDot(q, F.c);
+        P[i4] = r * shade * limb; P[i4 + 1] = g * shade * limb; P[i4 + 2] = Math.min(255, b * shade * limb + (1 - day) * 18); P[i4 + 3] = 255;
+    }
+    M.bg.putImageData(M.img, 0, 0);
+}
+function wcMapDraw() {
+    if (!wcMapEl || wcMapEl.ov.style.display === 'none' || !WC.circ) return;
+    const M = wcMapEl, cv = M.cv, g = cv.getContext('2d'), N = cv.width, v = M.view, F = wcGmFrame(v), Rp = v.zoom * N * 0.46, R = wcR(), k = Rp / R;   // px per sphere unit
+    const pr = q => wcGmProj(F, Rp, N, q), prXY = (x, y) => pr(wcVec(x, y)), now = wcServerNow();
+    const vk0 = [v.lat.toFixed(5), v.lon.toFixed(5), v.zoom.toFixed(4), N].join(), pnow = performance.now();
+    if (M.vk0 !== vk0) { M.vk0 = vk0; M.moved = pnow; }
+    const moving = pnow - (M.moved || 0) < 160, vkey = vk0 + (moving ? 'm' : '') + Math.floor(now / 4000);   // coarse while moving, sharp when it settles
+    if (M.vkey !== vkey) { M.vkey = vkey; wcGmRaster(M, N, F, Rp, moving ? 6 : 3); }
+    g.fillStyle = '#050b16'; g.fillRect(0, 0, N, N); cv.style.borderRadius = Rp < N * 0.52 ? '50%' : '14px';
+    if (Rp < N) for (let i = 0; i < 120; i++) { g.fillStyle = `rgba(255,255,255,${0.2 + (i % 4) * 0.15})`; g.fillRect((i * 97) % N, (i * 53) % N, 1.4, 1.4); }
+    g.imageSmoothingEnabled = true; g.drawImage(M.buf, 0, 0, N, N);
+    if (Rp < N * 1.5) { const gl = g.createRadialGradient(N / 2, N / 2, Rp * 0.98, N / 2, N / 2, Rp * 1.06); gl.addColorStop(0, 'rgba(120,180,255,.35)'); gl.addColorStop(1, 'rgba(120,180,255,0)'); g.fillStyle = gl; g.beginPath(); g.arc(N / 2, N / 2, Rp * 1.06, 0, 7); g.fill(); }
+    const vis = q => wcDot(q, F.c) > 0.02, onScr = p => p[2] > 0 && p[0] > -40 && p[0] < N + 40 && p[1] > -40 && p[1] < N + 40;
+    const poly = (qs, close) => { g.beginPath(); let pen = false; for (const q of qs) { const p = pr(q); if (p[2] <= 0) { pen = false; continue; } pen ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); pen = true; } if (close) g.closePath(); };
+    // graticule: meridians every 15° (the date line in red), parallels every 15°
+    g.lineWidth = 1;
+    for (let m = 0; m < 24; m++) { const lo = m * Math.PI / 12, pts = []; for (let la = -88; la <= 88; la += 2) pts.push(wcVecLL(la * Math.PI / 180, lo)); g.strokeStyle = m === 0 ? 'rgba(255,90,90,.8)' : 'rgba(255,255,255,.1)'; g.setLineDash(m === 0 ? [6, 5] : []); poly(pts); g.stroke(); }
+    g.setLineDash([]); for (let la = -75; la <= 75; la += 15) { const pts = []; for (let lo = 0; lo <= 360; lo += 3) pts.push(wcVecLL(la * Math.PI / 180, lo * Math.PI / 180)); g.strokeStyle = la === 0 ? 'rgba(255,255,255,.22)' : 'rgba(255,255,255,.08)'; poly(pts); g.stroke(); }
+    // time-zone labels along the equator
+    if (WC.gap) { g.font = 'bold 12px Ubuntu, sans-serif'; g.textAlign = 'center'; for (let c = 0; c < Math.round(WC.circ / WC.gap); c++) { const x = c * WC.gap + WC.gap / 2, tz = Math.round(wcWrapD(x - WC.center) / WC.gap) * 6, p = pr(wcVecLL(0, x / WC.circ * Math.PI * 2)); if (p[2] > 0.1) { g.fillStyle = 'rgba(255,255,255,.55)'; g.fillText(wcTzLabel(tz <= -12 ? tz + 24 : tz), p[0], p[1] - 6); } } }
+    const kc = k * 0.75;                                                // px per chart unit, roughly, on the land
+    // cities: outlines and districts when close
+    if (kc > 0.004) for (const q of WC.cities) {
+        const P = q.bp || []; if (!P.length || !vis(wcVec(q.cx, q.cy))) continue;
+        const ring = sc => { const out = []; for (let i = 0; i <= P.length; i++) { const a = i / P.length * Math.PI * 2, r = P[i % P.length] * sc; out.push(wcVec(q.cx + Math.cos(a) * r, q.cy + Math.sin(a) * r)); } return out; };
+        g.fillStyle = 'rgba(200,198,186,.75)'; poly(ring(1), true); g.fill(); g.fillStyle = 'rgba(222,218,204,.8)'; poly(ring(0.5), true); g.fill();
+        g.setLineDash([5, 4]); g.strokeStyle = '#e8c53a'; g.lineWidth = 1.5; poly(ring(1), true); g.stroke(); g.setLineDash([]);
+    }
+    // roads: highways always, city streets as you zoom in
+    if (WC.roads) {
+        if (!M.roadQ) M.roadQ = WC.roads.map(r => { const ro = r.o ?? WC.center, a = r.a === 'v' ? [r.p, ro - r.e] : [ro - r.e, r.p], b = r.a === 'v' ? [r.p, ro + r.e] : [ro + r.e, r.p], n = Math.max(1, Math.ceil(r.e * 2 / 30000)); const pts = []; for (let i = 0; i <= n; i++) pts.push(wcVec(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n)); return { r, pts }; });
+        for (const { r, pts } of M.roadQ) {
+            const hw = r.c === 'x'; if (!hw && (kc * r.e < 2 || kc < 0.003)) continue; if (!hw && kc < 0.012 && r.c !== 'a') continue;
+            if (!vis(pts[0]) && !vis(pts[pts.length - 1])) continue;
+            g.strokeStyle = hw ? '#d98a1f' : r.c === 'a' ? '#6d7680' : '#9aa1a7'; g.lineWidth = hw ? Math.max(1.5, Math.min(5, kc * 250)) : Math.max(0.6, Math.min(4, kc * (r.hw || 30) * 2)); poly(pts); g.stroke();
+        }
+    }
+    // air routes: every scheduled leg as a faint great circle; your own flight in yellow
+    if (WC.air && kc < 0.05) { g.strokeStyle = 'rgba(255,255,255,.16)'; g.lineWidth = 1; const seen = new Set(); for (const l of WC.air.legs) { const key = [l.from, l.to].sort().join(); if (seen.has(key)) continue; seen.add(key); const A = wcAp(l.from), B = wcAp(l.to); if (!A || !B) continue; poly(wcGCVecs(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 40)); g.stroke(); } }
+    if (wcFlight) { const A = wcAp(wcFlight.from), B = wcAp(wcFlight.to); if (A && B) { g.strokeStyle = '#ffd23d'; g.lineWidth = 2.5; g.setLineDash([8, 5]); poly(wcGCVecs(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 160)); g.stroke(); g.setLineDash([]); } }
+    // satnav route and the picked point
+    const n = WC.nav; if (n && n.route) { g.strokeStyle = '#18a0ff'; g.lineWidth = 3; poly(n.route.pts.map(p => wcVec(p[0], p[1]))); g.stroke(); }
+    // places when close, airports and cities always
+    g.textAlign = 'center';
+    if (kc > 0.005) for (const q of WC.mapPlaces || []) {
+        const p = prXY(q[1], q[2]); if (!onScr(p)) continue;
+        if (q[0] === 'w') { if (kc < 0.012) continue; g.fillStyle = q[4] || '#c33'; g.fillRect(p[0] - 2.5, p[1] - 2.5, 5, 5); }
+        else if (q[0] === 'a') { if (kc < 0.03) continue; g.fillStyle = '#1b7a3d'; g.fillRect(p[0] - 1.5, p[1] - 1.5, 3, 3); }
+        else if (q[0] !== 'airport') { g.font = '15px sans-serif'; g.fillText({ bank: '🏦', dealer: '🚘', hall: '🏛', mall: '🛍', megamall: '🛍', school: '🏫', hotel: '🏨', fuel: '⛽', attr: '🖼' }[q[0]] || '•', p[0], p[1] + 5); }
+    }
+    for (const a of WC.airports || []) { const p = prXY(a.door.x, a.door.y); if (!onScr(p)) continue; g.font = `${kc > 0.03 ? 20 : 14}px sans-serif`; g.fillText('✈', p[0], p[1] + 5); if (kc > 0.01) { g.font = 'bold 11px Ubuntu'; g.fillStyle = '#ffd23d'; g.fillText(a.code, p[0], p[1] + 18); } }
+    const placed = []; g.font = 'bold 13px Ubuntu, sans-serif';
+    for (const q of WC.cities.slice().sort((a, b) => (b.size || 0) - (a.size || 0))) {
+        const p = prXY(q.cx, q.cy); if (!onScr(p)) continue;
+        if (kc < 0.004) { g.fillStyle = '#fff'; g.beginPath(); g.arc(p[0], p[1], 3, 0, 7); g.fill(); }
+        const t = `${q.name} · ${wcTzLabel(q.tz)}`, w = g.measureText(t).width; let pick = null;
+        for (const dy of [-10, 12, -24]) { const r = [p[0] - w / 2 - 3, p[1] + dy - 12, w + 6, 16]; if (!placed.some(o => r[0] < o[0] + o[2] && o[0] < r[0] + r[2] && r[1] < o[1] + o[3] && o[1] < r[1] + r[3])) { pick = [dy, r]; break; } }
+        if (!pick) continue; placed.push(pick[1]); g.fillStyle = 'rgba(0,0,0,.75)'; g.fillText(t, p[0] + 1, p[1] + pick[0] + 1); g.fillStyle = '#fff'; g.fillText(t, p[0], p[1] + pick[0]);
+    }
+    // aircraft in the air and on the ground, from the timetable
+    if (WC.air) for (const P of wcAiActive(now)) { const a = wcAiAt(P, now); if (!a || (a.alt <= 0 && kc < 0.03)) continue; const p = pr(a.q); if (!onScr(p)) continue; const p2 = pr(wcNorm([a.q[0] + a.h[0] * 1e-3, a.q[1] + a.h[1] * 1e-3, a.q[2] + a.h[2] * 1e-3])), ang = Math.atan2(p2[1] - p[1], p2[0] - p[0]);
+        g.save(); g.translate(p[0], p[1]); g.rotate(ang); g.fillStyle = wcAirline(P.liv.split(':')[0]).c1 || '#fff'; g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 1; g.beginPath(); g.moveTo(8, 0); g.lineTo(-6, -6); g.lineTo(-3, 0); g.lineTo(-6, 6); g.closePath(); g.fill(); g.stroke(); g.restore(); }
+    const pin = wcMapSel || (n && { x: n.x, y: n.y, label: n.label });
+    if (pin) { const p = prXY(pin.x, pin.y); if (p[2] > 0) { g.font = '22px sans-serif'; g.fillText('📍', p[0], p[1]); g.font = 'bold 13px sans-serif'; g.fillStyle = '#000'; g.fillText(pin.label || '', p[0] + 1, p[1] - 22); g.fillStyle = '#fff'; g.fillText(pin.label || '', p[0], p[1] - 23); } }
+    // you
+    const me = gameState.entities.find(e => e.id === myId), mq = me ? wcEntQ(me) : null;
+    if (mq) { const p = pr(mq); if (p[2] > 0) { g.fillStyle = '#fff'; g.strokeStyle = '#e22'; g.lineWidth = 3; g.beginPath(); g.arc(p[0], p[1], 6, 0, 7); g.fill(); g.stroke(); } }
+    g.fillStyle = 'rgba(255,255,255,.6)'; g.font = '12px Ubuntu, sans-serif'; g.textAlign = 'left';
+    g.fillText(`${Math.abs(v.lat * 180 / Math.PI).toFixed(1)}°${v.lat >= 0 ? 'N' : 'S'} · ${(((v.lon * 180 / Math.PI) % 360 + 360) % 360).toFixed(1)}° · drag to spin · scroll to zoom`, 10, N - 10);
+}
+function wcMapAnimate() {                                               // eases towards a target view (after "focus"), redrawing every frame while the map is open
+    const M = wcMapEl; if (!M || M.ov.style.display === 'none') { if (M) M.raf = 0; return; }
+    const v = M.view, t = M.target;
+    if (t) { const dl = Math.atan2(Math.sin(t.lon - v.lon), Math.cos(t.lon - v.lon)); v.lon += dl * 0.18; v.lat += (t.lat - v.lat) * 0.18; v.zoom *= Math.pow(t.zoom / v.zoom, 0.18); if (Math.abs(dl) < 1e-4 && Math.abs(t.lat - v.lat) < 1e-4 && Math.abs(Math.log(t.zoom / v.zoom)) < 0.01) M.target = null; }
+    wcMapDraw(); M.raf = requestAnimationFrame(wcMapAnimate);
+}
 function wcMapBuild() {
     const btn = document.createElement('button'); btn.textContent = '🗺 Map';
     btn.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:60;padding:8px 20px;border:0;border-radius:20px;background:#1d6fa5;color:#fff;font:bold 15px sans-serif;cursor:pointer;display:none;box-shadow:0 2px 8px rgba(0,0,0,.45)';
     btn.onclick = () => wcMapToggle(true); document.body.appendChild(btn);
-    const ov = document.createElement('div'); ov.style.cssText = 'position:fixed;inset:0;z-index:155;background:rgba(5,10,20,.78);display:none;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;font-family:sans-serif';
-    ov.innerHTML = '<canvas id="wc-map-cv" style="border:3px solid #fff;border-radius:8px;cursor:crosshair;background:#2b6a94"></canvas><div id="wc-map-side" style="display:flex;flex-direction:column;gap:6px;min-width:200px;max-height:94vh;overflow-y:auto;padding-right:4px"></div>';
+    const ov = document.createElement('div'); ov.style.cssText = 'position:fixed;inset:0;z-index:155;background:rgba(3,6,14,.86);display:none;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;font-family:sans-serif';
+    ov.innerHTML = '<canvas id="wc-map-cv" style="border-radius:50%;cursor:grab;touch-action:none"></canvas><div id="wc-map-side" style="display:flex;flex-direction:column;gap:6px;min-width:200px;max-height:94vh;overflow-y:auto;padding-right:4px"></div>';
     document.body.appendChild(ov);
     const side = ov.querySelector('#wc-map-side'), mk = (t, f) => { const b = document.createElement('button'); b.textContent = t; b.style.cssText = 'padding:9px 12px;border:0;border-radius:8px;background:#26496b;color:#fff;font:bold 14px sans-serif;cursor:pointer;text-align:left'; b.onclick = f; side.appendChild(b); return b; };
-    side.innerHTML = '<div style="color:#fff;font:bold 18px sans-serif">World map</div><div style="color:#9fd8ff;font-size:13px">Click anywhere to set a destination.</div>';
+    side.innerHTML = '<div style="color:#fff;font:bold 18px sans-serif">World map</div><div style="color:#9fd8ff;font-size:13px">Drag to spin the globe, scroll to zoom, click to pick a destination.</div>';
     for (const [t, m] of [['🏠 Home', 'home'], ['🚗 My car', 'car'], ['💼 Nearest workplace', 'work'], ['🏧 Nearest ATM', 'atm'], ['🏦 Central Bank', 'bank'], ['🚘 Car Dealership', 'dealer'], ['✈ Nearest airport', 'airport'], ['⛽ Nearest fuel', 'fuel'], ['🏨 Hotel', 'hotel'], ['🛒 Grocery', 'shop'], ['🛍 Mall', 'mall']]) mk(t, () => { if (wcMapEl.taxi) { worldSend('world_taxi', { act: 'hail', t: m }); wcMapToggle(false); } else { wcSetNav(m); wcMapToggle(false); } });
     mk('🧭 Navigate to selected point', () => { if (wcMapSel) { wcSetNav('pin', wcMapSel); wcMapToggle(false); } else wcToast('Click the map first.'); }).style.background = '#1d8a4f';
     mk('🚕 Taxi to selected point', () => { if (wcMapSel) { worldSend('world_taxi', { act: 'hail', t: 'pin', ...wcMapSel }); wcMapToggle(false); } else wcToast('Click the map first.'); }).style.background = '#a07a00';
     mk('✖ Cancel taxi', () => { worldSend('world_taxi', { act: 'cancel' }); wcMapToggle(false); });
     mk('✖ Stop satnav', () => { wcSetNav('off'); wcMapToggle(false); }); mk('Close', () => wcMapToggle(false));
-    const cv = ov.querySelector('#wc-map-cv');
-    const view = { x: WC.extent / 2, y: (WC.extentY || WC.extent) / 2, half: WC.extent / 2 }; let drag = null;
-    const toWorld = ev => { const r = cv.getBoundingClientRect(), u = (ev.clientX - r.left) / r.width, w = (ev.clientY - r.top) / r.height; return [view.x - view.half + u * 2 * view.half, view.y - view.half + w * 2 * view.half]; };
-    cv.onmousedown = ev => { drag = { sx: ev.clientX, sy: ev.clientY, vx: view.x, vy: view.y, moved: false }; };
-    window.addEventListener('mouseup', () => { drag = null; });
-    cv.onmousemove = ev => { if (!drag) return; const dx = ev.clientX - drag.sx, dy = ev.clientY - drag.sy; if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true; if (!drag.moved) return; const r = cv.getBoundingClientRect(), wpp = 2 * view.half / r.width; const C = WC.circ || WC.extent; view.x = ((drag.vx - dx * wpp) % C + C) % C; view.y = drag.vy - dy * wpp; wcMapDraw(); };
-    cv.onwheel = ev => { ev.preventDefault(); const [wx, wy] = toWorld(ev), f = ev.deltaY < 0 ? 0.8 : 1.25, nh = Math.max(1500, Math.min((WC.circ || WC.extent) / 2, view.half * f)); view.x = wx - (wx - view.x) * nh / view.half; view.y = wy - (wy - view.y) * nh / view.half; view.half = nh; wcMapDraw(); };
+    const cv = ov.querySelector('#wc-map-cv'), view = { lat: 0.5, lon: 0, zoom: 1 }; let drag = null;
+    const Rp = () => view.zoom * cv.width * 0.46, scale = () => cv.width / cv.getBoundingClientRect().width;
+    const at = ev => { const r = cv.getBoundingClientRect(), s = scale(); return [(ev.clientX - r.left) * s, (ev.clientY - r.top) * s]; };
+    cv.onpointerdown = ev => { drag = { x: ev.clientX, y: ev.clientY, moved: false }; cv.setPointerCapture(ev.pointerId); cv.style.cursor = 'grabbing'; };
+    cv.onpointerup = () => { cv.style.cursor = 'grab'; setTimeout(() => { drag = null; }, 0); };
+    cv.onpointermove = ev => {
+        if (!drag) return; const dx = (ev.clientX - drag.x) * scale(), dy = (ev.clientY - drag.y) * scale(); if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true; if (!drag.moved) return;
+        drag.x = ev.clientX; drag.y = ev.clientY; wcMapEl.target = null;
+        const r = Rp(); view.lon -= dx / r / Math.max(0.2, Math.cos(view.lat)); view.lat = Math.max(-1.53, Math.min(1.53, view.lat + dy / r));
+    };
+    cv.onwheel = ev => {
+        ev.preventDefault(); wcMapEl.target = null; const [sx, sy] = at(ev), F = wcGmFrame(view), q = wcGmUnproj(F, Rp(), cv.width, sx, sy), f = ev.deltaY < 0 ? 1.3 : 1 / 1.3;
+        view.zoom = Math.max(0.6, Math.min(2500, view.zoom * f));
+        if (q && f > 1) { const c = wcNorm(wcSlerp(F.c, q, 1 - 1 / f)); view.lat = Math.asin(c[2]); view.lon = Math.atan2(c[1], c[0]); }   // zoom towards the cursor
+    };
     cv.onclick = ev => {
         if (drag && drag.moved) return;
-        let [mx, my] = toWorld(ev); const C = WC.circ || WC.extent; mx = ((mx % C) + C) % C; let best = null, bd = (14 * 2 * view.half / cv.width) ** 2;
-        for (const q of WC.mapPlaces || []) { const d = wcWrapD(q[1] - mx) ** 2 + (q[2] - my) ** 2; if (d < bd) { bd = d; best = q; } }
-        wcMapSel = best ? { x: best[1], y: best[2], label: best[3] } : { x: Math.round(mx), y: Math.round(my), label: 'Selected point' };
-        wcMapDraw();
+        const [sx, sy] = at(ev), F = wcGmFrame(view), r = Rp(), q = wcGmUnproj(F, r, cv.width, sx, sy); if (!q) return;
+        let best = null, bd = 14 * 14;
+        for (const p of WC.mapPlaces || []) { const s = wcGmProj(F, r, cv.width, wcVec(p[1], p[2])); if (s[2] <= 0) continue; const d = (s[0] - sx) ** 2 + (s[1] - sy) ** 2; if (d < bd) { bd = d; best = p; } }
+        const c = wcChart(q); wcMapSel = best ? { x: best[1], y: best[2], label: best[3] } : { x: Math.round(c[0]), y: Math.round(c[1]), label: 'Selected point' };
     };
     mk('🌍 Whole world', () => wcMapFocus(null));
     const grid = document.createElement('div'); grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px'; side.appendChild(grid);
     for (const q of WC.cities) { const b = mk(`📍 ${q.name} ${wcTzLabel(q.tz)}`, () => wcMapFocus(q)); b.style.fontSize = '12px'; b.style.padding = '7px 8px'; grid.appendChild(b); }
-    wcMapEl = { btn, ov, cv, view };
-    setInterval(() => { if (!isWorldMode || !WC.circ) return; const [bx, by] = wcCamC(), hc = wcCityHere(bx, by); const Ld = WC.land, sea = Ld && (bx < Ld.x0 || bx > Ld.x1 || by < Ld.y0 || by > Ld.y1); btn.textContent = `🗺 Map · ${hc ? hc.name : sea ? 'Open ocean' : 'Open road'} · ${wcClock(bx)}`; btn.style.display = isWorldMode && WC.scene === 'ext' ? 'block' : 'none'; if (!(isWorldMode && WC.scene === 'ext')) ov.style.display = 'none'; }, 400);
+    wcMapEl = { btn, ov, cv, view, target: null };
+    setInterval(() => { if (!isWorldMode || !WC.circ) return; const [bx, by] = wcCamC(), hc = wcCityHere(bx, by); const Ld = WC.land, sea = Ld && (bx < Ld.x0 || bx > Ld.x1 || by < Ld.y0 || by > Ld.y1); btn.textContent = `🗺 Map · ${hc ? hc.name : sea ? 'Open ocean' : 'Open road'} · ${wcClock(bx)}`; }, 1000);
 }
 function wcMapFocus(city) {
-    const v = wcMapEl.view;
-    if (!city) { const L = WC.land; v.x = L ? (L.x0 + L.x1) / 2 : WC.extent / 2; v.y = (WC.extentY || WC.extent) / 2; v.half = (WC.circ || WC.extent) / 2; v.x = (WC.circ || WC.extent) / 2; }
-    else { v.x = city.cx; v.y = city.cy; v.half = city.border * 1.2; }
-    wcMapDraw();
+    const M = wcMapEl, N = M.cv.width || 800;
+    if (!city) { const me = gameState.entities.find(e => e.id === myId), q = me ? wcEntQ(me) : wcVec(WC.center, WC.centerY || 0); M.target = { lat: Math.asin(q[2]), lon: Math.atan2(q[1], q[0]), zoom: 1 }; return; }
+    const lat = wcLat(city.cy), zoom = (0.42 * N) / (city.border * 1.15 * Math.cos(lat)) * wcR() / (0.46 * N);
+    M.target = { lat, lon: city.cx / WC.circ * Math.PI * 2, zoom: Math.max(1, zoom) };
 }
 function wcMapToggle(on, mode) {
     if (!wcMapEl) wcMapBuild();
-    wcMapEl.ov.style.display = on ? 'flex' : 'none';
-    wcMapEl.taxi = mode === 'taxi';
-    clearInterval(wcMapEl.timer); wcMapEl.timer = on ? setInterval(() => { if (wcMapEl.ov.style.display === 'none' || !isWorldMode) { clearInterval(wcMapEl.timer); return; } wcMapDraw(); }, 200) : null;
-    const hint = wcMapEl.ov.querySelector('#wc-map-side div:nth-child(2)'); if (hint) hint.textContent = wcMapEl.taxi ? '🚕 Taxi mode: pick a place below, or click the map then “Taxi to selected point”.' : 'Click anywhere to set a destination.';
+    const M = wcMapEl; M.ov.style.display = on ? 'flex' : 'none'; M.taxi = mode === 'taxi';
+    const hint = M.ov.querySelector('#wc-map-side div:nth-child(2)'); if (hint) hint.textContent = M.taxi ? '🚕 Taxi mode: pick a place below, or click the globe then “Taxi to selected point”.' : 'Drag to spin the globe, scroll to zoom, click to pick a destination.';
     if (on) {
-        const sz = Math.floor(Math.min(innerWidth - 260, innerHeight - 40, 820)); wcMapEl.cv.width = wcMapEl.cv.height = Math.max(300, sz); wcMapEl.cv.style.width = wcMapEl.cv.style.height = wcMapEl.cv.width + 'px';
-        const [px, py] = wcCamC();
-        wcMapFocus(wcCityHere(px, py)); worldSend('world_map');
+        const sz = Math.floor(Math.min(innerWidth - 260, innerHeight - 40, 860)); M.cv.width = M.cv.height = Math.max(320, sz); M.cv.style.width = M.cv.style.height = M.cv.width + 'px'; M.vkey = null;
+        const [px, py] = wcCamC(), hc = wcCityHere(px, py), me = gameState.entities.find(e => e.id === myId), q = me ? wcEntQ(me) : wcVec(px, py);
+        M.view.lat = Math.asin(q[2]); M.view.lon = Math.atan2(q[1], q[0]); M.view.zoom = 1;
+        if (hc) wcMapFocus(hc); else M.target = { lat: M.view.lat, lon: M.view.lon, zoom: wcFlight ? 2.2 : 6 };
+        worldSend('world_map'); if (!M.raf) M.raf = requestAnimationFrame(wcMapAnimate);
     }
 }
-// The map wraps east-west like the globe: drag past the date line and the other side comes round again.
-function wcMapDraw() {
-    if (!wcMapEl || wcMapEl.ov.style.display === 'none' || !WC.roads) return;
-    const cv = wcMapEl.cv, g = cv.getContext('2d'), N = cv.width, v = wcMapEl.view, k = N / (2 * v.half), C = WC.center, CIRC = WC.circ || WC.extent, EY = WC.extentY || WC.extent;
-    const S = n => n * k, MY = y => (y - v.y + v.half) * k;
-    g.fillStyle = '#2b6a94'; g.fillRect(0, 0, N, N);
-    const offs = [-CIRC, 0, CIRC].filter(o => o + CIRC > v.x - v.half && o < v.x + v.half);
-    const Ld = WC.land || { x0: 1800, x1: WC.extent - 1800, y0: 1800, y1: EY - 1800 };
-    for (const o of offs) {
-        const MX = x => (x + o - v.x + v.half) * k;
-        g.fillStyle = '#7fae66'; g.fillRect(MX(Ld.x0), MY(Ld.y0), S(Ld.x1 - Ld.x0), S(Ld.y1 - Ld.y0));
-        if (WC.globe && o === offs[0]) {                                     // Mercator: sea ice beyond ~66°, the chart stops at 85° (the poles are at infinity)
-            const yN = wcYofLat(WC_LATMAX), yS = wcYofLat(-WC_LATMAX), iN = wcYofLat(66 * Math.PI / 180), iS = wcYofLat(-66 * Math.PI / 180);
-            g.fillStyle = '#e3edf2'; g.fillRect(0, MY(yN), N, MY(iN) - MY(yN)); g.fillRect(0, MY(iS), N, MY(yS) - MY(iS));
-            g.fillStyle = '#0b1622'; g.fillRect(0, 0, N, Math.max(0, MY(yN))); g.fillRect(0, MY(yS), N, N);
-            g.fillStyle = '#c0392b'; g.font = 'bold 12px sans-serif'; g.textAlign = 'center'; g.fillText('85°N · NORTH POLE BEYOND', N / 2, MY(yN) + 15); g.fillText('85°S · SOUTH POLE BEYOND', N / 2, MY(yS) - 7);
-        }
-        // time-zone bands (each column is 6 hours)
-        if (WC.gap) for (let c = 0; c < Math.round(CIRC / WC.gap); c++) {
-            const x0 = c * WC.gap, tz = Math.round(wcWrapD(x0 + WC.gap / 2 - C) / WC.gap) * 6;
-            if (c % 2) { g.fillStyle = 'rgba(255,255,255,.06)'; g.fillRect(MX(x0), 0, S(WC.gap), N); }
-            g.fillStyle = 'rgba(255,255,255,.75)'; g.font = 'bold 13px sans-serif'; g.textAlign = 'center'; g.fillText(wcTzLabel(tz <= -12 ? tz + 24 : tz), MX(x0 + WC.gap / 2), N - 12);
-        }
-        for (const q of WC.cities) {
-            const mx = x => MX(x), cs = (q.border * k);
-            if (mx(q.cx) + cs < 0 || mx(q.cx) - cs > N) continue;
-            const path = (sc) => { const P = q.bp || []; g.beginPath(); for (let i = 0; i <= P.length; i++) { const a = i / P.length * Math.PI * 2, r = P[i % P.length] * sc; i ? g.lineTo(mx(q.cx + Math.cos(a) * r), MY(q.cy + Math.sin(a) * r)) : g.moveTo(mx(q.cx + Math.cos(a) * r), MY(q.cy + Math.sin(a) * r)); } g.closePath(); };
-            g.fillStyle = '#b8b7ac'; path(1); g.fill(); g.fillStyle = '#d4d0c2'; path(0.5); g.fill(); g.fillStyle = '#e6e2d4'; path(0.2); g.fill();
-            g.setLineDash([6, 5]); g.strokeStyle = '#e8c53a'; g.lineWidth = 2; path(1); g.stroke(); g.setLineDash([]);
-        }
-        for (const r of WC.roads) {
-            const ro = r.o ?? C, vert = r.a === 'v'; if (S(r.e) < 0.6 && r.c !== 'x') continue;
-            if (vert ? (MX(r.p) < -5 || MX(r.p) > N + 5) : (MX(ro + r.e) < 0 || MX(ro - r.e) > N)) continue;
-            g.strokeStyle = r.c === 'x' ? '#d98a1f' : r.c === 'a' ? '#6d7680' : r.c === 's' ? '#8d949b' : '#a5abb0';
-            g.lineWidth = r.c === 'x' ? 3.5 : r.c === 'a' ? 2.2 : 1; g.beginPath();
-            if (vert) { g.moveTo(MX(r.p), MY(ro - r.e)); g.lineTo(MX(r.p), MY(ro + r.e)); } else { g.moveTo(MX(ro - r.e), MY(r.p)); g.lineTo(MX(ro + r.e), MY(r.p)); }
-            g.stroke();
-        }
-        // the date line, mid-ocean between the CT+12 and CT-6 columns
-        g.save(); g.setLineDash([10, 8]); g.strokeStyle = 'rgba(255,120,120,.85)'; g.lineWidth = 2; g.beginPath(); g.moveTo(MX(0), 0); g.lineTo(MX(0), N - 30); g.stroke(); g.restore();
-        g.save(); g.translate(MX(0) + 14, N / 2); g.rotate(-Math.PI / 2); g.fillStyle = 'rgba(255,190,190,.95)'; g.font = 'bold 12px sans-serif'; g.textAlign = 'center'; g.fillText('INTERNATIONAL DATE LINE', 0, 0); g.restore();
-        g.textAlign = 'center'; g.font = 'bold 14px sans-serif';
-        const placed = [];                                               // labels dodge each other: full, then below, then short, then code
-        for (const q of WC.cities.slice().sort((a, b) => (b.size || 0) - (a.size || 0))) {
-            const x = MX(q.cx), y = MY(q.cy); if (!(x > -50 && x < N + 50 && y > -50 && y < N + 50)) continue;
-            const code = ((WC.airports || []).find(a => a.city === q.id) || {}).code || q.name.slice(0, 3).toUpperCase(), tz = wcTzLabel(q.tz);
-            const tries = [[`${q.name} · ${tz}`, 0], [`${q.name} · ${tz}`, 18], [`${q.name} · ${tz}`, -18], [q.name.split(' ')[0], 0], [q.name.split(' ')[0], 18], [code, 0], [code, 18], [code, -18]];
-            let pick = null; for (const [t, dy] of tries) { const w = g.measureText(t).width, r = [x - w / 2 - 3, y + dy - 12, w + 6, 16]; if (!placed.some(o => r[0] < o[0] + o[2] && o[0] < r[0] + r[2] && r[1] < o[1] + o[3] && o[1] < r[1] + r[3])) { pick = [t, dy, r]; break; } }
-            if (!pick) continue; placed.push(pick[2]); g.fillStyle = '#000'; g.fillText(pick[0], x + 1, y + pick[1] + 1); g.fillStyle = '#fff'; g.fillText(pick[0], x, y + pick[1]);
-        }
-        const showA = v.half < 40000, showW = v.half < 150000; g.font = '15px sans-serif';
-        for (const q of WC.mapPlaces || []) {
-            const x = MX(q[1]), y = MY(q[2]); if (x < -10 || y < -10 || x > N + 10 || y > N + 10) continue;
-            if (q[0] === 'w') { if (!showW) continue; g.fillStyle = q[4] || '#c33'; g.fillRect(x - 2.5, y - 2.5, 5, 5); }
-            else if (q[0] === 'a') { if (!showA) continue; g.fillStyle = '#1b7a3d'; g.fillRect(x - 1.5, y - 1.5, 3, 3); }
-            else if (q[0] === 'airport') { g.font = '18px sans-serif'; g.fillText('✈', x, y + 6); g.font = '15px sans-serif'; }
-            else if (showW) g.fillText({ bank: '🏦', dealer: '🚘', hall: '🏛', mall: '🛍', megamall: '🛍', school: '🏫', hotel: '🏨', fuel: '⛽', attr: '🖼' }[q[0]] || '•', x, y + 5);
-        }
-        if (!WC.mapPlaces) for (const a of WC.airports || []) { g.font = '18px sans-serif'; g.fillText('✈', MX(a.door.x), MY(a.door.y) + 6); }
-        const n = WC.nav;
-        if (n && n.route) { g.strokeStyle = '#18a0ff'; g.lineWidth = 3; g.beginPath(); n.route.pts.forEach((p, i) => i ? g.lineTo(MX(p[0]), MY(p[1])) : g.moveTo(MX(p[0]), MY(p[1]))); g.stroke(); }
-        const pin = wcMapSel || (n && { x: n.x, y: n.y, label: n.label });
-        if (pin) { g.font = '22px sans-serif'; g.fillText('📍', MX(pin.x), MY(pin.y)); g.font = 'bold 13px sans-serif'; g.fillStyle = '#000'; g.fillText(pin.label || '', MX(pin.x) + 1, MY(pin.y) - 22); g.fillStyle = '#fff'; g.fillText(pin.label || '', MX(pin.x), MY(pin.y) - 23); }
-        const [px, py] = wcCamC();
-        // scheduled air traffic, and your own flight's great circle (over the pole it leaves the top and comes back on the far side)
-        if (WC.air) { const now = Date.now(); for (const [l, q] of wcAiFlights(now)) { const P = wcAiPos(l, q); if (!P) continue; const x = MX(P.x), y = MY(P.y); if (x < -5 || y < -5 || x > N + 5 || y > N + 5) continue; g.save(); g.translate(x, y); g.rotate(P.a); g.fillStyle = wcAirline(l.al).c1; g.beginPath(); g.moveTo(6, 0); g.lineTo(-4, -4); g.lineTo(-2, 0); g.lineTo(-4, 4); g.closePath(); g.fill(); g.restore(); } }
-        if (wcFlight) {
-            const A = WC.airports.find(a => a.city === wcFlight.from), B = WC.airports.find(a => a.city === wcFlight.to);
-            if (A && B) { g.save(); g.strokeStyle = '#ffd23d'; g.lineWidth = 2.5; g.setLineDash([8, 5]); g.beginPath(); for (const seg of wcGCChart(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 160)) seg.forEach(([x0, y0], i) => { const X1 = MX(x0), Y1 = MY(y0); i ? g.lineTo(X1, Y1) : g.moveTo(X1, Y1); }); g.stroke(); g.restore(); }
-        }
-        g.fillStyle = '#fff'; g.strokeStyle = '#e22'; g.lineWidth = 3; g.beginPath(); g.arc(MX(px), MY(py), 6, 0, 7); g.fill(); g.stroke();
-    }
-}
+
 // Sunlight follows longitude continuously (one full day round the globe); clocks show zone time, 6 hours per column.
 function wcDayPhase(px) { return (((Date.now() % WC_DAY_MS) / WC_DAY_MS + wcWrapD(px - WC.center) / (WC.circ || 1800000)) % 1 + 1) % 1; }
 function wcTzAt(px) { const c = wcCityHere(px, camera.y + canvas.height * fov / 2); if (c) return c.tz; let tz = Math.round(wcWrapD(px - WC.center) / (WC.gap || 450000)) * 6; if (tz <= -12) tz += 24; return tz; }
@@ -3369,10 +3475,10 @@ function wcPaintFurniture(g, f, D) {
 // ===================== 2.5D: buildings, trees and interiors rise towards a camera above the screen centre =====================
 // A point at height h projects to  c + (p - c) * Hc / (Hc - h),  where c is the ground point under the camera and Hc its height.
 // Walls facing the camera are drawn as quads between the footprint and the projected roof, so blocks read as volumes.
-const WC_BH = { tower: b => 70 + (b.f || 30) * 2.6, mid: b => 46 + (b.f || 8) * 4, apt: 72, mall: 46, megamall: b => 34 * (b.lv || 3), hotel: b => 60 + (b.f || 20) * 2.4, shop: 24, old: b => 22 + (b.f || 2) * 7, house: 22, farmhouse: 22, barn: 30, shed: 14, school: 30, bank: 70, dealer: 34, hall: 56, terminal: 46, ctower: 150, hangar: 54, gallery: 34, cathedral: 96, inn: 28, motel: 24, mill: 32 };
-const WC_WALL = { tower: '#55687c', mid: '#66788a', apt: '#9d8f7e', mall: '#8a8f96', megamall: '#7d8590', hotel: '#7d7a8c', shop: '#b9ae9c', old: '#d8c4a0', house: '#e2d6bd', farmhouse: '#e2d6bd', barn: '#8a2f28', shed: '#7b6a55', school: '#b7a27f', bank: '#c8bfa8', dealer: '#9fb3c4', hall: '#c9c0aa', terminal: '#9fb3c4', ctower: '#d5d9dc', hangar: '#8d99a1', gallery: '#e3d9c0', cathedral: '#a89f8b', inn: '#d8c4a0', motel: '#c9bfa6', mill: '#6e5638' };
+const WC_BH = { tower: b => 70 + (b.f || 30) * 2.6, mid: b => 46 + (b.f || 8) * 4, apt: 72, mall: 46, megamall: b => 34 * (b.lv || 3), hotel: b => 60 + (b.f || 20) * 2.4, shop: 24, old: b => 22 + (b.f || 2) * 7, house: 22, farmhouse: 22, barn: 30, shed: 14, school: 30, bank: 70, dealer: 34, hall: 56, terminal: 46, pier: 30, satellite: 40, ctower: 150, hangar: 54, gallery: 34, cathedral: 96, inn: 28, motel: 24, mill: 32 };
+const WC_WALL = { tower: '#55687c', mid: '#66788a', apt: '#9d8f7e', mall: '#8a8f96', megamall: '#7d8590', hotel: '#7d7a8c', shop: '#b9ae9c', old: '#d8c4a0', house: '#e2d6bd', farmhouse: '#e2d6bd', barn: '#8a2f28', shed: '#7b6a55', school: '#b7a27f', bank: '#c8bfa8', dealer: '#9fb3c4', hall: '#c9c0aa', terminal: '#9fb3c4', pier: '#9fb3c4', satellite: '#9fb3c4', ctower: '#d5d9dc', hangar: '#8d99a1', gallery: '#e3d9c0', cathedral: '#a89f8b', inn: '#d8c4a0', motel: '#c9bfa6', mill: '#6e5638' };
 // heights are exaggerated (×2.2) against a low virtual camera so towers lean visibly away from the screen centre
-function wcBHeight(b) { const h = WC_BH[b.k]; let H = 2.2 * (typeof h === 'function' ? h(b) : (h || 30)); if (H > 520) H = 520 + 560 * (1 - Math.exp(-(H - 520) / 650)); return H; }   // supertalls are eased so the roof never runs off to infinity
+function wcBHeight(b) { const h = b.bh != null ? b.bh : WC_BH[b.k]; let H = 2.2 * (typeof h === 'function' ? h(b) : (h || 30)); if (H > 520) H = 520 + 560 * (1 - Math.exp(-(H - 520) / 650)); return H; }   // supertalls are eased so the roof never runs off to infinity
 function wcCam() { const W = canvas.width, H = canvas.height; return { x: camera.x + W * fov / 2, y: camera.y + H * fov / 2, hc: WC.viewHc || 1900 * fov }; }
 function wcProj(cam, x, y, h) { const k = cam.hc / (cam.hc - h); return [worldToScreenX(cam.x + (x - cam.x) * k), worldToScreenY(cam.y + (y - cam.y) * k), k]; }
 function wcQuad(a, b, c, d, fill) { ctx.fillStyle = fill; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); ctx.closePath(); ctx.fill(); }
@@ -3454,7 +3560,7 @@ function wcGetInterior() {
     const g = c.getContext('2d'); g.scale(sc, sc); g.translate(M - fl.x, M - fl.y);
     if (!(D.bid || D.hid)) { g.fillStyle = '#12171c'; g.fillRect(fl.x - M, fl.y - M, fl.w + 2 * M, fl.h + 2 * M); }
     for (const r of D.rooms) {
-        if (r.c === 'mall' && D.theme.floor && wcPaintFloor(g, r, D)) continue;
+        if ((r.c === 'mall' || D.kind === 'terminal') && D.theme.floor && wcPaintFloor(g, r, D)) continue;
         const col = { office: '#8d9aa8', lobby: '#d8d1c0', living: '#c9a070', kitchen: '#cfd3d0', bedroom: '#b9a7a0', mall: D.theme.neon ? '#2a2540' : '#e4dfd2', hall: '#dcdad3', lounge: '#c7ccd3' }[r.c] || '#bbb';
         g.fillStyle = col; g.fillRect(r.x, r.y, r.w, r.h);
         const tile = r.c === 'mall' || r.c === 'hall' ? 60 : r.c === 'lobby' || r.c === 'kitchen' ? 40 : 0;
@@ -3582,54 +3688,229 @@ function wcCitySnapshot(id) {
 }
 let wcCardsEl = null;
 // ===================== long-haul in-flight screen: the globe as a cylinder ===========================================
+// ===================== the in-flight entertainment system: one per airline =====================
+// Every airline has its own IFE: colours, typography, where the menu sits, and a few things of its own. Central Air's
+// is in the spirit of a Japanese flag carrier's dark, minimal screens; Kaimana Wings' in the spirit of a crimson-and-gold
+// island carrier. All names, films and music here are made up.
+const WC_IFE_TH = {
+    CA: { name: 'SKYLINE', tag: 'Central Air entertainment', nav: 'top',  cls: 'ife-ca', bg1: '#0b0b0d', bg2: '#17171b', route: '#d0112b', welcome: 'Welcome aboard', sub: 'We hope you enjoy your flight with Central Air.' },
+    KW: { name: 'PEARL SKIES', tag: 'Kaimana Wings', nav: 'side', cls: 'ife-kw', bg1: '#3a0710', bg2: '#5c0d1a', route: '#e2b65a', welcome: 'Aloha, and welcome aboard', sub: 'The isles are waiting – relax, we will take it from here.' },
+    WR: { name: 'FRONTIER', tag: 'Westreach Airways', nav: 'top',  cls: 'ife-wr', bg1: '#2a1a10', bg2: '#3d2616', route: '#e8c53a', welcome: 'Howdy, partner', sub: 'Saddle up for the long ride west.' },
+    SJ: { name: 'SUNBEAM', tag: 'Sunward Jet', nav: 'bottom', cls: 'ife-sj', bg1: '#0b3d91', bg2: '#1f6fd1', route: '#f39c12', welcome: 'Good to have you on board', sub: 'Sunshine all the way to your destination.' },
+    HP: { name: 'HOPSCREEN', tag: 'Hopper', nav: 'top', cls: 'ife-hp', bg1: '#1a1a1a', bg2: '#2a2a2a', route: '#ff6f00', welcome: 'Hi! You hopped on.', sub: 'Films are 3 coins. Snacks are cheap. Smiles are free.', ads: 1 },
+    PL: { name: 'PRAIRIE LINK', tag: 'Prairie Link', nav: 'top', cls: 'ife-pl', bg1: '#123b26', bg2: '#1e5631', route: '#f1c40f', welcome: 'Welcome aboard', sub: 'A short hop – sit back and watch the fields go by.', lite: 1 }
+};
+const WC_IFE_PAGES = [['home', '⌂', 'Home'], ['map', '🌍', 'Flight map'], ['movies', '🎬', 'Movies'], ['music', '🎵', 'Music'], ['games', '🎮', 'Games'], ['dine', '🍽', 'Dining'], ['shop', '🛍', 'Duty free'], ['dest', '📍', 'Destination'], ['info', 'ℹ', 'Flight info']];
+const WC_MOVIES = [
+    { t: 'The Last Lighthouse', g: 'Drama', m: 118, sc: 'ocean', c: ['#0b3954', '#f4d35e'] }, { t: 'Orbit of Glass', g: 'Sci-fi', m: 131, sc: 'space', c: ['#120136', '#00e5ff'] },
+    { t: 'Neon Rain', g: 'Thriller', m: 104, sc: 'city', c: ['#1b1b2f', '#ff2bd6'] }, { t: 'Paper Planes', g: 'Family', m: 92, sc: 'toon', c: ['#ffb703', '#219ebc'] },
+    { t: 'Monsoon Letters', g: 'Romance', m: 113, sc: 'rain', c: ['#264653', '#e9c46a'] }, { t: 'Tank Academy', g: 'Comedy', m: 97, sc: 'toon', c: ['#2a9d8f', '#e76f51'] },
+    { t: 'Desert Signal', g: 'Mystery', m: 109, sc: 'desert', c: ['#9c4a2b', '#f2cc8f'] }, { t: 'Northern Lights Express', g: 'Adventure', m: 126, sc: 'aurora', c: ['#081c15', '#52b788'] },
+    { t: 'Skyline Stories', g: 'Documentary', m: 58, sc: 'city', c: ['#0b0b0d', '#d0112b'], al: 'CA' }, { t: 'Pearl Diver', g: 'Drama', m: 101, sc: 'ocean', c: ['#5c0d1a', '#e2b65a'], al: 'KW' },
+    { t: 'Dust and Thunder', g: 'Western', m: 122, sc: 'desert', c: ['#3d2616', '#e8c53a'], al: 'WR' }, { t: 'Chasing Noon', g: 'Road movie', m: 99, sc: 'desert', c: ['#f39c12', '#0b3d91'], al: 'SJ' }
+];
+const WC_TRACKS = [
+    { t: 'Cruising Altitude', a: 'The Contrails', mood: 'Chill', bpm: 84, wave: 'sine', sc: [0, 2, 4, 7, 9], base: 57 },
+    { t: 'Island Breeze', a: 'Lagoon Club', mood: 'Tropical', bpm: 100, wave: 'triangle', sc: [0, 2, 4, 5, 7, 9, 11], base: 62 },
+    { t: 'Night Flight', a: 'Midnight Quartet', mood: 'Jazz', bpm: 72, wave: 'sine', sc: [0, 3, 5, 7, 10], base: 55 },
+    { t: 'Chiptune Takeoff', a: '8-bit Pilots', mood: 'Arcade', bpm: 140, wave: 'square', sc: [0, 2, 4, 7, 9, 12], base: 60 },
+    { t: 'Desert Strings', a: 'Canyon Echo', mood: 'Folk', bpm: 90, wave: 'sawtooth', sc: [0, 1, 4, 5, 7, 8, 10], base: 50 }
+];
 let wcIfe = null;
+function wcIfeTheme() { const al = wcFlight && wcFlight.al; return WC_IFE_TH[al] || WC_IFE_TH.CA; }
 function wcIfeEnsure() {
     if (wcIfe) return wcIfe;
     const el = document.createElement('div'); el.id = 'wc-ife';
-    el.innerHTML = `<div class="ife-tabs"><button data-t="route" class="on">🌍 Route</button><button data-t="menu">🍽 Menu</button><button data-t="info">ℹ Flight info</button><span class="ife-sp"></span><button class="ife-min" title="Minimise">▾</button></div>
-      <div class="ife-body"><canvas class="ife-cv" width="760" height="270"></canvas><div class="ife-menu"></div><div class="ife-info"></div></div>`;
+    el.innerHTML = `<div class="ife-top"><div class="ife-brand"><b></b><small></small></div><div class="ife-flt"></div><div class="ife-clock"></div><button class="ife-min" title="Minimise">▾</button></div>
+      <div class="ife-mid"><nav class="ife-nav"></nav><section class="ife-page"><canvas class="ife-cv" width="900" height="380"></canvas><div class="ife-html"></div></section></div>
+      <div class="ife-foot"><span class="ife-a"></span><div class="ife-bar"><i></i><b>✈</b></div><span class="ife-b"></span><span class="ife-eta"></span></div>`;
     document.body.appendChild(el);
     const pill = document.createElement('button'); pill.id = 'wc-ife-pill'; pill.textContent = '✈ In-flight screen'; document.body.appendChild(pill);
-    wcIfe = { el, pill, tab: 'route', open: false, rot: 0, drag: null, idle: 0, cv: el.querySelector('.ife-cv') };
-    el.querySelectorAll('.ife-tabs button[data-t]').forEach(b => b.addEventListener('click', () => { wcIfe.tab = b.dataset.t; el.querySelectorAll('.ife-tabs button[data-t]').forEach(x => x.classList.toggle('on', x === b)); wcIfeRender(true); }));
+    wcIfe = { el, pill, page: 'home', open: false, rot: 0, drag: null, idle: 0, cv: el.querySelector('.ife-cv'), html: el.querySelector('.ife-html'), movie: null, track: null, game: null, al: null };
     el.querySelector('.ife-min').addEventListener('click', () => { wcIfe.open = false; wcIfe.userClosed = true; wcIfeRender(true); });
     pill.addEventListener('click', () => { wcIfe.open = true; wcIfeRender(true); });
     const cv = wcIfe.cv;
-    cv.addEventListener('pointerdown', e => { wcIfe.drag = { x: e.clientX, r: wcIfe.rot }; cv.setPointerCapture(e.pointerId); });
-    cv.addEventListener('pointermove', e => { if (wcIfe.drag) { wcIfe.rot = wcIfe.drag.r - (e.clientX - wcIfe.drag.x) * 0.012; wcIfe.idle = performance.now(); } });
+    cv.addEventListener('pointerdown', e => { if (wcIfe.page === 'map') { wcIfe.drag = { x: e.clientX, y: e.clientY, r: wcIfe.rot, t: wcIfe.tilt || 0 }; cv.setPointerCapture(e.pointerId); } });
+    cv.addEventListener('pointermove', e => { if (wcIfe.drag) { wcIfe.rot = wcIfe.drag.r - (e.clientX - wcIfe.drag.x) * 0.012; wcIfe.tilt = Math.max(-1, Math.min(1, wcIfe.drag.t + (e.clientY - wcIfe.drag.y) * 0.01)); wcIfe.idle = performance.now(); } });
     cv.addEventListener('pointerup', () => { wcIfe.drag = null; wcIfe.idle = performance.now(); });
     el.addEventListener('wheel', e => e.stopPropagation(), { passive: true });
+    el.addEventListener('click', e => {
+        const t = e.target.closest('[data-p],[data-mv],[data-tr],[data-gm],[data-buy],[data-q],[data-act]'); if (!t) return;
+        if (t.dataset.p) wcIfeGo(t.dataset.p);
+        else if (t.dataset.mv) wcIfePlayMovie(+t.dataset.mv);
+        else if (t.dataset.tr) wcIfePlayTrack(+t.dataset.tr);
+        else if (t.dataset.gm) wcIfeStartGame(t.dataset.gm);
+        else if (t.dataset.buy) worldSend('world_inflight', { item: t.dataset.buy });
+        else if (t.dataset.q) wcIfeAnswer(+t.dataset.q);
+        else if (t.dataset.act === 'stopmv') { wcIfe.movie = null; wcIfeGo('movies'); }
+        else if (t.dataset.act === 'stoptr') { wcIfeStopTrack(); wcIfeRender(true); }
+    });
+    window.addEventListener('keydown', e => {                           // the snake game takes the arrow keys while it's on screen
+        const I = wcIfe; if (!I || !I.open || I.page !== 'games' || !I.game || I.game.kind !== 'snake') return;
+        const k = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0], w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0], W: [0, -1], S: [0, 1], A: [-1, 0], D: [1, 0] }[e.key];
+        if (!k) return; e.preventDefault(); e.stopPropagation();
+        const G = I.game; if (G.dead) { wcIfeStartGame('snake'); return; } if (k[0] !== -G.dir[0] || k[1] !== -G.dir[1]) G.next = k;
+    }, true);
     return wcIfe;
 }
+function wcIfeGo(p) { const I = wcIfe; if (I.page === 'games' && p !== 'games') I.game = null; I.page = p; wcIfeRender(true); }
+function wcIfeSeat(f) { const h = wcFnv((f.fn || '') + (f.from || '') + (typeof myId !== 'undefined' ? myId : '')); return f.cls === 'J' ? `${1 + h % 4}${'ACDF'[(h >>> 4) % 4]}` : `${12 + h % 30}${'ABCDEF'[(h >>> 4) % 6]}`; }
+function wcIfeClock(tz) { const dms = WC.dayMs || WC_DAY_MS, h = ((6 + (wcServerNow() % dms) / dms * 24 + tz) % 24 + 24) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); }
 function wcIfeRender(force) {
     const I = wcIfeEnsure(), f = wcFlight, flying = isWorldMode && f;
-    if (!flying) { I.el.style.display = 'none'; I.pill.style.display = 'none'; I.userClosed = false; I.autoDone = false; return; }
-    if (f.long && f.ph === 'air' && !I.autoDone && !I.userClosed) { I.open = true; I.autoDone = true; }
+    if (!flying) { I.el.style.display = 'none'; I.pill.style.display = 'none'; I.userClosed = false; I.autoDone = false; I.movie = null; I.game = null; wcIfeStopTrack(); I.al = null; return; }
+    const th = wcIfeTheme();
+    if (I.al !== (f.al || 'CA')) {                                       // a new flight: dress the screen in the airline's colours
+        I.al = f.al || 'CA'; I.th = th; I.page = 'home'; I.el.className = th.cls + ' ife-nav-' + th.nav;
+        I.el.querySelector('.ife-brand b').textContent = th.name; I.el.querySelector('.ife-brand small').textContent = th.tag;
+        const pages = WC_IFE_PAGES.filter(([id]) => !th.lite || ['home', 'map', 'dine', 'dest', 'info'].includes(id));
+        I.el.querySelector('.ife-nav').innerHTML = pages.map(([id, ic, lab]) => `<button data-p="${id}"><span>${ic}</span><em>${lab}</em></button>`).join('');
+        force = true;
+    }
+    if ((f.long || f.ph === 'board') && !I.autoDone && !I.userClosed) { I.open = true; I.autoDone = true; }
     I.el.style.display = I.open ? 'flex' : 'none'; I.pill.style.display = I.open ? 'none' : 'block';
     if (!I.open) return;
-    const body = I.el.querySelector('.ife-body');
-    body.querySelector('.ife-cv').style.display = I.tab === 'route' ? 'block' : 'none';
-    body.querySelector('.ife-menu').style.display = I.tab === 'menu' ? 'block' : 'none';
-    body.querySelector('.ife-info').style.display = I.tab === 'info' ? 'grid' : 'none';
-    if (I.tab === 'menu' && (force || !I.menuBuilt)) {
-        I.menuBuilt = true;
-        const m = WC.inflight || {};
-        body.querySelector('.ife-menu').innerHTML = `<div class="ife-mh">Served at your seat · charged to your cash or bank</div>` + Object.entries(m).map(([id, it]) => `<div class="ife-mi"><div><b>${escapeHTML(it.name)}</b><small>${[it.heal ? `+${it.heal}% health` : '', it.speed ? '+25% speed' : '', it.xp ? `+${it.xp} score` : '', it.souvenir ? 'collectable for ' + escapeHTML(f.toName) : ''].filter(Boolean).join(' · ')}</small></div><button data-i="${id}">Order · ${it.price}</button></div>`).join('');
-        body.querySelectorAll('.ife-mi button').forEach(b => b.addEventListener('click', () => worldSend('world_inflight', { item: b.dataset.i })));
-    }
-    if (I.tab === 'info') {
-        const me = gameState.entities.find(e => e.id === myId), dz = ((f.tz - f.fromTz) % 24 + 36) % 24 - 12;
-        const clock = tz => { const h = ((6 + (Date.now() % WC_DAY_MS) / WC_DAY_MS * 24 + tz) % 24 + 24) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); };
-        const anti = me ? wcAntipodeCity(me.x, me.y) : null, crossIDL = wcRouteCrossesIDL(f);
-        const rows = [['Flight', `${f.alName || ''} ${f.fn || ''} · ${f.acName || ''} · ${f.cls === 'J' ? 'Business' : 'Economy'}`], ...(f.next ? [['Connection', f.next]] : []), ...(f.pole ? [['Route', `Polar – straight over the ${f.pole === 'N' ? 'North' : 'South'} Pole`]] : []),
-            ['From', `${f.fromName} (${f.fromCode}) · ${clock(f.fromTz)} ${wcTzLabel(f.fromTz)}`], ['To', `${f.toName} (${f.toCode}) · ${clock(f.tz)} ${wcTzLabel(f.tz)}`],
-            ['Time difference', `${dz >= 0 ? '+' : ''}${dz} h`], ['Direction', ({ east: 'Eastbound', west: 'Westbound', north: 'Northbound', south: 'Southbound' })[f.dir] + (crossIDL ? ' · crosses the date line' : '')],
-            ['Distance', `${Math.round((f.total - f.rem) / 1000).toLocaleString()} / ${Math.round(f.total / 1000).toLocaleString()} km`], ['Time to arrival', `${Math.floor(f.eta / 60)}:${String(f.eta % 60).padStart(2, '0')}`],
-            ['Altitude', `${Math.round(f.alt * 11000).toLocaleString()} m`], ['Ground speed', `${f.kmh.toLocaleString()} km/h`], ['Antipode below you', anti ? `${anti.name} (${wcTzLabel(anti.tz)}) is on the opposite side of the world` : '—']];
-        const html = rows.map(([k, v]) => `<div class="ife-k">${k}</div><div class="ife-v">${escapeHTML(String(v))}</div>`).join('');
-        const inf = body.querySelector('.ife-info'); if (inf.dataset.h !== html) { inf.dataset.h = html; inf.innerHTML = html; }
-    }
+    I.el.querySelectorAll('.ife-nav button').forEach(b => b.classList.toggle('on', b.dataset.p === I.page));
+    I.el.querySelector('.ife-flt').textContent = `${f.fn || ''} · ${f.fromCode} → ${f.toCode} · Seat ${wcIfeSeat(f)} · ${f.cls === 'J' ? 'Business' : 'Economy'}`;
+    I.el.querySelector('.ife-clock').innerHTML = `<span>${escapeHTML(f.fromCode)} ${wcIfeClock(f.fromTz)}</span><span>${escapeHTML(f.toCode)} ${wcIfeClock(f.tz)}</span>`;
+    const prog = f.ph === 'board' ? 0 : Math.max(0, Math.min(1, 1 - f.rem / (f.total || 1))), eta = Math.max(0, f.eta || 0);
+    I.el.querySelector('.ife-a').textContent = f.fromCode; I.el.querySelector('.ife-b').textContent = f.toCode;
+    I.el.querySelector('.ife-bar i').style.width = (prog * 100).toFixed(1) + '%'; I.el.querySelector('.ife-bar b').style.left = (prog * 100).toFixed(1) + '%';
+    I.el.querySelector('.ife-eta').textContent = f.ph === 'board' ? `Boarding · push-back in ${Math.floor((f.wait || 0) / 60)}:${String((f.wait || 0) % 60).padStart(2, '0')}` : `Arriving in ${Math.floor(eta / 60)}:${String(eta % 60).padStart(2, '0')}`;
+    const canvasPage = I.page === 'map' || (I.page === 'movies' && I.movie) || (I.page === 'games' && I.game && I.game.kind === 'snake') || (I.page === 'music' && I.track);
+    I.cv.style.display = canvasPage ? 'block' : 'none';
+    const html = wcIfePageHtml(I, f, th);
+    if (force || I.html.dataset.h !== html) { I.html.dataset.h = html; I.html.innerHTML = html; }
 }
+function wcIfePageHtml(I, f, th) {
+    const dest = WC.cityById && WC.cityById.get(f.to), cu = dest && WC.cultures && WC.cultures[dest.culture], dz = ((f.tz - f.fromTz) % 24 + 36) % 24 - 12, items = Object.entries(WC.inflight || {});
+    const tile = (p, ic, t, s) => `<button class="ife-tile" data-p="${p}"><span>${ic}</span><b>${t}</b><small>${s}</small></button>`;
+    const price = it => (f.cls === 'J' && it.cat === 'dine') || (it.cat === 'pay' && (f.cls === 'J' || f.al !== 'HP')) ? (f.cls === 'J' && it.cat === 'dine' ? 'Complimentary' : 'Free') : it.price + ' coins';
+    switch (I.page) {
+        case 'home': return `${th.ads ? `<div class="ife-ad">⚡ UPGRADE to Business on your next Hopper flight – and the food is on us! ⚡</div>` : ''}
+            <div class="ife-hero" style="background-image:url(${wcCitySnapshot(f.to)})"><div><small>${escapeHTML(th.welcome)}</small><h2>${escapeHTML(f.toName)}</h2><p>${escapeHTML(th.sub)}</p><p class="ife-hm">${wcTzLabel(f.tz)} · ${dz >= 0 ? '+' : ''}${dz} h from ${escapeHTML(f.fromName)}${cu ? ' · ' + escapeHTML(cu.greet || '') : ''}</p></div></div>
+            <div class="ife-tiles">${tile('map', '🌍', 'Flight map', 'Where are we?')}${th.lite ? '' : tile('movies', '🎬', 'Movies', WC_MOVIES.length + ' films')}${th.lite ? '' : tile('music', '🎵', 'Music', 'Playlists')}${th.lite ? '' : tile('games', '🎮', 'Games', 'Snake · World quiz')}${tile('dine', '🍽', 'Dining', f.cls === 'J' ? 'On the house' : 'Order to your seat')}${th.lite ? '' : tile('shop', '🛍', 'Duty free', 'Gifts & souvenirs')}${tile('dest', '📍', 'Destination', escapeHTML(f.toName))}${tile('info', 'ℹ', 'Flight info', escapeHTML(f.acName || ''))}</div>`;
+        case 'map': return `<div class="ife-maphint">Drag to spin the globe · ${f.pole ? `Polar route over the ${f.pole === 'N' ? 'North' : 'South'} Pole · ` : ''}${escapeHTML(f.fromName)} → ${escapeHTML(f.toName)}</div>`;
+        case 'movies': {
+            if (I.movie) { const m = WC_MOVIES[I.movie.i]; return `<div class="ife-now"><b>${escapeHTML(m.t)}</b> · ${m.g} · ${Math.floor(m.m / 60)}h ${m.m % 60}m <button data-act="stopmv">■ Stop</button></div>`; }
+            const list = WC_MOVIES.filter(m => !m.al || m.al === f.al);
+            return `<div class="ife-h">Movies${th.ads && f.cls !== 'J' ? ' · 3 coins each' : ''}</div><div class="ife-posters">${list.map(m => { const i = WC_MOVIES.indexOf(m); return `<button class="ife-poster" data-mv="${i}" style="background:linear-gradient(160deg,${m.c[0]},${m.c[1]})"><i>${m.al ? '★ ' + escapeHTML(th.name) + ' special' : ''}</i><b>${escapeHTML(m.t)}</b><small>${m.g} · ${Math.floor(m.m / 60)}h ${m.m % 60}m</small></button>`; }).join('')}</div>`;
+        }
+        case 'music': return `<div class="ife-h">Music${I.track ? ` · now playing <b>${escapeHTML(WC_TRACKS[I.track.i].t)}</b> <button data-act="stoptr">■ Stop</button>` : ''}</div><div class="ife-list">${WC_TRACKS.map((t, i) => `<button class="ife-row${I.track && I.track.i === i ? ' on' : ''}" data-tr="${i}"><span>${I.track && I.track.i === i ? '🔊' : '▶'}</span><b>${escapeHTML(t.t)}</b><small>${escapeHTML(t.a)} · ${t.mood}</small></button>`).join('')}</div>`;
+        case 'games': {
+            const G = I.game;
+            if (G && G.kind === 'quiz') return `<div class="ife-h">World quiz · score ${G.score}/${G.n}</div>${G.q ? `<div class="ife-quiz"><p>${escapeHTML(G.q.q)}</p>${G.q.opts.map((o, i) => `<button data-q="${i}" class="${G.ans != null ? (i === G.q.a ? 'ok' : i === G.ans ? 'bad' : '') : ''}">${escapeHTML(o)}</button>`).join('')}</div>` : ''}<button class="ife-row" data-gm="quiz"><b>↻ New quiz</b></button>`;
+            if (G && G.kind === 'snake') return `<div class="ife-h">Sky Snake · score ${G.score} · best ${I.best || 0} · arrow keys or WASD${G.dead ? ' · press any arrow to play again' : ''}</div>`;
+            return `<div class="ife-h">Games</div><div class="ife-tiles"><button class="ife-tile" data-gm="snake"><span>🐍</span><b>Sky Snake</b><small>Collect the clouds</small></button><button class="ife-tile" data-gm="quiz"><span>🧭</span><b>World quiz</b><small>How well do you know the world?</small></button></div>`;
+        }
+        case 'dine': case 'shop': {
+            const cat = I.page === 'dine' ? 'dine' : 'shop';
+            return `<div class="ife-h">${cat === 'dine' ? (f.cls === 'J' ? 'Business class menu · complimentary' : 'Café menu · served at your seat') : 'Duty free · delivered to your seat'}</div><div class="ife-list">${items.filter(([, it]) => (it.cat || 'dine') === cat).map(([id, it]) => `<div class="ife-row"><span>${it.ic || '•'}</span><b>${escapeHTML(it.name)}</b><small>${[it.heal ? `+${it.heal}% health` : '', it.speed ? '+25% speed' : '', it.xp ? `+${it.xp} score` : '', it.souvenir ? 'collectable for ' + escapeHTML(f.toName) : ''].filter(Boolean).join(' · ')}</small><button data-buy="${id}">${price(it)}</button></div>`).join('')}</div>`;
+        }
+        case 'dest': {
+            const fest = cu && cu.fest ? cu.fest : '', spec = cu && cu.spec ? [].concat(cu.spec).map(id => (WC.itemDefs[id] && WC.itemDefs[id].name) || id).join(', ') : '';
+            const weather = { hill: '🌧 Showers likely', tropic: '🌦 Warm, passing showers', port: '🌫 Morning fog', pine: '🌲 Cool and misty', sun: '☀ Hot and sunny', mesa: '🌵 Dry heat', blossom: '🌸 Mild, petals in the air', cyber: '🌃 Clear neon nights', old: '⛅ Fair' }[dest && dest.theme] || '⛅ Fair';
+            const ap = (WC.airports || []).find(a => a.city === f.to);
+            return `<div class="ife-dest"><div class="ife-hero sm" style="background-image:url(${wcCitySnapshot(f.to)})"><div><h2>${escapeHTML(f.toName)}</h2><p>${escapeHTML(ap ? ap.name : '')} · ${escapeHTML(f.toCode)}</p></div></div>
+                <div class="ife-kv"><div>Time zone</div><div>${wcTzLabel(f.tz)} (${dz >= 0 ? '+' : ''}${dz} h from ${escapeHTML(f.fromCode)}) · local time is shown top right</div><div>Weather</div><div>${weather}</div>
+                ${cu ? `<div>Culture</div><div>${escapeHTML(cu.name || dest.culture)}${cu.greet ? ' · say “' + escapeHTML(cu.greet) + '”' : ''}</div>` : ''}${spec ? `<div>Try</div><div>${escapeHTML(String(spec))}</div>` : ''}${fest ? `<div>Festival</div><div>${escapeHTML(String(fest))}</div>` : ''}
+                ${cu && cu.lht ? '<div>Traffic</div><div>Drive on the left here</div>' : ''}${f.next ? `<div>Connection</div><div>${escapeHTML(f.next)}</div>` : ''}<div>Arrival gate</div><div>${f.agate || '–'}</div></div></div>`;
+        }
+        case 'info': {
+            const me = gameState.entities.find(e => e.id === myId), anti = me ? wcAntipodeCity(me.x, me.y) : null;
+            const rows = [['Flight', `${f.alName || ''} ${f.fn || ''} · ${f.acName || ''}`], ['Seat', `${wcIfeSeat(f)} · ${f.cls === 'J' ? 'Business' : 'Economy'}`], ...(f.next ? [['Connection', f.next]] : []), ...(f.pole ? [['Route', `Polar – over the ${f.pole === 'N' ? 'North' : 'South'} Pole`]] : []),
+                ['From', `${f.fromName} (${f.fromCode}) · Gate ${f.gate || '–'} · ${wcTzLabel(f.fromTz)}`], ['To', `${f.toName} (${f.toCode}) · Gate ${f.agate || '–'} · ${wcTzLabel(f.tz)}`],
+                ['Distance', `${Math.round((f.total - f.rem) / 1000).toLocaleString()} / ${Math.round(f.total / 1000).toLocaleString()} km`], ['Altitude', `${Math.round(f.alt * 11000).toLocaleString()} m`], ['Ground speed', `${(f.kmh || 0).toLocaleString()} km/h`],
+                ['Below you, on the far side', anti ? `${anti.name} (${wcTzLabel(anti.tz)})` : '—']];
+            return `<div class="ife-kv">${rows.map(([k, v]) => `<div>${k}</div><div>${escapeHTML(String(v))}</div>`).join('')}</div>`;
+        }
+    }
+    return '';
+}
+// ---- movies: a little procedural film for each genre, with a progress bar and subtitles ----
+function wcIfePlayMovie(i) { const I = wcIfe, f = wcFlight; if (f && f.al === 'HP' && f.cls !== 'J') worldSend('world_inflight', { item: 'movie' }); I.movie = { i, t0: performance.now() }; wcIfeRender(true); }
+const WC_SUBS = ['…I never thought I would see it again.', 'Hold on – look over there!', 'We have to go. Now.', 'It was always about the journey.', 'Do you hear that?', 'Trust me.', 'The tide is turning.', 'Ten minutes to sunrise.', 'Not without you.', 'Keep flying.'];
+function wcIfeMovieFrame(g, W, H, I) {
+    const m = WC_MOVIES[I.movie.i], t = (performance.now() - I.movie.t0) / 1000, len = 150, u = Math.min(1, t / len), sc = m.sc;
+    const sky = g.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, m.c[0]); sky.addColorStop(1, sc === 'desert' ? '#f2cc8f' : sc === 'ocean' ? '#1d3557' : '#000'); g.fillStyle = sky; g.fillRect(0, 0, W, H);
+    if (sc === 'space') { for (let i = 0; i < 160; i++) { const a = i * 2.4, r = ((i * 37 + t * 60) % 500); g.fillStyle = `rgba(255,255,255,${Math.min(1, r / 300)})`; g.fillRect(W / 2 + Math.cos(a) * r, H / 2 + Math.sin(a) * r * 0.6, 2, 2); } g.fillStyle = m.c[1]; g.beginPath(); g.arc(W * 0.7, H * 0.4, 50 + Math.sin(t) * 3, 0, 7); g.fill(); }
+    else if (sc === 'ocean') { g.fillStyle = m.c[1]; g.beginPath(); g.arc(W * 0.3, H * 0.45 - u * 60, 40, 0, 7); g.fill(); for (let k = 0; k < 6; k++) { g.fillStyle = `rgba(30,80,140,${0.35 + k * 0.1})`; g.beginPath(); g.moveTo(0, H); for (let x = 0; x <= W; x += 20) g.lineTo(x, H * 0.55 + k * 22 + Math.sin(x / 60 + t * (1 + k * 0.3)) * 8); g.lineTo(W, H); g.fill(); } g.fillStyle = '#222'; g.fillRect(W * 0.8, H * 0.3, 14, H * 0.3); g.fillStyle = `rgba(255,240,160,${0.5 + 0.5 * Math.sin(t * 3)})`; g.beginPath(); g.moveTo(W * 0.8 + 7, H * 0.3); g.lineTo(W * 0.8 - 200, H * 0.2); g.lineTo(W * 0.8 - 200, H * 0.4); g.fill(); }
+    else if (sc === 'city' || sc === 'rain') { for (let i = 0; i < 24; i++) { const bw = 30 + (i * 13) % 40, bh = 80 + (i * 71) % 180, x = ((i * 53 - t * 20) % (W + 100) + W + 100) % (W + 100) - 50; g.fillStyle = '#0d0d16'; g.fillRect(x, H - bh, bw, bh); for (let wy = H - bh + 8; wy < H - 8; wy += 14) for (let wx = x + 5; wx < x + bw - 5; wx += 10) if ((wx * 7 + wy * 3 + i) % 5 < 2) { g.fillStyle = m.c[1]; g.globalAlpha = 0.6; g.fillRect(wx, wy, 4, 6); g.globalAlpha = 1; } } if (sc === 'rain') { g.strokeStyle = 'rgba(200,220,255,.4)'; g.beginPath(); for (let i = 0; i < 120; i++) { const x = (i * 97) % W, y = (i * 53 + t * 400) % H; g.moveTo(x, y); g.lineTo(x - 3, y + 12); } g.stroke(); } }
+    else if (sc === 'desert') { g.fillStyle = '#fff3c4'; g.beginPath(); g.arc(W * 0.5, H * 0.35, 46, 0, 7); g.fill(); for (let k = 0; k < 3; k++) { g.fillStyle = ['#d68c45', '#b5651d', '#8b4513'][k]; g.beginPath(); g.moveTo(0, H); for (let x = 0; x <= W; x += 30) g.lineTo(x, H * (0.6 + k * 0.1) + Math.sin(x / 120 + k + t * 0.2 * (k + 1)) * 20); g.lineTo(W, H); g.fill(); } }
+    else if (sc === 'aurora') { for (let k = 0; k < 4; k++) { g.strokeStyle = `rgba(${80 + k * 30},255,${150 + k * 20},.35)`; g.lineWidth = 18; g.beginPath(); for (let x = 0; x <= W; x += 20) g.lineTo(x, H * 0.3 + k * 18 + Math.sin(x / 90 + t * 0.7 + k) * 25); g.stroke(); } g.fillStyle = '#0b2015'; g.beginPath(); g.moveTo(0, H); for (let x = 0; x <= W; x += 40) g.lineTo(x, H * 0.8 - ((x * 13) % 60)); g.lineTo(W, H); g.fill(); }
+    else { for (let i = 0; i < 9; i++) { const x = (i * 110 + t * 80) % (W + 100) - 50, y = H * 0.6 - Math.abs(Math.sin(t * 2 + i)) * 120; g.fillStyle = ['#ffb703', '#fb8500', '#8ecae6', '#e76f51'][i % 4]; g.beginPath(); g.arc(x, y, 18, 0, 7); g.fill(); } g.fillStyle = '#4caf50'; g.fillRect(0, H * 0.6 + 18, W, H); }
+    if (t < 4) { g.fillStyle = `rgba(0,0,0,${1 - t / 4 * 0.6})`; g.fillRect(0, 0, W, H); g.fillStyle = '#fff'; g.font = 'bold 34px Georgia, serif'; g.textAlign = 'center'; g.fillText(m.t, W / 2, H / 2); g.font = '14px Ubuntu'; g.fillText(wcIfeTheme().name + ' presents', W / 2, H / 2 - 40); }
+    else if (u >= 1) { g.fillStyle = 'rgba(0,0,0,.75)'; g.fillRect(0, 0, W, H); g.fillStyle = '#fff'; g.font = 'bold 26px Georgia, serif'; g.textAlign = 'center'; g.fillText('THE END', W / 2, H / 2); }
+    else { const s = WC_SUBS[Math.floor(t / 6) % WC_SUBS.length]; if ((t % 6) < 4) { g.font = '18px Ubuntu'; g.textAlign = 'center'; g.fillStyle = 'rgba(0,0,0,.6)'; const w = g.measureText(s).width; g.fillRect(W / 2 - w / 2 - 8, H - 58, w + 16, 28); g.fillStyle = '#fff'; g.fillText(s, W / 2, H - 38); } }
+    g.fillStyle = 'rgba(255,255,255,.25)'; g.fillRect(0, H - 6, W, 6); g.fillStyle = wcIfeTheme().route; g.fillRect(0, H - 6, W * u, 6);
+}
+// ---- music: a small generative synth (Web Audio), with a visualiser ----
+let wcAudio = null;
+function wcIfePlayTrack(i) {
+    const I = wcIfe; wcIfeStopTrack();
+    try { wcAudio = wcAudio || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+    const A = wcAudio, T = WC_TRACKS[i], out = A.createGain(); out.gain.value = 0.06; out.connect(A.destination);
+    const tr = { i, out, step: 0, next: A.currentTime + 0.05, levels: new Array(16).fill(0) };
+    tr.timer = setInterval(() => {
+        const beat = 60 / T.bpm / 2;
+        while (tr.next < A.currentTime + 0.25) {
+            const s = tr.step++, note = T.sc[(s * 3 + (s >> 3) * 2 + (s % 5)) % T.sc.length] + T.base + ((s >> 4) % 2 ? 12 : 0), fq = 440 * Math.pow(2, (note - 69) / 12);
+            if (s % 8 !== 7) { const o = A.createOscillator(), g = A.createGain(); o.type = T.wave; o.frequency.value = fq; g.gain.setValueAtTime(0.0001, tr.next); g.gain.exponentialRampToValueAtTime(0.9, tr.next + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, tr.next + beat * 1.8); o.connect(g); g.connect(out); o.start(tr.next); o.stop(tr.next + beat * 2); tr.levels[s % 16] = 1; }
+            if (s % 4 === 0) { const o = A.createOscillator(), g = A.createGain(); o.type = 'sine'; o.frequency.value = 440 * Math.pow(2, (T.base - 12 + T.sc[(s >> 2) % T.sc.length] - 69) / 12); g.gain.setValueAtTime(0.7, tr.next); g.gain.exponentialRampToValueAtTime(0.0001, tr.next + beat * 3.5); o.connect(g); g.connect(out); o.start(tr.next); o.stop(tr.next + beat * 4); }
+            tr.next += beat;
+        }
+    }, 80);
+    I.track = tr; wcIfeRender(true);
+}
+function wcIfeStopTrack() { const I = wcIfe; if (!I || !I.track) return; clearInterval(I.track.timer); try { I.track.out.disconnect(); } catch (e) { } I.track = null; }
+function wcIfeMusicFrame(g, W, H, I) {
+    const T = WC_TRACKS[I.track.i], th = wcIfeTheme(), t = performance.now() / 1000;
+    const bg = g.createLinearGradient(0, 0, W, H); bg.addColorStop(0, th.bg1); bg.addColorStop(1, th.bg2); g.fillStyle = bg; g.fillRect(0, 0, W, H);
+    for (let i = 0; i < 16; i++) { I.track.levels[i] *= 0.93; const h = 20 + (I.track.levels[i] * 0.8 + 0.2 * Math.abs(Math.sin(t * 2 + i))) * (H - 120); g.fillStyle = th.route; g.globalAlpha = 0.85; g.fillRect(60 + i * (W - 120) / 16, H - 40 - h, (W - 120) / 16 - 8, h); }
+    g.globalAlpha = 1; g.fillStyle = '#fff'; g.font = 'bold 28px Ubuntu'; g.textAlign = 'left'; g.fillText(T.t, 60, 60); g.font = '16px Ubuntu'; g.globalAlpha = 0.75; g.fillText(`${T.a} · ${T.mood}`, 60, 86); g.globalAlpha = 1;
+}
+// ---- games ----
+function wcIfeStartGame(kind) {
+    const I = wcIfe;
+    if (kind === 'snake') I.game = { kind, dir: [1, 0], next: null, body: [[5, 7], [4, 7], [3, 7]], food: [14, 7], score: 0, t: 0, dead: false };
+    else { I.game = { kind: 'quiz', score: 0, n: 0, q: null, ans: null }; wcIfeNextQ(); }
+    wcIfeRender(true);
+}
+function wcIfeNextQ() {
+    const G = wcIfe.game, cities = WC.cities || [], r = n => Math.floor(Math.random() * n), pick = arr => arr[r(arr.length)];
+    const shuffle = (right, wrong) => { const opts = [right, ...wrong.filter((v, i, a) => v !== right && a.indexOf(v) === i).slice(0, 3)].sort(() => Math.random() - 0.5); return { opts, a: opts.indexOf(right) }; };
+    const kinds = [
+        () => { const c = pick(cities); return { q: `Which time zone is ${c.name} in?`, ...shuffle(wcTzLabel(c.tz), cities.map(x => wcTzLabel(x.tz)).sort(() => Math.random() - 0.5)) }; },
+        () => { const a = pick(WC.airports || []); return { q: `Which city has the airport code ${a.code}?`, ...shuffle(WC.cityById.get(a.city).name, cities.map(x => x.name).sort(() => Math.random() - 0.5)) }; },
+        () => { const al = pick(Object.entries((WC.air && WC.air.airlines) || {}).filter(([, v]) => v.hub)); return { q: `Where is ${al[1].name} based?`, ...shuffle(WC.cityById.get(al[1].hub).name, cities.map(x => x.name).sort(() => Math.random() - 0.5)) }; },
+        () => { const cs = cities.filter(c => WC.cultures && WC.cultures[c.culture] && WC.cultures[c.culture].greet), c = pick(cs); const gr = WC.cultures[c.culture].greet; return { q: `In which city might you be greeted with “${gr}”?`, ...shuffle(c.name, cities.filter(x => x.culture !== c.culture).map(x => x.name).sort(() => Math.random() - 0.5)) }; }
+    ];
+    G.q = kinds[r(kinds.length)](); G.ans = null;
+}
+function wcIfeAnswer(i) { const G = wcIfe.game; if (!G || G.ans != null) return; G.ans = i; G.n++; if (i === G.q.a) G.score++; wcIfeRender(true); setTimeout(() => { if (wcIfe.game === G) { wcIfeNextQ(); wcIfeRender(true); } }, 1300); }
+function wcIfeSnakeFrame(g, W, H, I) {
+    const G = I.game, th = wcIfeTheme(), CW = 30, CH = 14, cs = Math.min(W / CW, H / CH), ox = (W - cs * CW) / 2, oy = (H - cs * CH) / 2, now = performance.now();
+    if (!G.dead && now - G.t > 120) {
+        G.t = now; if (G.next) { G.dir = G.next; G.next = null; }
+        const h = [(G.body[0][0] + G.dir[0] + CW) % CW, (G.body[0][1] + G.dir[1] + CH) % CH];
+        if (G.body.some(b => b[0] === h[0] && b[1] === h[1])) { G.dead = true; I.best = Math.max(I.best || 0, G.score); wcIfeRender(true); }
+        else { G.body.unshift(h); if (h[0] === G.food[0] && h[1] === G.food[1]) { G.score++; G.food = [Math.floor(Math.random() * CW), Math.floor(Math.random() * CH)]; wcIfeRender(true); } else G.body.pop(); }
+    }
+    const bg = g.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, '#6cb6ef'); bg.addColorStop(1, '#cfe9fb'); g.fillStyle = bg; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(ox + (G.food[0] + 0.5) * cs, oy + (G.food[1] + 0.5) * cs, cs * 0.45, 0, 7); g.arc(ox + (G.food[0] + 0.2) * cs, oy + (G.food[1] + 0.6) * cs, cs * 0.3, 0, 7); g.fill();
+    G.body.forEach((b, i) => { g.fillStyle = i ? th.route : '#fff'; wcRR(g, ox + b[0] * cs + 2, oy + b[1] * cs + 2, cs - 4, cs - 4, 5); g.fill(); });
+    if (G.dead) { g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(0, 0, W, H); g.fillStyle = '#fff'; g.font = 'bold 30px Ubuntu'; g.textAlign = 'center'; g.fillText(`Score ${G.score}`, W / 2, H / 2); }
+}
+// Called every frame: whatever the screen shows on its canvas.
+function wcIfeTick() {
+    const I = wcIfe; if (!I || !I.open || !wcFlight) return;
+    const cv = I.cv, g = cv.getContext('2d');
+    if (I.page === 'map') wcIfeDraw();
+    else if (I.page === 'movies' && I.movie) wcIfeMovieFrame(g, cv.width, cv.height, I);
+    else if (I.page === 'music' && I.track) wcIfeMusicFrame(g, cv.width, cv.height, I);
+    else if (I.page === 'games' && I.game && I.game.kind === 'snake') wcIfeSnakeFrame(g, cv.width, cv.height, I);
+}
+
 function wcAntipodeCity(x, y) { const ax = x + (WC.circ || 0) / 2; let best = null, bd = Infinity; for (const c of WC.cities || []) { const d = Math.abs(wcWrapD(c.cx - ax)) + Math.abs(c.cy - y) * 0.3; if (d < bd) { bd = d; best = c; } } return best; }
 function wcRouteCrossesIDL(f) { const A = WC.airports.find(a => a.city === f.from), B = WC.airports.find(a => a.city === f.to); if (!A || !B) return false; const dx = wcWrapD(B.sb.x - A.sb.x), x2 = A.sb.x + dx; return x2 < 0 || x2 >= WC.circ; }
 // 3D cylinder: longitude = x / circumference, height = y. Looks slightly from above; the near side is lit, night side shaded.
@@ -3645,7 +3926,7 @@ function wcDrawBuilding25(b, s, cam, night, flat) {
     ctx.fillStyle = 'rgba(8,12,16,.26)'; ctx.beginPath();
     ctx.moveTo(X(gx0), Y(gy0)); ctx.lineTo(X(gx1), Y(gy0)); ctx.lineTo(X(gx1) + dx, Y(gy0) + dy); ctx.lineTo(X(gx1) + dx, Y(gy1) + dy); ctx.lineTo(X(gx0) + dx, Y(gy1) + dy); ctx.lineTo(X(gx0), Y(gy1)); ctx.closePath(); ctx.fill();
     const cu = !b.neon && b.city && wcCultureOf(b.city), pal = cu && WC_CULT_WALL[cu];
-    const base = b.neon ? '#1e1b33' : pal ? (b.k === 'tower' ? pal.tower : pal.low[b.id % pal.low.length]) : (WC_WALL[b.k] || '#8a8f96'), base7 = base.length === 7 ? base : '#8a8f96', tiers = wcTierList(b);
+    const base = b.wc ? b.wc : b.neon ? '#1e1b33' : pal ? (b.k === 'tower' ? pal.tower : pal.low[b.id % pal.low.length]) : (WC_WALL[b.k] || '#8a8f96'), base7 = base.length === 7 ? base : '#8a8f96', tiers = wcTierList(b);
     let topT = null, topBox = null;
     for (let ti = 0; ti < tiers.length; ti++) {
         const [a0, a1, ins] = tiers[ti], ix = b.w * ins, iy = b.h * ins, x0 = b.x + ix, y0 = b.y + iy, x1 = b.x + b.w - ix, y1 = b.y + b.h - iy, hb = h * a0, ht = h * a1;
@@ -4357,89 +4638,208 @@ function wcDrawGlobe() {
 // ---- liveries and aircraft types ----
 const WC_AL_IDX = ['CA', 'WR', 'SJ', 'KW', 'HP', 'PL'];
 function wcAirline(al) { return (WC.air && WC.air.airlines[al]) || { name: 'Airline', c1: '#1d6fa5', c2: '#f2b233', tail: '#14213d' }; }
-function wcPlanePathFor(g, ac) {
-    if (ac !== 'prop') { wcPlanePath(g); return; }
-    g.beginPath();                                                                                     // turboprop: straight high wing, T-tail
-    g.moveTo(-100, -4); g.lineTo(-88, -36); g.lineTo(-78, -36); g.lineTo(-74, -6); g.lineTo(-10, -8); g.lineTo(-6, -98); g.lineTo(14, -98); g.lineTo(18, -9);
-    g.lineTo(92, -9); g.quadraticCurveTo(110, -7, 110, 0); g.quadraticCurveTo(110, 7, 92, 9);
-    g.lineTo(18, 9); g.lineTo(14, 98); g.lineTo(-6, 98); g.lineTo(-10, 8); g.lineTo(-74, 6); g.lineTo(-78, 36); g.lineTo(-88, 36); g.lineTo(-100, 4); g.closePath();
+// ---- aircraft: four types drawn from parameters, in each airline's livery (all liveries are original designs) ----
+// Geometry is in sprite units (nose at +x); `scale` turns it into world units. Jets are deliberately big next to a tank.
+const WC_AC = {
+    prop:   { L: 104, fw: 9,  span: 106, root: 26, tip: 18, sweep: 0,    wx: 6,  tail: 34, tspan: 36, eng: [[0.46, 'prop']], scale: 1.1 },
+    narrow: { L: 122, fw: 11, span: 104, root: 34, tip: 11, sweep: 0.58, wx: 18, tail: 40, tspan: 40, eng: [[0.40, 'fan']], wl: 1, scale: 1.75 },
+    wide:   { L: 128, fw: 14, span: 112, root: 40, tip: 12, sweep: 0.62, wx: 14, tail: 44, tspan: 44, eng: [[0.38, 'big']], wl: 1, scale: 2.35 },
+    quad:   { L: 130, fw: 15, span: 116, root: 42, tip: 12, sweep: 0.64, wx: 12, tail: 46, tspan: 46, eng: [[0.32, 'fan'], [0.62, 'fan']], hump: 0.42, wl: 1, scale: 2.65 }
+};
+const WC_LIVERIES = {
+    CA: { body: '#ffffff', edge: '#d9dee3', tail: '#d0112b', mark: 'ring',  markC: '#ffffff', stripe: '#d0112b', titles: '#d0112b', eng: '#e9ecef', engC: '#d0112b', tips: '#d0112b', crown: null },
+    WR: { body: '#f6efe2', edge: '#8a4b22', tail: '#5a2e12', mark: 'mesa',  markC: '#e8c53a', stripe: '#9a5b2a', titles: '#5a2e12', eng: '#9a5b2a', engC: '#e8c53a', tips: '#e8c53a', crown: null },
+    SJ: { body: '#ffffff', edge: '#1f6fd1', tail: '#f39c12', mark: 'sun',   markC: '#ffffff', stripe: '#1f6fd1', titles: '#0b3d91', eng: '#0b3d91', engC: '#f39c12', tips: '#f39c12', crown: null },
+    KW: { body: '#ffffff', edge: '#e3ded6', tail: '#b3202c', mark: 'bird',  markC: '#f2c14e', stripe: '#f2c14e', titles: '#b3202c', eng: '#b3202c', engC: '#f2c14e', tips: '#f2c14e', crown: null },
+    HP: { body: '#ff6f00', edge: '#e65c00', tail: '#ffd54f', mark: 'dots',  markC: '#ff6f00', stripe: null,      titles: '#ffffff', eng: '#ffd54f', engC: '#ff6f00', tips: '#ffd54f', crown: '#ff8a1f' },
+    PL: { body: '#ffffff', edge: '#2e8b57', tail: '#1e5631', mark: 'wheat', markC: '#f1c40f', stripe: '#2e8b57', titles: '#1e5631', eng: '#2e8b57', engC: '#f1c40f', tips: '#f1c40f', crown: null }
+};
+function wcAcScale(ac) { return (WC_AC[ac] || WC_AC.narrow).scale; }
+// Outline of the whole aircraft (used for the shadow, and as the base of the body).
+function wcAcWingPath(g, G, side, ox = 0, k = 1) {      // one wing (side = ±1), optionally offset/scaled for the stabiliser
+    const sw = G.sweep * G.span * k, r = G.root * k, t = G.tip * k, x0 = ox + G.wx * k + r / 2, span = G.span * k;
+    g.moveTo(x0, side * G.fw * 0.8); g.lineTo(x0 - sw, side * span); g.lineTo(x0 - sw - t, side * span); g.lineTo(x0 - r, side * G.fw * 0.8);
+}
+function wcAcOutline(g, G) {
+    g.beginPath();
+    const L = G.L, fw = G.fw;                                            // fuselage: rounded nose, tapered tail cone
+    g.moveTo(L, 0); g.bezierCurveTo(L, fw * 0.75, L - fw * 1.2, fw, L - fw * 2.6, fw);
+    g.lineTo(-L * 0.62, fw); g.quadraticCurveTo(-L * 0.9, fw * 0.6, -L, fw * 0.18); g.lineTo(-L, -fw * 0.18); g.quadraticCurveTo(-L * 0.9, -fw * 0.6, -L * 0.62, -fw);
+    g.lineTo(L - fw * 2.6, -fw); g.bezierCurveTo(L - fw * 1.2, -fw, L, -fw * 0.75, L, 0); g.closePath();
+    for (const sd of [-1, 1]) { wcAcWingPath(g, G, sd); g.closePath(); wcAcWingPath(g, Object.assign({}, G, { span: G.tspan, fw: G.fw * 0.6, wx: 0, root: G.root * 0.55, tip: G.tip * 0.7 }), sd, -L * 0.78, 1); g.closePath(); }
+}
+function wcAcMark(g, mark, c, x, y, r) {                    // the airline's emblem, painted on the crown ahead of the fin
+    g.save(); g.translate(x, y); g.fillStyle = c; g.strokeStyle = c;
+    switch (mark) {
+        case 'ring': g.lineWidth = r * 0.32; g.beginPath(); g.arc(0, 0, r * 0.78, 0, 7); g.stroke(); g.beginPath(); g.moveTo(-r * 0.2, 0); g.lineTo(r * 1.25, -r * 0.55); g.lineTo(r * 1.25, r * 0.55); g.closePath(); g.fill(); break;   // ring and arrow
+        case 'mesa': for (let i = 0; i < 3; i++) { g.globalAlpha = 1 - i * 0.25; g.fillRect(-r + i * r * 0.55, -r * (0.9 - i * 0.25), r * 0.45, r * 2 * (0.9 - i * 0.25)); } break;    // stepped canyon
+        case 'sun': g.beginPath(); g.arc(0, 0, r * 0.55, 0, 7); g.fill(); g.lineWidth = r * 0.16; for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; g.beginPath(); g.moveTo(Math.cos(a) * r * 0.75, Math.sin(a) * r * 0.75); g.lineTo(Math.cos(a) * r * 1.1, Math.sin(a) * r * 1.1); g.stroke(); } break;
+        case 'bird': g.beginPath(); g.moveTo(r * 1.1, 0); g.quadraticCurveTo(0, -r * 0.2, -r, -r * 1.05); g.quadraticCurveTo(-r * 0.35, -r * 0.1, -r * 0.6, 0); g.quadraticCurveTo(-r * 0.35, r * 0.1, -r, r * 1.05); g.quadraticCurveTo(0, r * 0.2, r * 1.1, 0); g.fill(); break;   // a stylised sea bird
+        case 'dots': for (let i = -1; i <= 1; i++) { g.beginPath(); g.arc(i * r * 0.7, 0, r * 0.3, 0, 7); g.fill(); } break;
+        case 'wheat': g.lineWidth = r * 0.14; g.beginPath(); g.moveTo(-r, 0); g.lineTo(r, 0); g.stroke(); for (let i = -2; i <= 2; i++) for (const sd of [-1, 1]) { g.beginPath(); g.ellipse(i * r * 0.38, sd * r * 0.22, r * 0.22, r * 0.1, sd * 0.6, 0, 7); g.fill(); } break;
+    }
+    g.restore();
 }
 function wcPlaneSprite(liv, shadow) {
     let al, ac; if (typeof liv === 'string' && liv.includes(':')) [al, ac] = liv.split(':'); else { al = WC_AL_IDX[(liv | 0) % 6]; ac = 'narrow'; }
-    const key = (shadow ? 'plS' : 'pl') + al + ac;
+    const G = WC_AC[ac] || WC_AC.narrow, key = (shadow ? 'plS' : 'pl') + al + ac;
     let c = wcSpriteCache.get(key); if (c) return c;
-    const sc = { prop: 0.7, narrow: 1, wide: 1.34 }[ac] || 1, CW = Math.ceil(260 * sc), CH = Math.ceil(230 * sc);
-    c = document.createElement('canvas'); c.width = Math.ceil(CW * wcSPR); c.height = Math.ceil(CH * wcSPR);
-    const g = c.getContext('2d'); g.scale(wcSPR * sc, wcSPR * sc); g.translate(125, 115);
-    if (shadow) { g.fillStyle = 'rgba(6,10,16,.32)'; wcPlanePathFor(g, ac); g.fill(); }
+    const sc = G.scale, half = Math.max(G.L, G.span) + 8, CW = Math.ceil(2 * half * sc), spr = Math.min(wcSPR, 1.6);
+    c = document.createElement('canvas'); c.width = Math.ceil(CW * spr); c.height = Math.ceil(CW * spr);
+    const g = c.getContext('2d'); g.scale(spr * sc, spr * sc); g.translate(half, half);
+    if (shadow) { g.fillStyle = 'rgba(6,10,16,.3)'; wcAcOutline(g, G); g.fill(); }
     else {
-        const L = wcAirline(al);
-        g.fillStyle = '#59636b';
-        if (ac === 'wide') for (const y of [-38, -66, 38, 66]) { wcRR(g, y < -50 || y > 50 ? -8 : 4, y - 8, 32, 16, 7); g.fill(); }
-        else if (ac === 'narrow') for (const y of [-46, 46]) { wcRR(g, 2, y - 8, 34, 16, 7); g.fill(); }
-        g.fillStyle = '#eef1f3'; wcPlanePathFor(g, ac); g.fill(); g.strokeStyle = 'rgba(40,50,60,.45)'; g.lineWidth = 1.5; g.stroke();
-        if (ac === 'prop') for (const y of [-52, 52]) { g.fillStyle = '#59636b'; wcRR(g, 12, y - 7, 30, 14, 6); g.fill(); g.strokeStyle = 'rgba(30,30,30,.55)'; g.lineWidth = 3; g.beginPath(); g.moveTo(46, y - 22); g.lineTo(46, y + 22); g.stroke(); }
-        g.fillStyle = L.c1; g.fillRect(-96, -3.5, 190, 7);                                       // cheat line
-        g.fillStyle = L.tail || L.c1; g.beginPath(); g.moveTo(-112, -4); g.lineTo(-84, -4); g.lineTo(-74, 0); g.lineTo(-84, 4); g.lineTo(-112, 4); g.closePath(); g.fill();   // fin
-        g.fillStyle = L.c2; for (const y of [-92, 92]) { g.beginPath(); g.arc(ac === 'prop' ? 4 : -52, y, 5, 0, 7); g.fill(); }
-        g.fillStyle = '#1e2a33'; g.beginPath(); g.moveTo(98, -7); g.quadraticCurveTo(112, -5, 112, 0); g.quadraticCurveTo(112, 5, 98, 7); g.closePath(); g.fill();
-        g.fillStyle = '#2d3e4a'; for (let x = -70; x < 90; x += 9) { g.fillRect(x, -11, 4, 2.4); g.fillRect(x, 8.6, 4, 2.4); }
-        g.save(); g.fillStyle = L.c1; g.font = 'bold 9px Ubuntu, Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(L.name.toUpperCase().slice(0, 18), 4, -15); g.restore();
+        const V = WC_LIVERIES[al] || WC_LIVERIES.CA, L = G.L, fw = G.fw;
+        // wings and stabilisers: light grey with a darker leading edge, flap lines and coloured tips
+        for (const sd of [-1, 1]) {
+            g.beginPath(); wcAcWingPath(g, G, sd); g.closePath();
+            const gr = g.createLinearGradient(G.wx + G.root, 0, G.wx - G.sweep * G.span, 0); gr.addColorStop(0, '#c9d0d6'); gr.addColorStop(1, '#e8ecef'); g.fillStyle = gr; g.fill();
+            g.strokeStyle = 'rgba(60,70,80,.35)'; g.lineWidth = 0.8; g.stroke();
+            g.strokeStyle = 'rgba(80,90,100,.28)'; g.beginPath(); for (const f of [0.35, 0.7]) { const y = sd * (fw + (G.span - fw) * f), x = G.wx + G.root / 2 - G.sweep * G.span * f - (G.root - (G.root - G.tip) * f) * 0.72; g.moveTo(x, y - sd * 6); g.lineTo(x - 4, y + sd * 8); } g.stroke();
+            g.fillStyle = V.tips; const tx = G.wx + G.root / 2 - G.sweep * G.span; g.fillRect(tx - G.tip, sd * G.span - (sd > 0 ? 3 : 0), G.tip, 3);   // wingtip / winglet
+            const T = Object.assign({}, G, { span: G.tspan, fw: fw * 0.6, wx: 0, root: G.root * 0.55, tip: G.tip * 0.7 });
+            g.beginPath(); wcAcWingPath(g, T, sd, -L * 0.78, 1); g.closePath(); g.fillStyle = V.tail === V.body ? '#dfe4e8' : V.tail; g.globalAlpha = 0.9; g.fill(); g.globalAlpha = 1;
+        }
+        // engines (under the wings, so drawn before the fuselage): nacelles with a coloured intake ring, or propellers
+        for (const [f, kind] of G.eng) for (const sd of [-1, 1]) {
+            const y = sd * (fw + (G.span - fw) * f), x = G.wx + G.root / 2 - G.sweep * G.span * f + (kind === 'prop' ? 10 : 6), len = kind === 'big' ? 30 : kind === 'prop' ? 24 : 24, wd = kind === 'big' ? 12 : 9;
+            g.fillStyle = V.eng; wcRR(g, x - len * 0.35, y - wd / 2, len, wd, wd / 2); g.fill(); g.strokeStyle = 'rgba(0,0,0,.25)'; g.lineWidth = 0.8; g.stroke();
+            g.fillStyle = V.engC; g.fillRect(x + len * 0.55, y - wd / 2 + 1, 3, wd - 2);
+            if (kind === 'prop') { g.fillStyle = 'rgba(40,44,50,.22)'; g.beginPath(); g.ellipse(x + len * 0.7, y, 3, 17, 0, 0, 7); g.fill(); g.strokeStyle = 'rgba(30,30,30,.55)'; g.lineWidth = 1.6; g.beginPath(); g.moveTo(x + len * 0.7, y - 16); g.lineTo(x + len * 0.7, y + 16); g.stroke(); }
+        }
+        // fuselage with a soft cylindrical shade, the livery's edge colour along the sides
+        g.beginPath(); g.moveTo(L, 0); g.bezierCurveTo(L, fw * 0.75, L - fw * 1.2, fw, L - fw * 2.6, fw); g.lineTo(-L * 0.62, fw); g.quadraticCurveTo(-L * 0.9, fw * 0.6, -L, fw * 0.18); g.lineTo(-L, -fw * 0.18); g.quadraticCurveTo(-L * 0.9, -fw * 0.6, -L * 0.62, -fw); g.lineTo(L - fw * 2.6, -fw); g.bezierCurveTo(L - fw * 1.2, -fw, L, -fw * 0.75, L, 0); g.closePath();
+        const fg = g.createLinearGradient(0, -fw, 0, fw); fg.addColorStop(0, V.edge); fg.addColorStop(0.22, V.body); fg.addColorStop(0.78, V.body); fg.addColorStop(1, V.edge); g.fillStyle = fg; g.fill();
+        g.strokeStyle = 'rgba(40,50,60,.4)'; g.lineWidth = 0.9; g.stroke();
+        g.save(); g.clip();
+        if (V.crown) { g.fillStyle = V.crown; g.fillRect(-L, -fw * 0.35, 2 * L, fw * 0.7); }
+        if (G.hump) { g.fillStyle = 'rgba(255,255,255,.35)'; wcRR(g, L * (1 - G.hump * 2) , -fw * 0.55, L * G.hump * 1.6, fw * 1.1, fw * 0.5); g.fill(); g.strokeStyle = 'rgba(0,0,0,.12)'; g.stroke(); }
+        if (V.stripe) { g.fillStyle = V.stripe; g.fillRect(-L * 0.6, fw - 3.2, L * 1.45, 2.2); g.fillRect(-L * 0.6, -fw + 1, L * 1.45, 2.2); }
+        g.fillStyle = 'rgba(40,55,70,.55)'; for (let x = -L * 0.55; x < L - fw * 3; x += 6) { g.fillRect(x, fw - 1.6, 2.6, 1.2); g.fillRect(x, -fw + 0.4, 2.6, 1.2); }   // cabin windows at the sides
+        g.restore();
+        g.fillStyle = '#1d2a35'; g.beginPath(); g.moveTo(L - fw * 0.6, -fw * 0.52); g.quadraticCurveTo(L - fw * 0.15, 0, L - fw * 0.6, fw * 0.52); g.lineTo(L - fw * 1.3, fw * 0.5); g.lineTo(L - fw * 1.3, -fw * 0.5); g.closePath(); g.fill();   // cockpit
+        // tail fin seen from above: a tapered blade in the tail colour, with the emblem painted on the crown ahead of it
+        g.fillStyle = V.tail; g.beginPath(); g.moveTo(-L * 0.42, 0); g.quadraticCurveTo(-L * 0.6, -fw * 0.5, -L * 1.02, -fw * 0.22); g.lineTo(-L * 1.02, fw * 0.22); g.quadraticCurveTo(-L * 0.6, fw * 0.5, -L * 0.42, 0); g.fill();
+        wcAcMark(g, V.mark, V.tail === V.body ? V.titles : V.tail, -L * 0.28, 0, fw * 0.72);
+        if (V.markC && V.mark !== 'ring') wcAcMark(g, V.mark, V.markC, -L * 0.28, 0, fw * 0.4);
+        else if (V.mark === 'ring') wcAcMark(g, 'ring', V.markC, -L * 0.28, 0, fw * 0.38);
+        g.save(); g.fillStyle = V.titles; g.font = `bold ${Math.round(fw * 0.85)}px Ubuntu, Arial`; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(wcAirline(al).name.toUpperCase(), L * 0.2, 0); g.restore();
     }
-    c._w = CW; c._h = CH; c._ox = 125 * sc; c._oy = 115 * sc; wcSpriteCache.set(key, c); return c;
+    c._w = CW; c._h = CW; c._ox = half * sc; c._oy = half * sc; c._tipX = (G.wx + G.root / 2 - G.sweep * G.span - G.tip / 2) * sc; c._tipY = G.span * sc; c._L = G.L * sc;
+    wcSpriteCache.set(key, c); return c;
 }
 function wcDrawPlane(context, sx, sy, a, alt, liv) {
-    const s = 1 / fov, k = 1 + 0.8 * alt, body = wcPlaneSprite(liv, false), sh = wcPlaneSprite(liv, true);
-    context.save(); context.translate(sx + alt * 260 * s, sy + alt * 320 * s); context.rotate(a); context.scale(0.95, 0.95);
-    context.globalAlpha = 1 - alt * 0.45; context.drawImage(sh, -sh._ox * s, -sh._oy * s, sh._w * s, sh._h * s); context.restore();
+    const s = 1 / fov, k = 1 + 0.5 * alt, body = wcPlaneSprite(liv, false), sh = wcPlaneSprite(liv, true);
+    context.save(); context.translate(sx + alt * 260 * s, sy + alt * 320 * s); context.rotate(a); context.scale(0.97, 0.97);
+    context.globalAlpha = 1 - alt * 0.5; context.drawImage(sh, -sh._ox * s, -sh._oy * s, sh._w * s, sh._h * s); context.restore();
     context.save(); context.translate(sx, sy); context.rotate(a); context.scale(k, k);
     context.drawImage(body, -body._ox * s, -body._oy * s, body._w * s, body._h * s);
-    if ((performance.now() / 500 | 0) % 2 === 0) { context.fillStyle = '#ff3b3b'; context.beginPath(); context.arc(-50 * s, -body._oy * 0.82 * s, 3 * s + 1, 0, 7); context.fill(); context.fillStyle = '#3bff6b'; context.beginPath(); context.arc(-50 * s, body._oy * 0.82 * s, 3 * s + 1, 0, 7); context.fill(); }
+    const on = (performance.now() / 500 | 0) % 2 === 0, r = 2.5 * s + 1;                      // navigation lights: red left, green right, strobes
+    context.fillStyle = '#ff3b3b'; context.beginPath(); context.arc(body._tipX * s, -body._tipY * s, r, 0, 7); context.fill();
+    context.fillStyle = '#3bff6b'; context.beginPath(); context.arc(body._tipX * s, body._tipY * s, r, 0, 7); context.fill();
+    if (on) { context.fillStyle = 'rgba(255,255,255,.95)'; context.beginPath(); context.arc(-body._L * s, 0, r * 1.2, 0, 7); context.fill(); }
     context.restore();
 }
+
 function wcDrawFlightEntity(context, rPos, en) {
     const f = en.fl, ta = WC.G && f._ga != null ? f._ga : f.a;
     rPos.flA = lerpAngle(rPos.flA !== undefined ? rPos.flA : ta, ta, 0.3);
     rPos.flAlt = rPos.flAlt !== undefined ? rPos.flAlt + (f.alt - rPos.flAlt) * 0.2 : f.alt;
     wcDrawPlane(context, 0, 0, rPos.flA, rPos.flAlt, f.al ? f.al + ':' + (f.ac || 'narrow') : (f.liv || 0));
-    const k = (1 + 0.8 * rPos.flAlt) * (f.ac === 'prop' ? 0.8 : 1);
+    if (en.id !== myId) return;                                          // other passengers sit inside; only your own tank rides up top
+    const k = (1 + 0.5 * rPos.flAlt) * (f.ac === 'prop' ? 0.85 : 1);
     context.save(); context.scale(k, k); drawEntityBody(context, rPos); context.restore();
 }
 
 // ---- scheduled air traffic: every route flies on a timetable, the same one the departures boards show ----
-WC._aiPaths = new Map();
-function wcAiPath(l) {
-    let P = WC._aiPaths.get(l.fn + l.from); if (P) return P;
-    const A = WC.airports.find(a => a.city === l.from), B = WC.airports.find(a => a.city === l.to); if (!A || !B) return null;
-    P = { a: wcVec(A.sb.x, A.sb.y), b: wcVec(B.sb.x, B.sb.y) }; WC._aiPaths.set(l.fn + l.from, P); return P;
+// ---- scheduled air traffic: the same timetable, stands and block times the server flies ------------------------------
+// Each departure becomes a path in time: parked at its stand while boarding, push-back and taxi, take-off roll, the great
+// circle, final approach, landing roll, taxi in, parked at the arrival stand for a while. If a real player is on that
+// departure (same flight number and departure), the player's plane is drawn instead.
+function wcFnv(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function wcAp(city) { if (!WC._apBy || WC._apBy.n !== (WC.airports || []).length) { WC._apBy = new Map((WC.airports || []).map(a => [a.city, a])); WC._apBy.n = (WC.airports || []).length; } return WC._apBy.get(city); }
+function wcBrg(a, b) { const d = wcToward(a, b), { e, n } = wcEN(a); return Math.atan2(wcDot(d, e), wcDot(d, n)); }
+function wcTanQ(q, a) { const { e, n } = wcEN(q), c = Math.cos(a), s = Math.sin(a); return [c * e[0] - s * n[0], c * e[1] - s * n[1], c * e[2] - s * n[2]]; }
+const WC_AI_PARK = 240000, WC_FINAL = 22000;
+WC._aiPlans = new Map();
+function wcAiPlan(l, k) {
+    const key = l.fn + '@' + k, slot = WC.airSlots && WC.airSlots.get(key), sig = slot ? slot.join() : 'h'; let P = WC._aiPlans.get(key); if (P && P.sig === sig) return P;
+    const A = wcAp(l.from), B = wcAp(l.to); if (!A || !B || !A.stands || !B.stands || !A.stands.length || !B.stands.length) return null;
+    const h = wcFnv(l.fn + ':' + k), S = A.stands[(slot ? slot[0] : h) % A.stands.length], T = B.stands[(slot ? slot[1] : h >>> 8) % B.stands.length];
+    const qa = wcVec(A.sb.x, A.sb.y), qb = wcVec(B.sb.x, B.sb.y), brg = wcBrg(qa, qb), brgB = wcBrg(qb, qa), dx = wcWrapD(B.sb.x - A.sb.x);
+    const east = Math.abs(Math.sin(brg)) > 0.2 ? Math.sin(brg) > 0 : dx >= 0, arrE = -Math.sin(brgB), dir = Math.abs(arrE) > 0.25 ? (arrE > 0 ? 1 : -1) : (dx >= 0 ? 1 : -1);
+    const startX = east ? A.endW : A.endE, lift = startX + (east ? 1 : -1) * 1550, tdx = dir > 0 ? B.x0 + 220 : B.x1 - 220, exitX = dir > 0 ? B.endE : B.endW, fix = tdx - dir * WC_FINAL;
+    const out = [[S[0], S[1]], [S[4], S[5]], [S[4], A.ty], [startX, A.ty], [startX, A.ry], [lift, A.ry]];
+    const inn = [[tdx, B.ry], [exitX, B.ry], [exitX, B.ty], [T[4], B.ty], [T[4], T[5]], [T[0], T[1]]];
+    const plen = pts => { let s = 0; for (let i = 1; i < pts.length; i++) s += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return s; };
+    const dur = l.dur || l.mins * 60000, tOut = Math.min(dur * 0.3, plen(out) / 280 * 1000 + 30000), tIn = Math.min(dur * 0.3, plen(inn) / 300 * 1000 + 20000), tFin = 14000;
+    P = { key, sig, dep: k * l.per + l.off, dur, S, T, out, inn, tOut, tIn, tFin, tAir: Math.max(20000, dur - tOut - tIn - tFin), q0: wcVec(lift, A.ry), q1: wcVec(fix, B.ry), fix, tdx, ry: B.ry, liv: l.al + ':' + l.ac, used: 0 };
+    WC._aiPlans.set(key, P); if (WC._aiPlans.size > 600) { const cut = wcServerNow() - 3600000; for (const [k2, p2] of WC._aiPlans) if (p2.dep + p2.dur < cut) WC._aiPlans.delete(k2); }
+    return P;
 }
-function wcAiFlights(now) {                                   // every scheduled flight in the air right now: [leg, fraction]
+function wcAlong(pts, u) {                                             // point and heading at fraction u along a polyline
+    let tot = 0; const seg = []; for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(d); tot += d; }
+    let t = Math.max(0, Math.min(1, u)) * tot;
+    for (let i = 0; i < seg.length; i++) { if (t <= seg[i] || i === seg.length - 1) { const f = seg[i] ? t / seg[i] : 0, a = pts[i], b = pts[i + 1]; return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, Math.atan2(b[1] - a[1], b[0] - a[0]), i]; } t -= seg[i]; }
+    return [pts[0][0], pts[0][1], 0, 0];
+}
+// Where the departure is at time t: { x, y, a, alt, q, h, ph } or null when it isn't around.
+function wcAiAt(P, t) {
+    const r = t - P.dep, R = wcR();
+    if (r < -((WC.air && WC.air.holdDep) || WC_AI_PARK) + 15000 || r > P.dur + ((WC.air && WC.air.holdArr) || WC_AI_PARK) - 15000) return null;
+    const ground = (x, y, a, ph) => { const q = wcVec(x, y); return { x, y, a, alt: 0, q, h: wcTanQ(q, a), ph }; };
+    if (r < 0) return ground(P.S[0], P.S[1], P.S[2], 'board');
+    if (r > P.dur) return ground(P.T[0], P.T[1], P.T[2], 'park');
+    if (r < P.tOut) { const [x, y, a, i] = wcAlong(P.out, r / P.tOut); return ground(x, y, i === 0 ? P.S[2] : a, 'taxi'); }    // the first leg is the push-back: nose stays put
+    if (r < P.tOut + P.tAir) {
+        const u = (r - P.tOut) / P.tAir, q = wcNorm(wcSlerp(P.q0, P.q1, u)), h = wcToward(q, P.q1), c = wcChart(q), D = wcAngle(P.q0, P.q1) * R;
+        return { x: c[0], y: c[1], a: wcChartAng(q, h), alt: Math.max(0, Math.min(1, u * D / 14000, (1 - u) * D / 42000 + 0.52)), q, h, ph: 'air' };
+    }
+    if (r < P.tOut + P.tAir + P.tFin) { const u = (r - P.tOut - P.tAir) / P.tFin, x = P.fix + (P.tdx - P.fix) * u, a = P.tdx > P.fix ? 0 : Math.PI, q = wcVec(x, P.ry); return { x, y: P.ry, a, alt: 0.52 * (1 - u), q, h: wcTanQ(q, a), ph: 'final' }; }
+    const [x, y, a] = wcAlong(P.inn, (r - P.tOut - P.tAir - P.tFin) / P.tIn); return ground(x, y, a, 'taxiin');
+}
+// Every departure that is boarding, flying or parked after arrival right now.
+function wcAiActive(now) {
     const out = []; if (!WC.air) return out;
-    for (const l of WC.air.legs) { const D = l.mins * 60000; for (let k = Math.floor((now - l.off) / l.per); k * l.per + l.off + D > now && k > -5; k--) { const t0 = k * l.per + l.off; if (now >= t0) out.push([l, (now - t0) / D]); } }
+    for (const l of WC.air.legs) {
+        const dur = l.dur || l.mins * 60000;
+        for (let k = Math.ceil((now - dur - WC_AI_PARK - l.off) / l.per); k * l.per + l.off <= now + WC_AI_PARK; k++) { const P = wcAiPlan(l, k); if (P) out.push(P); }
+    }
     return out;
 }
-// Scheduled flights fly the great circle on the sphere (a slerp between the two airports).
-function wcAiPos(l, t) {
-    const P = wcAiPath(l); if (!P) return null;
-    const q = wcNorm(wcSlerp(P.a, P.b, t)), h = wcToward(q, P.b), c = wcChart(q);
-    return { q, h, x: c[0], y: c[1], a: wcChartAng(q, h), lat: Math.asin(q[2]), alt: Math.max(0, Math.min(1, t * 9, (1 - t) * 9)) };
-}
+// Kept for the map/IFE callers: [leg, fraction] of flights in the air.
+function wcAiFlights(now) { return wcAiActive(now).filter(P => now >= P.dep && now <= P.dep + P.dur).map(P => [P, 0]); }
+function wcAiPos(P) { return wcAiAt(P, wcServerNow()); }
 function wcDrawAiTraffic(s, vx0, vy0, vx1, vy1) {
     if (!WC.air || WC.viewMode && s > 1.5) return;
-    const now = Date.now(); WC._aiNow = WC._aiNow && now - WC._aiNow.t < 1000 ? WC._aiNow : { t: now, list: wcAiFlights(now) };
-    for (const [l, q0] of WC._aiNow.list) {
-        const q = q0 + (now - WC._aiNow.t) / (l.mins * 60000); if (q > 1) continue;
-        const p = wcAiPos(l, q); if (!p) continue;
-        if (WC.G) {                                                       // globe view: project from the sphere
+    const now = wcServerNow(); WC._aiNow = WC._aiNow && now - WC._aiNow.t < 1000 ? WC._aiNow : { t: now, list: wcAiActive(now) };
+    const live = new Set(); for (const e of gameState.entities) if (e.fl && e.fl.svc) live.add(e.fl.svc);
+    for (const P of WC._aiNow.list) {
+        if (live.has(P.key)) continue;
+        const p = wcAiAt(P, now); if (!p) continue;
+        if (WC.G) {
             if (wcDot(p.q, WC.G.qc) < 0.995) continue;
             const v = wcGlobeProj(p.q); if (v[0] < vx0 || v[0] > vx1 || v[1] < vy0 || v[1] > vy1) continue;
-            wcDrawPlane(ctx, worldToScreenX(v[0]), worldToScreenY(v[1]), wcGlobeAng(p.h), p.alt, l.al + ':' + l.ac); continue;
+            wcDrawPlane(ctx, worldToScreenX(v[0]), worldToScreenY(v[1]), wcGlobeAng(p.h), p.alt, P.liv); continue;
         }
-        if (Math.abs(p.lat) > 1.05) continue;
-        const x = wcNearX(p.x);
-        if (x < vx0 - 600 || x > vx1 + 600 || p.y < vy0 - 600 || p.y > vy1 + 600) continue;
-        wcDrawPlane(ctx, worldToScreenX(x), worldToScreenY(p.y), p.a, p.alt, l.al + ':' + l.ac);
+        if (Math.abs(wcLat(p.y)) > 1.05) continue;
+        const x = wcNearX(p.x), m = 700;
+        if (x < vx0 - m || x > vx1 + m || p.y < vy0 - m || p.y > vy1 + m) continue;
+        wcDrawPlane(ctx, worldToScreenX(x), worldToScreenY(p.y), p.a, p.alt, P.liv);
     }
+}
+function wcDepartures(D) {
+    const A = (WC.airports || []).find(a => a.city === (D.theme && D.theme.city)); if (!A || !WC.air) return [];
+    const now = wcServerNow(); if (WC._dep && WC._dep.k === A.code && now - WC._dep.t < 1000) return WC._dep.l;
+    const city = WC.cities.find(c => c.id === A.city), dms = WC.dayMs || WC_DAY_MS, rows = [], board = WC.air.board || 150000;
+    for (const l of WC.air.legs) if (l.from === A.city) for (let k = Math.ceil((now - 60000 - l.off) / l.per), j = 0; j < 2; j++, k++) rows.push([k * l.per + l.off, l, k]);
+    rows.sort((p, q) => p[0] - q[0]);
+    const clock = t => { const h = ((6 + (t % dms) / dms * 24 + city.tz) % 24 + 24) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); };
+    const out = rows.slice(0, 10).map(([t, l, k]) => { const B = wcAp(l.to), sl = WC.airSlots && WC.airSlots.get(l.fn + '@' + k), g = A.stands && A.stands.length ? A.stands[(sl ? sl[0] : wcFnv(l.fn + ':' + k)) % A.stands.length][3] : '-', left = t - now;
+        const st = left < 0 ? 'DEPARTED' : left < 40000 ? 'FINAL CALL' : left < board ? 'BOARDING' : 'GATE ' + g;
+        return `${clock(t)} ${l.fn.padEnd(6)} ${B.code} ${WC.cities.find(c => c.id === l.to).name.toUpperCase().slice(0, 14).padEnd(14)} G${String(g).padEnd(3)} ${st}`; });
+    WC._dep = { k: A.code, l: out, t: now }; return out;
 }
 
 // ---- culture: palettes, signs in the local script, festivals ----
@@ -4533,7 +4933,7 @@ function wcDrawOutsideView(D) {
 
 // ---- in-flight screen: a real globe now ----
 function wcIfeDraw() {
-    const I = wcIfe; if (!I || !I.open || I.tab !== 'route' || !wcFlight || !WC.circ || !WC.globe) return;
+    const I = wcIfe; if (!I || !I.open || I.page !== 'map' || !wcFlight || !WC.circ || !WC.globe) return;
     const f = wcFlight, cv = I.cv, g = cv.getContext('2d'), Wc = cv.width, Hc = cv.height, C = WC.circ;
     const me = gameState.entities.find(e => e.id === myId), rp = me && renderEntities.get(me.id), pq = rp && rp.rq ? rp.rq : me ? wcEntQ(me) : [1, 0, 0];
     const plat = Math.asin(pq[2]), plon = Math.atan2(pq[1], pq[0]);
@@ -4542,7 +4942,7 @@ function wcIfeDraw() {
     const sinPc = Math.sin(pc), cosPc = Math.cos(pc);
     const P = (lat, lon) => { const dl = lon - lc, cl = Math.cos(lat); return [cx + R * cl * Math.sin(dl), cy - R * (cosPc * Math.sin(lat) - sinPc * cl * Math.cos(dl)), sinPc * Math.sin(lat) + cosPc * cl * Math.cos(dl)]; };
     const PM = (x, y) => P(wcLat(y), x / C * Math.PI * 2), PQ = q => P(Math.asin(q[2]), Math.atan2(q[1], q[0]));
-    const bg = g.createLinearGradient(0, 0, 0, Hc); bg.addColorStop(0, '#040a16'); bg.addColorStop(1, '#0b1d33'); g.fillStyle = bg; g.fillRect(0, 0, Wc, Hc);
+    const TH = I.th || wcIfeTheme(), bg = g.createLinearGradient(0, 0, 0, Hc); bg.addColorStop(0, TH.bg1); bg.addColorStop(1, TH.bg2); g.fillStyle = bg; g.fillRect(0, 0, Wc, Hc);
     for (let i = 0; i < 80; i++) { g.fillStyle = `rgba(255,255,255,${0.25 + (i % 3) * 0.2})`; g.fillRect((i * 97) % Wc, (i * 53) % Hc, 1.3, 1.3); }
     const oc = g.createRadialGradient(cx - R * 0.35, cy - R * 0.35, R * 0.1, cx, cy, R); oc.addColorStop(0, '#2f7fbf'); oc.addColorStop(1, '#0c3358'); g.fillStyle = oc; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.fill();
     // land and ice, sampled on a 3° grid (cached per view)
@@ -4571,7 +4971,7 @@ function wcIfeDraw() {
     const A = WC.airports.find(a => a.city === f.from), B = WC.airports.find(a => a.city === f.to);
     if (A && B) {
         const pts = wcGCVecs(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 120);
-        for (let i = 1; i < pts.length; i++) { const p = PQ(pts[i - 1]), q = PQ(pts[i]); if (p[2] < 0 || q[2] < 0) continue; g.strokeStyle = '#ffd23d'; g.lineWidth = 2.4; g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.stroke(); }
+        for (let i = 1; i < pts.length; i++) { const p = PQ(pts[i - 1]), q = PQ(pts[i]); if (p[2] < 0 || q[2] < 0) continue; g.strokeStyle = TH.route; g.lineWidth = 2.4; g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.stroke(); }
     }
     for (const c of WC.cities) { const p = PM(c.cx, c.cy); if (p[2] < 0.02) continue; const k = c.id === f.from || c.id === f.to; g.fillStyle = k ? '#ffd23d' : 'rgba(255,255,255,.85)'; g.beginPath(); g.arc(p[0], p[1], k ? 4 : 2.3, 0, 7); g.fill(); if (k || p[2] > 0.4) { g.font = `${k ? 'bold 12px' : '10px'} Ubuntu, sans-serif`; g.textAlign = 'left'; g.fillText(c.code, p[0] + 5, p[1] - 4); } }
     for (const [la, lab] of [[Math.PI / 2, 'N'], [-Math.PI / 2, 'S']]) { const p = P(la, 0); if (p[2] > 0) { g.fillStyle = '#ff6b6b'; g.beginPath(); g.arc(p[0], p[1], 3, 0, 7); g.fill(); g.fillStyle = '#ffb3b3'; g.font = 'bold 10px Ubuntu'; g.fillText(lab + ' POLE', p[0] + 5, p[1] + 3); } }
@@ -4612,6 +5012,9 @@ function wcRenderCards(p) {
     wcCardsEl.querySelector('.wcc-grid').innerHTML = wcItinCardsHtml(p.actions, wcCardCls);
     wcCardsEl.querySelectorAll('.wcc-buy').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); worldSend('world_interact', { id: p.id, a: b.dataset.a, cls: wcCardCls }); }));
 }
+// Server time: messages carry the server's clock now and then; departures are server times.
+function wcServerNow() { return Date.now() + (WC.clockSkew || 0); }
+function wcClockAt(t, tz) { const dms = WC.dayMs || WC_DAY_MS, h = ((6 + (t % dms) / dms * 24 + (tz || 0)) % 24 + 24) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); }
 function wcItinCardsHtml(actions, cls) {
     const head = { east: 'Eastbound →', west: '← Westbound', north: '↑ Northbound', south: '↓ Southbound' }, groups = new Map();
     for (const a of actions) (groups.get(a.city) || groups.set(a.city, []).get(a.city)).push(a);
@@ -4620,22 +5023,11 @@ function wcItinCardsHtml(actions, cls) {
           <div class="wcc-img" style="background-image:url(${wcCitySnapshot(a0.city)})"><span class="wcc-code">${escapeHTML(a0.code)}</span><span class="wcc-tz">${escapeHTML(wcTzLabel(a0.tz))}</span></div>
           <div class="wcc-cap"><div class="wcc-name">${escapeHTML(a0.name)}</div><div class="wcc-meta">${list.some(a => a.pole && !a.stops) ? `🧭 Over the ${list.find(a => a.pole && !a.stops).pole === 'N' ? 'North' : 'South'} Pole` : head[a0.head] || ''} · ${a0.km.toLocaleString()} km</div>
           ${list.map(a => { const on = cls === 'J' ? a.onJ : a.on, fare = cls === 'J' ? a.fareJ : a.fare, L = wcAirline(a.legs[0].al);
-            return `<button class="wcc-buy" data-a="${escapeHTML(a.a)}" ${on ? '' : 'disabled'}><span class="wcc-al">${a.legs.map(l => `<i style="background:${wcAirline(l.al).c1}"></i>`).join('')}${escapeHTML(a.legs.map(l => l.fn).join(' + '))}</span><span class="wcc-route">${a.stops ? `${a.stops} stop · via ${escapeHTML(a.via.join(', '))}` : 'Nonstop'} · ${a.mins} min · ${escapeHTML(L.name)}${a.legs.length > 1 && a.legs.some(l => l.al !== a.legs[0].al) ? ' +' : ''}</span><b>${fare.toLocaleString()}</b></button>`; }).join('')}
+            return `<button class="wcc-buy" data-a="${escapeHTML(a.a)}" ${on ? '' : 'disabled'}><span class="wcc-al">${a.legs.map(l => `<i style="background:${wcAirline(l.al).c1}"></i>`).join('')}${escapeHTML(a.legs.map(l => l.fn).join(' + '))}</span><span class="wcc-route">${a.dep ? `🕒 ${wcClockAt(a.dep, a.tz0)} · in ${wcFmtMs(a.dep - wcServerNow())} · Gate ${a.gate} · ` : ''}${a.stops ? `${a.stops} stop · via ${escapeHTML(a.via.join(', '))}` : 'Nonstop'} · ${a.mins} min · ${escapeHTML(L.name)}${a.legs.length > 1 && a.legs.some(l => l.al !== a.legs[0].al) ? ' +' : ''}</span><b>${fare.toLocaleString()}</b></button>`; }).join('')}
           </div>
         </div>`; }).join('');
 }
 // the departures board: the real timetable for this airport
-function wcDepartures(D) {
-    const A = (WC.airports || []).find(a => a.city === (D.theme && D.theme.city)); if (!A || !WC.air) return [];
-    const now = Date.now(); if (WC._dep && WC._dep.k === A.code && now - WC._dep.t < 1000) return WC._dep.l;
-    const city = WC.cities.find(c => c.id === A.city), dms = WC.dayMs || WC_DAY_MS, rows = [];
-    for (const l of WC.air.legs) if (l.from === A.city) for (let k = Math.ceil((now - 60000 - l.off) / l.per), j = 0; j < 2; j++, k++) { const t = k * l.per + l.off; rows.push([t, l]); }
-    rows.sort((p, q) => p[0] - q[0]);
-    const clock = t => { const h = ((6 + (t % dms) / dms * 24 + city.tz) % 24 + 24) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0'); };
-    const out = rows.slice(0, 10).map(([t, l]) => { const B = WC.airports.find(a => a.city === l.to), st = t - now < 0 ? 'DEPARTED' : t - now < 90000 ? 'BOARDING' : (l.off % 7 === 0 ? 'DELAYED' : 'ON TIME'); return `${clock(t)} ${l.fn.padEnd(6)} ${B.code} ${WC.cities.find(c => c.id === l.to).name.toUpperCase().slice(0, 11).padEnd(11)} ${st}`; });
-    WC._dep = { k: A.code, l: out, t: now }; return out;
-}
-
 // ---- the phone ----
 const PH = { open: false, app: 'home', inbox: [], msgs: [], chat: null, flights: null, trip: null, hotels: null, players: null, unread: 0, from: null };
 const PH_APPS = [['maps', '🗺', 'Maps'], ['flights', '✈', 'Flights'], ['trips', '🎫', 'Trips'], ['hotels', '🏨', 'Hotels'], ['taxi', '🚕', 'Taxi'], ['bank', '🏦', 'Wallet'], ['clock', '🕐', 'World clock'], ['msgs', '💬', 'Messages'], ['work', '💼', 'Work'], ['settings', '⚙', 'Settings']];
@@ -4679,7 +5071,7 @@ function phRender() {
         case 'trips': {
             const T = PH.trip; h = phHead('Trips');
             if (!T) { h += '<div class="ph-empty">No trips booked.<br><button class="ph-btn" data-go="flights">Book a flight</button></div>'; break; }
-            h += `<div class="ph-note">Valid for ${Math.max(0, Math.round(T.left / 60000))} more minutes · ${T.cls === 'J' ? 'Business' : 'Economy'}</div>` + T.legs.map((l, i) => `<div class="ph-pass${i < T.i ? ' done' : i === T.i ? ' now' : ''}" style="--al:${wcAirline(l.al).c1}"><div class="ph-pt"><b>${escapeHTML(l.alName)}</b><span>${escapeHTML(l.fn)}</span></div><div class="ph-pr"><div><big>${escapeHTML(l.from)}</big><small>${escapeHTML(l.fromName)}</small></div><div class="ph-plane">✈</div><div><big>${escapeHTML(l.to)}</big><small>${escapeHTML(l.toName)}</small></div></div><div class="ph-pf"><span>${escapeHTML(l.ac)} · Gate 2</span><span class="ph-qr">${Array.from({ length: 36 }, (_, k) => `<i class="${(l.fn.charCodeAt(k % l.fn.length) * (k + 3)) % 3 ? '' : 'on'}"></i>`).join('')}</span></div>${i < T.i ? '<div class="ph-stamp">FLOWN</div>' : ''}</div>`).join('') + `<button class="ph-btn" data-nav="airport">🧭 Navigate to the airport</button>`;
+            h += `<div class="ph-note">Valid for ${Math.max(0, Math.round(T.left / 60000))} more minutes · ${T.cls === 'J' ? 'Business' : 'Economy'}</div>` + T.legs.map((l, i) => `<div class="ph-pass${i < T.i ? ' done' : i === T.i ? ' now' : ''}" style="--al:${wcAirline(l.al).c1}"><div class="ph-pt"><b>${escapeHTML(l.alName)}</b><span>${escapeHTML(l.fn)}</span></div><div class="ph-pr"><div><big>${escapeHTML(l.from)}</big><small>${escapeHTML(l.fromName)}</small></div><div class="ph-plane">✈</div><div><big>${escapeHTML(l.to)}</big><small>${escapeHTML(l.toName)}</small></div></div><div class="ph-pf"><span>${escapeHTML(l.ac)} · Gate ${l.gate || '–'}${l.dep ? ` · dep ${wcClockAt(l.dep, l.tzFrom)} local · ${l.dep > wcServerNow() ? (l.dep - wcServerNow() < (T.board || 150000) ? '<b style="color:#1d8a4f">boarding</b>' : 'in ' + wcFmtMs(l.dep - wcServerNow())) : i < T.i ? 'flown' : 'departed'}` : ''}</span><span class="ph-qr">${Array.from({ length: 36 }, (_, k) => `<i class="${(l.fn.charCodeAt(k % l.fn.length) * (k + 3)) % 3 ? '' : 'on'}"></i>`).join('')}</span></div>${i < T.i ? '<div class="ph-stamp">FLOWN</div>' : ''}</div>`).join('') + `<button class="ph-btn" data-nav="airport">🧭 Navigate to the airport</button>`;
             break;
         }
         case 'hotels': {
@@ -4732,7 +5124,7 @@ function phRender() {
 function phOnMsg(d) {
     switch (d.act) {
         case 'flights': PH.flights = d; PH.from = d.from; break;
-        case 'trip': PH.trip = d.trip; break;
+        case 'trip': PH.trip = d.trip; if (d.trip && d.trip.now) WC.clockSkew = d.trip.now - Date.now(); break;
         case 'hotels': PH.hotels = d; break;
         case 'players': PH.players = d; break;
         case 'msg': PH.msgs.push(d); if (PH.msgs.length > 200) PH.msgs.shift(); if (!d.mine) { if (!(PH.open && PH.app === 'msgs' && PH.chat === d.from)) { PH.unread++; phBadge(); wcToast(`💬 ${d.from}: ${d.text}`); } } break;
@@ -4746,7 +5138,7 @@ function drawWorldEnvironment() {
     if (WC.scene === 'ext') { if (WC.G) wcDrawGlobe(); else wcDrawExteriorWrapped(); } else wcDrawInterior();
     ctx.restore();
     if (WC.scene === 'ext' && !WC.G) wcCityWelcome(canvas.width, canvas.height);
-    wcIfeDraw();
+    wcIfeTick();
     wcPositionPrompt();                                                   // keep the bubble glued to its building / car
     const now = performance.now(); if (now - wcChipT > 400) { wcChipT = now; wcRenderChip(); }   // shift countdown
 }
@@ -6597,6 +6989,7 @@ if (e.square) {
 
     });
 
+    const wcSvcDrawn = new Set();
     shapeEntities.concat(tankEntities).forEach(en => {
 
         if(!en.inView){ return; }
@@ -6805,6 +7198,7 @@ if (e.square) {
 
         }
 
+        if (en.fl && en.fl.svc && en.id !== myId) { const me2 = gameState.entities.find(q => q.id === myId); if ((me2 && me2.fl && me2.fl.svc === en.fl.svc) || (wcSvcDrawn.has(en.fl.svc))) { ctx.restore(); return; } wcSvcDrawn.add(en.fl.svc); }   // one plane per departure, however many players are on it
         if (en.fl) wcDrawFlightEntity(ctx, rPos, en); else if (en.veh) wcDrawVehicleEntity(ctx, rPos, en); else drawEntityBody(ctx, rPos);
 
         ctx.globalAlpha = 1;
