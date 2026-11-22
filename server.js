@@ -1599,9 +1599,8 @@ getPowerupBulletSpeedMultiplier() {
     update() {
         this.vx *= 0.85; this.vy *= 0.85;
         this.x += this.vx; this.y += this.vy;
-        if (this.room.worldKind === 'exterior') {          // a cylinder east-west, and over a pole you come down the far meridian facing the other way
-            if (this.y < W_POLE_N || this.y > W_POLE_S) { this.y = this.y < W_POLE_N ? 2 * W_POLE_N - this.y : 2 * W_POLE_S - this.y; this.x += W_CIRC / 2; this.vx = -this.vx; this.vy = -this.vy; this.angle += Math.PI; }
-            this.x = wrapX(this.x);
+        if (this.room.worldKind === 'exterior') {          // the ground stays in the land zone, which never reaches the date line; flights fly the sphere
+            if (!this.flight) { this.x = clamp(this.x, W_LAND.x0 - 12000, W_LAND.x1 + 12000); this.y = clamp(this.y, W_LAND.y0 - 12000, W_LAND.y1 + 12000); }
         }
         else {
             const arenaExtent = this.room.mode === 'WORLD' ? (this.room.worldExtent || WORLD_SIZE) : WORLD_SIZE;
@@ -2962,48 +2961,46 @@ const W_BORDER_N = 96;                      // samples of each city's (organic) 
 function wrapDx(d) { d = ((d % W_CIRC) + W_CIRC) % W_CIRC; return d > W_CIRC / 2 ? d - W_CIRC : d; }
 function wrapX(x) { return ((x % W_CIRC) + W_CIRC) % W_CIRC; }
 // ---- the globe -------------------------------------------------------------------------------------------------
-// The map is an equirectangular chart of a sphere: x is longitude (W_CIRC = 360°) and y is latitude. The poles sit
-// beyond the polar seas, W_POLE_PAD past the northern and southern coasts, so pole to pole is half the circumference
-// (one map unit north-south = one unit east-west at the equator). Ground travel uses the chart as it is; flights follow
-// great circles, so long routes bow towards the pole and antipodal-meridian routes (Kaimana Bay → Central City) fly
-// straight over it: you reach the pole heading north and come down the far side heading south.
-const W_POLE_PAD = (W_CIRC / 2 - W_EXTY) / 2;
-const W_POLE_N = -W_POLE_PAD, W_POLE_S = W_EXTY + W_POLE_PAD;
-function wLat(y) { return Math.PI / 2 - (y - W_POLE_N) / (W_CIRC / 2) * Math.PI; }
+// The world is a true sphere of radius W_R (circumference W_CIRC). The land is laid onto it with the Mercator
+// projection, which is conformal: every city keeps its exact shape and street grid, and one chart unit on the ground is
+// cos(latitude) sphere units. The chart (x, y) is only an address book for the ground: x is longitude and y is
+// Mercator latitude (W_YEQ is the equator). Anything that leaves the ground – flights – moves as a 3D unit vector q on
+// the sphere with a tangent heading h, so there is no seam anywhere: not at the date line and not at the poles.
+// Ground entities stay inside the land zone (which never touches the date line), so chart physics never meets a seam.
+const W_R = W_CIRC / (2 * Math.PI), W_YEQ = W_EXTY / 2, W_LATMAX = 85 * Math.PI / 180;
+const FL_SPH = 0.82;                                     // cruise speed on the sphere relative to the chart cruise number
+function wLat(y) { return 2 * Math.atan(Math.exp((W_YEQ - y) / W_R)) - Math.PI / 2; }
 function wLon(x) { return x / W_CIRC * Math.PI * 2; }
-function wYofLat(lat) { return W_POLE_N + (Math.PI / 2 - lat) / Math.PI * (W_CIRC / 2); }
-function wGC(x1, y1, x2, y2) {                       // central angle, length (map units at equator scale) and initial bearing (0 = north, π/2 = east)
-    const p1 = wLat(y1), p2 = wLat(y2), dl = wLon(x2) - wLon(x1);
-    const cc = Math.sin(p1) * Math.sin(p2) + Math.cos(p1) * Math.cos(p2) * Math.cos(dl), c = Math.acos(Math.max(-1, Math.min(1, cc)));
-    const brg = Math.atan2(Math.sin(dl) * Math.cos(p2), Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl));
-    return { c, d: c * W_CIRC / (2 * Math.PI), brg };
+function wYofLat(lat) { lat = Math.max(-W_LATMAX, Math.min(W_LATMAX, lat)); return W_YEQ - W_R * Math.log(Math.tan(Math.PI / 4 + lat / 2)); }
+function wSec(y) { return 1 / Math.cos(wLat(y)); }       // chart units per sphere unit at chart row y
+function wVec(x, y) { const la = wLat(y), lo = wLon(x), c = Math.cos(la); return [c * Math.cos(lo), c * Math.sin(lo), Math.sin(la)]; }
+function wDot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function wCross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+function wNorm(a) { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+function wChart(q) { return { x: wrapX(Math.atan2(q[1], q[0]) / (Math.PI * 2) * W_CIRC), y: wYofLat(Math.asin(Math.max(-1, Math.min(1, q[2])))) }; }
+// local east / north at q (at the pole itself east is undefined: any horizontal direction will do)
+function wEN(q) { const r = Math.hypot(q[0], q[1]); const e = r > 1e-9 ? [-q[1] / r, q[0] / r, 0] : [0, 1, 0]; return { e, n: wCross(q, e) }; }
+// chart angle a (x right, y down = south) <-> tangent unit vector; Mercator is conformal so angles carry over exactly
+function wTan(q, a) { const { e, n } = wEN(q), c = Math.cos(a), s = Math.sin(a); return [c * e[0] - s * n[0], c * e[1] - s * n[1], c * e[2] - s * n[2]]; }
+function wAng(q, h) { const { e, n } = wEN(q); return Math.atan2(-wDot(h, n), wDot(h, e)); }
+function wAngle(a, b) { return Math.atan2(Math.hypot(...wCross(a, b)), wDot(a, b)); }
+function wDistV(a, b) { return wAngle(a, b) * W_R; }    // great-circle distance, sphere units
+function wSlerp(a, b, t) {
+    const c = wAngle(a, b), s = Math.sin(c);
+    if (s < 1e-9) return a.slice();
+    const k1 = Math.sin((1 - t) * c) / s, k2 = Math.sin(t * c) / s;
+    return [a[0] * k1 + b[0] * k2, a[1] * k1 + b[1] * k2, a[2] * k1 + b[2] * k2];
 }
-// Direction on the chart of a heading `brg` at latitude y (east-west stretches by 1/cos(lat) on an equirectangular map).
-function wMapAng(brg, y) { const k = Math.max(0.03, Math.cos(wLat(y))); return Math.atan2(-Math.cos(brg), Math.sin(brg) / k); }
-// The great circle sampled as chart points. Longitude is unwrapped so the line is continuous; going over a pole the
-// line continues past the pole (y beyond W_POLE_N / W_POLE_S) on the antipodal meridian – exactly how a plane flies it.
-function wGCPath(x1, y1, x2, y2, n = 48) {
-    const vec = (x, y) => { const la = wLat(y), lo = wLon(x); return [Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)]; };
-    let a = vec(x1, y1), b = vec(x2, y2), dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    if (dot < -0.999999) b = vec(x2 + 1, y2 + (y2 < (W_POLE_N + W_POLE_S) / 2 ? 1 : -1)), dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];   // antipodes: nudge so the path picks a pole
-    const c = Math.acos(Math.max(-1, Math.min(1, dot))), sc = Math.sin(c) || 1, out = [];
-    let px = null, flip = 0, mirror = 0;
-    for (let i = 0; i <= n; i++) {
-        const t = i / n, k1 = c ? Math.sin((1 - t) * c) / sc : 1 - t, k2 = c ? Math.sin(t * c) / sc : t;
-        const v = [a[0] * k1 + b[0] * k2, a[1] * k1 + b[1] * k2, a[2] * k1 + b[2] * k2];
-        const lat = Math.atan2(v[2], Math.hypot(v[0], v[1])), atPole = Math.hypot(v[0], v[1]) < 1e-7; let x = atPole && px !== null ? px - flip : Math.atan2(v[1], v[0]) / (Math.PI * 2) * W_CIRC, y = wYofLat(lat);
-        if (px !== null) {
-            let dx = x + flip - px; dx -= Math.round(dx / W_CIRC) * W_CIRC;
-            if (Math.abs(dx) > W_CIRC * 0.3) { mirror = mirror ? 0 : (lat > 0 ? 1 : -1); flip += W_CIRC / 2; dx = x + flip - px; dx -= Math.round(dx / W_CIRC) * W_CIRC; }   // over a pole
-            x = px + dx;
-        } else x = x1 + wrapDx(x - x1);
-        px = x;
-        if (mirror > 0) y = 2 * W_POLE_N - y; else if (mirror < 0) y = 2 * W_POLE_S - y;
-        out.push([x, y]);
-    }
-    return out;
+function wGC(x1, y1, x2, y2) {                       // central angle, great-circle length (sphere units) and initial bearing (0 = north, π/2 = east)
+    const a = wVec(x1, y1), b = wVec(x2, y2), c = wAngle(a, b), { e, n } = wEN(a), d = wNorm([b[0] - a[0] * wDot(a, b), b[1] - a[1] * wDot(a, b), b[2] - a[2] * wDot(a, b)]);
+    return { c, d: c * W_R, brg: Math.atan2(wDot(d, e), wDot(d, n)) };
 }
-function wGCMapLen(x1, y1, x2, y2, n = 24) { const P = wGCPath(x1, y1, x2, y2, n); let L = 0; for (let i = 1; i < P.length; i++) L += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]); return L; }
+// Does the great circle between two chart points pass near a pole? 'N', 'S' or ''.
+function wGCPole(x1, y1, x2, y2, deg = 82) {
+    const a = wVec(x1, y1), b = wVec(x2, y2), lim = Math.sin(deg * Math.PI / 180);
+    for (let i = 1; i < 48; i++) { const z = wSlerp(a, b, i / 48)[2]; if (z > lim) return 'N'; if (z < -lim) return 'S'; }
+    return '';
+}
 // Cities: col = time-zone column (CT-6 .. CT+12), row = 0 north / 1 south. `size` is the base radius
 // of the organic outline (the old cities were 18 000-unit squares). The first four keep their order.
 // style: 'cyber' (the capital: neon financial district, skyscrapers, multi-level malls, highest wages and prices),
@@ -4106,38 +4103,33 @@ const FL_TAXI = 5, FL_VR = 26, FL_FINAL = 22000, FL_CLIMB = 14000, FL_DESC = 420
 function flAng(a) { a = ((a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI; return a; }
 function flTurn(a, b, rate) { const d = flAng(b - a); return flAng(a + Math.max(-rate, Math.min(rate, d))); }
 function flightCreate(A, B, cruise) {
-    const g = wGC(A.sb.x, A.sb.y, B.sb.x, B.sb.y), dx = wrapDx(B.sb.x - A.sb.x), dy = B.sb.y - A.sb.y, east = Math.abs(Math.sin(g.brg)) > 0.2 ? Math.sin(g.brg) > 0 : dx >= 0, landDir = dx >= 0 ? 1 : -1;
-    const tdx = landDir > 0 ? B.x0 + 220 : B.x1 - 220, startX = east ? A.endW : A.endE;
+    const g = wGC(A.sb.x, A.sb.y, B.sb.x, B.sb.y), gB = wGC(B.sb.x, B.sb.y, A.sb.x, A.sb.y), dx = wrapDx(B.sb.x - A.sb.x);
+    const east = Math.abs(Math.sin(g.brg)) > 0.2 ? Math.sin(g.brg) > 0 : dx >= 0;
+    const arrE = -Math.sin(gB.brg), landDir = Math.abs(arrE) > 0.25 ? (arrE > 0 ? 1 : -1) : (dx >= 0 ? 1 : -1);   // land in the direction we arrive from
+    const tdx = landDir > 0 ? B.x0 + 220 : B.x1 - 220, startX = east ? A.endW : A.endE, ifx = tdx - landDir * FL_FINAL;
     const cb = Math.cos(g.brg), head = cb > 0.7 ? 'north' : cb < -0.7 ? 'south' : east ? 'east' : 'west';
-    const near = (8 / 180) * (W_CIRC / 2), P = wGCPath(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 48);           // does this stretch of the great circle pass within 8° of a pole?
-    const viaPole = P.some(q => q[1] < W_POLE_N + near) ? 'N' : P.some(q => q[1] > W_POLE_S - near) ? 'S' : null;   // then fly straight over it
     return {
-        from: A.city, to: B.city, dir: east ? 'east' : 'west', head, cruise, dist: Math.round(wGCMapLen(A.sb.x, A.sb.y, B.sb.x, B.sb.y)), poles: 0, remC: null, viaPole,
-        x: A.sb.x, y: A.sb.y, a: 0, v: 0, alt: 0, ph: 'taxi', t: 0, climb: 0, wraps: 0, prevDI: Infinity,
+        from: A.city, to: B.city, dir: east ? 'east' : 'west', head, cruise, cs: cruise * FL_SPH, dist: Math.round(g.d), poles: 0, viaPole: wGCPole(A.sb.x, A.sb.y, B.sb.x, B.sb.y) || null,
+        x: A.sb.x, y: A.sb.y, a: 0, v: 0, vs: 0, q: null, h: null, pz: 0, polar: false, alt: 0, ph: 'taxi', t: 0, climb: 0, wraps: 0, prevDI: Infinity, kA: wSec(A.ry),
         wp: [[A.cb, A.ty], [startX, A.ty], [startX, A.ry]],
         roll: { a: east ? 0 : Math.PI, y: A.ry },
-        land: { tx: tdx, ty: B.ry, dir: landDir, ifx: tdx - landDir * FL_FINAL, exitX: landDir > 0 ? B.endE : B.endW, taxiY: B.ty, cb: B.cb, sb: B.sb }
+        land: { tx: tdx, ty: B.ry, dir: landDir, ifx, exitX: landDir > 0 ? B.endE : B.endW, taxiY: B.ty, cb: B.cb, sb: B.sb, T: wVec(ifx, B.ry), kT: wSec(B.ry) }
     };
 }
-// Distance still to fly (straight line to the approach fix + final + landing roll), for the HUD / ETA.
+// Distance still to fly in true (sphere) units: great circle to the approach fix + final + landing roll, for the HUD / ETA.
 function flightRemaining(f) {
-    const L = f.land;
-    if (f.ph === 'air' && f.remC != null) return f.remC + FL_FINAL + 3000;
-    if (f.ph === 'taxi' || f.ph === 'lineup' || f.ph === 'roll' || f.ph === 'air') return wGCMapLen(f.x, f.y, L.ifx, L.ty, 16) + FL_FINAL + 3000;
-    if (f.ph === 'final') return Math.max(0, -wrapDx(f.x - L.tx) * L.dir) + 3000;
+    const L = f.land, tail = (FL_FINAL + 3000) / L.kT;
+    if (f.ph === 'air' && f.q) return wDistV(f.q, L.T) + tail;
+    if (f.ph === 'taxi' || f.ph === 'lineup' || f.ph === 'roll' || f.ph === 'air') return wDistV(wVec(f.x, f.y), L.T) + tail;
+    if (f.ph === 'final') return (Math.max(0, -wrapDx(f.x - L.tx) * L.dir) + 3000) / L.kT;
     return 0;
 }
-// Advances one tick. Returns 'wrap' when the plane crossed the date line, 'done' when parked at the gate.
+function flightSpeed(f) { return f.ph === 'air' && f.q ? f.vs : f.v / f.land.kT; }   // true ground speed, sphere units per tick
+// Advances one tick. Returns 'wrap' (date line), 'pole' (just passed over a pole) or 'done' (parked at the gate).
 function flightStep(f) {
     f.t++;
     const L = f.land; let ev = null;
-    const move = () => {
-        f.x += Math.cos(f.a) * f.v; f.y += Math.sin(f.a) * f.v;
-        if (f.y < W_POLE_N || f.y > W_POLE_S) {                   // over the pole: down the antipodal meridian, nose now pointing the other way on the chart
-            f.y = f.y < W_POLE_N ? 2 * W_POLE_N - f.y : 2 * W_POLE_S - f.y; f.x = wrapX(f.x + W_CIRC / 2); f.a = flAng(f.a + Math.PI); f.poles++; f.remC = null; ev = 'pole';
-        }
-        if (f.x < 0 || f.x >= W_CIRC) { f.x = wrapX(f.x); f.wraps++; if (ev !== 'pole') ev = 'wrap'; }
-    };
+    const move = () => { f.x = wrapX(f.x + Math.cos(f.a) * f.v); f.y += Math.sin(f.a) * f.v; };   // on the ground / near the runways: the chart is exact
     switch (f.ph) {
         case 'taxi': case 'taxiin': {
             const w = f.wp[0];
@@ -4159,25 +4151,42 @@ function flightStep(f) {
             if (f.v >= FL_VR) f.ph = 'air';
             break;
         case 'air': {
-            f.climb += f.v;
-            // great-circle navigation: steer along the initial bearing of the great circle to the approach fix
-            // (re-solved every tick, so the track curves on the chart); close in, fly the chart directly
+            // Airborne the plane is a point q on the sphere with heading h (unit vectors). Each tick it turns h towards
+            // the great circle to the approach fix and moves along its own great circle; the chart x/y/a are derived from
+            // q and h. Close to the destination (always well inside the land zone) it flies the conformal chart directly.
+            if (!f.q) { f.q = wVec(f.x, f.y); f.h = wTan(f.q, f.a); f.vs = f.v / wSec(f.y); }
+            f.climb += f.vs * f.kA;
             const dxI = wrapDx(L.ifx - f.x), dyI = L.ty - f.y, dLoc = Math.hypot(dxI, dyI);
-            if (f.remC == null || f.t % 20 === 0) f.remC = dLoc < 40000 ? dLoc : wGCMapLen(f.x, f.y, L.ifx, L.ty, 20); else f.remC = Math.max(dLoc, f.remC - f.v);
-            const dI = dLoc, rem = f.remC + FL_FINAL;
+            const rem = wDistV(f.q, L.T) * L.kT + FL_FINAL;                                    // in destination chart units
             f.alt = Math.max(0, Math.min(1, f.climb / FL_CLIMB, rem / FL_DESC));
-            const tv = Math.min(f.cruise, FL_VR + (f.cruise - FL_VR) * Math.max(0, Math.min(1, (rem - 9000) / 38000)));
-            f.v += Math.max(-0.05, Math.min(0.05, tv - f.v));
+            const vr = FL_VR / L.kT, tv = Math.min(f.cs, vr + (f.cs - vr) * Math.max(0, Math.min(1, (rem - 9000) / 38000)));
+            f.vs += Math.max(-0.04, Math.min(0.04, tv - f.vs));
             const rate = f.climb < 2500 ? 0 : rem < 70000 ? 0.012 : 0.02;
-            const nearPole = f.viaPole && Math.min(Math.abs(f.y - W_POLE_N), Math.abs(f.y - W_POLE_S)) < (8 / 180) * (W_CIRC / 2);
-            const want = dLoc < 60000 ? Math.atan2(dyI, dxI)
-                : f.viaPole && !f.poles ? (f.viaPole === 'N' ? -Math.PI / 2 : Math.PI / 2)                    // straight up the meridian to the pole
-                : nearPole ? (f.viaPole === 'N' ? Math.PI / 2 : -Math.PI / 2)                                  // and straight down the far side until the chart behaves again
-                : wMapAng(wGC(f.x, f.y, L.ifx, L.ty).brg, f.y);
-            f.a = flTurn(f.a, want, rate);
-            move();
-            if (dI < 2600 || (dI < 9000 && dI > f.prevDI)) f.ph = 'final';
-            f.prevDI = dI;
+            if (dLoc < 60000) {
+                f.a = flTurn(f.a, Math.atan2(dyI, dxI), rate);
+                f.v = f.vs * wSec(f.y); move();
+                f.q = wVec(f.x, f.y); f.h = wTan(f.q, f.a);
+            } else {
+                const q = f.q, T = L.T, qt = wDot(q, T);
+                let d = [T[0] - q[0] * qt, T[1] - q[1] * qt, T[2] - q[2] * qt];
+                d = Math.hypot(d[0], d[1], d[2]) < 1e-7 ? wEN(q).n : wNorm(d);                     // dead antipode: any way works, go north
+                const s = Math.atan2(wDot(q, wCross(f.h, d)), wDot(f.h, d)), tr = Math.max(-rate, Math.min(rate, s));
+                const qh = wCross(q, f.h), ct = Math.cos(tr), st = Math.sin(tr);
+                const h = [f.h[0] * ct + qh[0] * st, f.h[1] * ct + qh[1] * st, f.h[2] * ct + qh[2] * st];
+                const th = f.vs / W_R, c = Math.cos(th), sn = Math.sin(th);                         // along our own great circle
+                const nq = wNorm([q[0] * c + h[0] * sn, q[1] * c + h[1] * sn, q[2] * c + h[2] * sn]);
+                let nh = [h[0] * c - q[0] * sn, h[1] * c - q[1] * sn, h[2] * c - q[2] * sn]; const r = wDot(nh, nq);
+                nh = wNorm([nh[0] - nq[0] * r, nh[1] - nq[1] * r, nh[2] - nq[2] * r]);
+                f.q = nq; f.h = nh;
+                const p = wChart(nq), ox = f.x; f.x = p.x; f.y = p.y; f.a = wAng(nq, nh); f.v = f.vs * Math.min(8, wSec(f.y));
+                if (Math.abs(p.x - ox) > W_CIRC * 0.75) { f.wraps++; f.wrapEast = p.x < ox; ev = 'wrap'; }
+            }
+            const az = Math.abs(f.q[2]);
+            if (az > 0.9903 && az < f.pz && !f.polar) { f.polar = true; f.poles++; f.poleKm = Math.round((Math.PI / 2 - Math.asin(f.pz)) * W_R / 1000); ev = 'pole'; }   // just passed closest to a pole (within 8°)
+            if (az < 0.985) f.polar = false;
+            f.pz = az;
+            if (dLoc < 2600 || (dLoc < 9000 && dLoc > f.prevDI)) { f.ph = 'final'; f.q = f.h = null; f.v = f.vs * wSec(f.y); }
+            f.prevDI = dLoc;
             break;
         }
         case 'final': {
@@ -5047,6 +5056,7 @@ function worldSpawnNewlyOrAfterDeath(client) {
 function worldViewScale(p) { return Math.max(1, (1 + ((p.level || 1) - 1) * 0.011) * (p.flight ? 1.4 + 1.6 * p.flight.alt : p.vehicle ? 1.5 : 1) * (p.getPowerupActive('fov') ? 1.3 : 1)); }
 function worldStreamChunks(client, force) {
     const w = client.world, p = client.player; if (!w || !p || w.scene !== 'ext' || !WL) return;
+    if (Math.abs(p.y - W_YEQ) > W_EXTY * 0.62) return;                     // out over the polar oceans: there is nothing to stream
     const NX = Math.round(W_CIRC / W_CHUNK), cx = Math.floor(wrapX(p.x) / W_CHUNK) % NX, cy = clamp(Math.floor(p.y / W_CHUNK), 0, W_NCH - 1);
     const vs = worldViewScale(p), R = vs > 2.2 ? 3 : vs > 1.35 ? 2 : 1;
     // forget chunks far behind (the client drops them too), so long flights don't pile up memory on either side
@@ -5061,7 +5071,7 @@ function worldStreamChunks(client, force) {
 function worldSendStatic(client) {
     const bld = b => b && { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h, door: b.door };
     sendWorld(client, 'world_static', {
-        poleN: W_POLE_N, poleS: W_POLE_S, cultures: W_CULTURES, dayMs: WORLD_DAY_MS,
+        globe: { R: W_R, yEq: W_YEQ, latMax: W_LATMAX, sph: FL_SPH }, cultures: W_CULTURES, dayMs: WORLD_DAY_MS,
         air: { airlines: AIRLINES, aircraft: AIRCRAFT, legs: airNet().legs.map(l => ({ al: l.al, ac: l.ac, fn: l.fn, from: l.from, to: l.to, mins: l.mins, per: l.per, off: l.off })) },
         center: W_CX, centerY: W_CY, extent: W_CIRC, extentY: W_EXTY, circ: W_CIRC, gap: W_GAP, land: W_LAND, chunk: W_CHUNK, nch: W_NCH, roads: WL.allRoads,
         cities: W_CITIES.map(c => ({ id: c.id, name: c.name, code: c.code, cx: c.cx, cy: c.cy, tz: c.tz, theme: c.theme, style: c.style, culture: c.culture, toll: c.toll, home: !!c.home, size: c.size, border: c.border, bp: c.bp })),
@@ -5196,21 +5206,21 @@ function airHash(str) { let h = 2166136261; for (let i = 0; i < str.length; i++)
 function airNet() {
     if (AIR_NET) return AIR_NET;
     const legs = [], from = new Map(), seen = new Set(), ap = c => WL.airportByCity.get(c), city = id => W_CITIES.find(c => c.id === id);
-    const len = (a, b) => { const A = ap(a), B = ap(b); return wGCMapLen(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 32); };
+    const len = (a, b) => { const A = ap(a), B = ap(b); return wGC(A.sb.x, A.sb.y, B.sb.x, B.sb.y).d; };     // true great-circle distance
     const add = (al, a, b, ac) => {
         for (const [x, y] of [[a, b], [b, a]]) {
             const k = al + x + '>' + y; if (x === y || seen.has(k) || !ap(x) || !ap(y)) continue; seen.add(k);
             const L0 = len(x, y), AL = AIRLINES[al], h = airHash(k), mul = AL.kind === 'budget' ? 0.62 : AL.kind === 'regional' ? 0.85 : 1;
-            const fare = Math.round((30 + L0 / 7000) * mul), per = (ac === 'wide' ? 9 : ac === 'prop' ? 7 : 6) * 60000;
-            const A = ap(x), B = ap(y), near = (8 / 180) * (W_CIRC / 2), P = wGCPath(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 48), pole = P.some(q => q[1] < W_POLE_N + near) ? 'N' : P.some(q => q[1] > W_POLE_S - near) ? 'S' : '';
-            const leg = { al, ac, pole, fn: al + (100 + h % 880), from: x, to: y, len: Math.round(L0), mins: Math.max(1, Math.round((L0 / (PLANE_CRUISE * AIRCRAFT[ac].speed) + 2500) / 360) / 10), fare, fareJ: Math.round(fare * 2.8 + 60), per, off: h % per };
+            const fare = Math.round((30 + L0 / 6000) * mul), per = (ac === 'wide' ? 9 : ac === 'prop' ? 7 : 6) * 60000;
+            const A = ap(x), B = ap(y), pole = wGCPole(A.sb.x, A.sb.y, B.sb.x, B.sb.y);
+            const leg = { al, ac, pole, fn: al + (100 + h % 880), from: x, to: y, len: Math.round(L0), mins: Math.max(1, Math.round((L0 / (PLANE_CRUISE * FL_SPH * AIRCRAFT[ac].speed) + 2500) / 360) / 10), fare, fareJ: Math.round(fare * 2.8 + 60), per, off: h % per };
             legs.push(leg); (from.get(x) || from.set(x, []).get(x)).push(leg);
         }
     };
     const hubs = Object.values(AIR_HUB);
     for (const [cu, hub] of Object.entries(AIR_HUB)) {
         const al = AIR_FLAG[cu];
-        for (const h2 of hubs) if (h2 !== hub) add(al, hub, h2, len(hub, h2) > 560000 ? 'wide' : 'narrow');
+        for (const h2 of hubs) if (h2 !== hub) add(al, hub, h2, len(hub, h2) > 600000 ? 'wide' : 'narrow');
         for (const c of W_CITIES) if (c.culture === cu && c.id !== hub) add(al, hub, c.id, airSmall(c) ? 'prop' : 'narrow');
     }
     for (const c of W_CITIES) if (airSmall(c)) {                 // Prairie Link: each small town to its nearest airport in another region
@@ -5283,7 +5293,7 @@ function worldBoardFlight(client, A, leg) {
     const fromCity = W_CITIES.find(c => c.id === A.city), toCity = W_CITIES.find(c => c.id === B.city), it = w.itin, last = !it || it.i >= it.legs.length - 1;
     worldNotice(client, `${AL.name} ${leg.fn} · ${A.code} → ${B.code} (${toCity.name}) · ${ac.name}${f.viaPole ? ` · over the ${f.viaPole === 'N' ? 'North' : 'South'} Pole` : ''}. ${f.cls === 'J' ? 'Welcome to Business – the menu is on us. ' : ''}Taxiing to the runway.`, { level: 'good' });
     w.flightInfo = { from: A.city, to: B.city, fromName: fromCity.name, toName: toCity.name, fromCode: A.code, toCode: B.code, dir: f.head, tz: toCity.tz, fromTz: fromCity.tz, total: flightRemaining(f), dist: f.dist,
-        long: leg.ac === 'wide' || f.dist > W_GAP * 1.2 ? 1 : 0, east: f.dir === 'east' ? 1 : 0, al: leg.al, alName: AL.name, fn: leg.fn, ac: leg.ac, acName: ac.name, cls: f.cls, pole: f.viaPole || '',
+        long: leg.ac === 'wide' || f.dist > W_GAP * 0.9 ? 1 : 0, east: f.dir === 'east' ? 1 : 0, al: leg.al, alName: AL.name, fn: leg.fn, ac: leg.ac, acName: ac.name, cls: f.cls, pole: f.viaPole || '',
         next: !last ? (() => { const n = it.legs[it.i + 1]; return `${AIRLINES[n.al].name} ${n.fn} to ${WL.airportByCity.get(n.to).code}`; })() : '' };
     worldPushFlight(client);
     worldPushState(client);
@@ -5291,16 +5301,17 @@ function worldBoardFlight(client, A, leg) {
 function worldPushFlight(client) {
     const w = client.world, f = client.player?.flight;
     if (!w || !f || !w.flightInfo) { sendWorld(client, 'world_flight', { f: null }); return; }
-    const rem = flightRemaining(f), sp = Math.max(FL_VR, f.ph === 'air' ? f.v : FL_VR) * 60;
-    sendWorld(client, 'world_flight', { f: { ...w.flightInfo, ph: f.ph, rem: Math.round(rem), eta: Math.round(rem / sp + 25), alt: Math.round(f.alt * 100) / 100, kmh: Math.round(f.v * 60 * 3.6 / 10) } });
+    const rem = flightRemaining(f), gs = flightSpeed(f), sp = Math.max(FL_VR / f.land.kT, f.ph === 'air' ? gs : 0) * 60;
+    sendWorld(client, 'world_flight', { f: { ...w.flightInfo, ph: f.ph, rem: Math.round(rem), eta: Math.round(rem / sp + 25), alt: Math.round(f.alt * 100) / 100, kmh: Math.round(gs * 60 * 3.6 / 10) } });
 }
 function worldStepFlight(e) {
     const f = e.flight, ev = flightStep(f);
     e.x = f.x; e.y = f.y; e.vx = 0; e.vy = 0;
     const c = e.room.clients.find(q => q.player === e);
-    if (ev === 'pole' && c && c.world && c.world.flightInfo) { c.world.flightInfo.dir = f.y < W_EXTY / 2 ? 'south' : 'north'; worldPushFlight(c); }
-    if (ev === 'pole' && c) worldNotice(c, `🧭 Over the ${f.y < W_EXTY / 2 ? 'North' : 'South'} Pole – every time zone meets here. You're heading ${f.y < W_EXTY / 2 ? 'south' : 'north'} now, down the far side of the world.`, { level: 'warn' });
-    if (ev === 'wrap' && c) worldNotice(c, f.dir === 'east' ? '✈ Crossing the International Date Line eastbound – calendars go back one day.' : '✈ Crossing the International Date Line westbound – calendars jump forward one day.', { level: 'warn' });
+    const north = e.flight && e.flight.q ? e.flight.q[2] > 0 : f.y < W_YEQ;
+    if (ev === 'pole' && c && c.world && c.world.flightInfo) { c.world.flightInfo.dir = north ? 'south' : 'north'; worldPushFlight(c); }
+    if (ev === 'pole' && c) worldNotice(c, `🧭 ${f.poleKm < 25 ? `Over the ${north ? 'North' : 'South'} Pole` : `Passing the ${north ? 'North' : 'South'} Pole, ${f.poleKm} km off the wing`} – every time zone meets there. You're heading ${north ? 'south' : 'north'} now, down the far side of the world.`, { level: 'warn' });
+    if (ev === 'wrap' && c) worldNotice(c, f.wrapEast ? '✈ Crossing the International Date Line eastbound – calendars go back one day.' : '✈ Crossing the International Date Line westbound – calendars jump forward one day.', { level: 'warn' });
     if (ev === 'done') worldEndFlight(e, c);
 }
 function worldEndFlight(e, client) {
@@ -6609,6 +6620,7 @@ setInterval(() => {
 
                 let nearby = room.grid.getNearby(focalX, focalY, VD);
                 let processedEntities = new Set();
+                const vq = room.worldKind === 'exterior' && c.player && c.player.flight && c.player.flight.q, vk = vq ? Math.min(8, wSec(focalY)) : 1;   // flying: compare on the sphere
 
                 for (let i = 0; i < room.entities.length; i++) {
                     let e = room.entities[i];
@@ -6617,6 +6629,7 @@ setInterval(() => {
                         processedEntities.add(e.id);
                         let isVisible = Math.abs(room.worldKind === 'exterior' ? wrapDx(e.x - focalX) : e.x - focalX) < VD && 
                                         Math.abs(e.y - focalY) < VDY;
+                        if (vq && e.flight && e.flight.q) isVisible = wDistV(vq, e.flight.q) * vk < VD;     // chart x/y mean nothing near a pole
 
                         // Invisible Manager: hide coordinates from everyone except the player themselves.
                         // This prevents scripted clients from tracking the manager's position.
@@ -6635,7 +6648,7 @@ setInterval(() => {
                             opacity: (e.opacity !== undefined) ? Math.round(e.opacity * 100) / 100 : 1,
                             powerups: getActivePowerups(e),
                             veh: e.vehicle ? { a: Math.round(e.vehicle.a * 100) / 100, v: Math.round(e.vehicle.v * 10) / 10, m: e.vehicle.model } : e.taxiRide ? { a: Math.round(e.taxiRide.a * 100) / 100, v: Math.round(e.taxiRide.v * 10) / 10, m: 'taxi' } : undefined,
-                            fl: e.flight ? { a: Math.round(e.flight.a * 1000) / 1000, alt: Math.round(e.flight.alt * 1000) / 1000, v: Math.round(e.flight.v * 10) / 10, liv: e.flight.liv, al: e.flight.al, ac: e.flight.ac } : undefined
+                            fl: e.flight ? { a: Math.round(e.flight.a * 1000) / 1000, alt: Math.round(e.flight.alt * 1000) / 1000, v: Math.round(e.flight.v * 10) / 10, liv: e.flight.liv, al: e.flight.al, ac: e.flight.ac, vs: e.flight.q ? Math.round(e.flight.vs * 10) / 10 : undefined, q: e.flight.q ? e.flight.q.map(v => Math.round(v * 1e6) / 1e6) : undefined, h: e.flight.h ? e.flight.h.map(v => Math.round(v * 1e6) / 1e6) : undefined } : undefined
                         });
                     }
                 }
