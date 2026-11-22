@@ -2110,11 +2110,11 @@ function enterWorldMode() {
     pendingWorldJoin = true; worldSend('world_join');
 }
 function wcExtent() { return WC.scene === 'ext' ? WC.extent : (WC.interior?.ext || 1800); }
-// The world wraps east-west at the date line: when a plane crosses it the server x jumps by the circumference.
+// The chart wraps east-west at the date line: when a plane crosses it the chart x jumps by the circumference.
 // Shift the interpolated position (and the camera, for our own plane) by the same amount so nothing sweeps across the map.
 function wcWrapFix(rPos, en) {
-    if (!isWorldMode || !WC.circ || en.x == null || rPos.renderX == null) return;
-    if (wcPoleFix(rPos, en)) return;
+    if (!isWorldMode || !WC.circ || en.x == null || rPos.renderX == null || WC.G) return;
+    if (rPos._snap) { rPos._snap = 0; rPos.renderX = en.x; rPos.renderY = en.y; return; }   // just back from the globe view
     const d = en.x - rPos.renderX;
     if (Math.abs(d) > WC.circ / 2) { const sh = Math.sign(d) * WC.circ; rPos.renderX += sh; if (en.id === myId) { camera.x += sh; } }
 }
@@ -2134,7 +2134,7 @@ function handleWorldMessage(d) {
     switch (d.type) {
         case 'world_static':
             WC.inflight = d.inflight || {};
-            Object.assign(WC, { poleN: d.poleN, poleS: d.poleS, cultures: d.cultures, air: d.air, dayMs: d.dayMs, center: d.center, centerY: d.centerY, extent: d.extent, extentY: d.extentY, circ: d.circ, gap: d.gap, land: d.land, airports: d.airports || [], chunk: d.chunk, nch: d.nch, roads: d.roads, cities: d.cities, cars: d.cars, carColors: d.carColors, companies: d.companies, spawn: d.spawn, bank: d.bank, dealer: d.dealer, fireMs: d.fireMs, taskMs: d.taskMs }); WC.cityById = new Map((d.cities || []).map(c => [c.id, c])); WC._aiPaths = new Map(); WC._dep = null; phEl();
+            Object.assign(WC, { globe: d.globe, cultures: d.cultures, air: d.air, dayMs: d.dayMs, center: d.center, centerY: d.centerY, extent: d.extent, extentY: d.extentY, circ: d.circ, gap: d.gap, land: d.land, airports: d.airports || [], chunk: d.chunk, nch: d.nch, roads: d.roads, cities: d.cities, cars: d.cars, carColors: d.carColors, companies: d.companies, spawn: d.spawn, bank: d.bank, dealer: d.dealer, fireMs: d.fireMs, taskMs: d.taskMs }); WC.cityById = new Map((d.cities || []).map(c => [c.id, c])); WC._aiPaths = new Map(); WC._dep = null; phEl();
             wcBuildGates();
             beginWorldMode(); if (!wcMapEl) wcMapBuild(); return true;
         case 'world_houses': WC.houses = new Map(d.list.map(([h, o, m]) => [h, { o, m }])); return true;
@@ -2179,7 +2179,7 @@ function handleWorldMessage(d) {
 function wcIngestChunk(c) {
     WC.chunks.set(c.cx + c.cy * WC.nch, c);
     if (WC.scene === 'ext' && WC.chunks.size > 260) {                         // drop chunks far behind (the server forgets them first and re-sends on return)
-        const kx = Math.floor((camera.x + canvas.width * fov / 2) / WC.chunk), ky = Math.floor((camera.y + canvas.height * fov / 2) / WC.chunk);
+        const cc = wcCamC(), kx = Math.floor(cc[0] / WC.chunk), ky = Math.floor(cc[1] / WC.chunk);
         const NX = Math.round(WC.circ / WC.chunk);
         for (const [k, ch] of WC.chunks) { const ddx = ((ch.cx - kx) % NX + NX) % NX; if (Math.max(Math.min(ddx, NX - ddx), Math.abs(ch.cy - ky)) > 10) { WC.chunks.delete(k); for (const b of ch.buildings) WC.allBld.delete(b.id); } }
     }
@@ -3088,7 +3088,6 @@ function wcDrawWater(s, W, H) {
     for (const [x0, y0, x1, y1] of [[B, B, E, t], [B, u, E, E], [B, t, a, u], [z, t, E, u]]) rect(x0, y0, x1, y1, '#2b6a94');
     for (const [x0, y0, x1, y1] of [[B, t - 90 + wob, E, t], [B, u, E, u + 90 - wob], [a - 90 + wob, t, a, u], [z, t, z + 90 - wob, u]]) rect(x0, y0, x1, y1, 'rgba(120,200,225,.45)');
     for (const [x0, y0, x1, y1] of [[a, t, z, t + sand], [a, u - sand, z, u], [a, t, a + sand, u], [z - sand, t, z, u]]) rect(x0, y0, x1, y1, 'rgba(222,205,150,.55)');
-    wcDrawPolar(s, W, H);
     // open ocean: a few slow swells so the long Pacific crossing isn't a flat blue screen
     if (camera.x + W * fov < a || camera.x > z || camera.y + H * fov < t || camera.y > u) {
         const now = Date.now() / 1000, CELL = 900; ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = Math.max(1, 3 * s); ctx.beginPath();
@@ -3199,7 +3198,7 @@ function wcMapBuild() {
     const grid = document.createElement('div'); grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px'; side.appendChild(grid);
     for (const q of WC.cities) { const b = mk(`📍 ${q.name} ${wcTzLabel(q.tz)}`, () => wcMapFocus(q)); b.style.fontSize = '12px'; b.style.padding = '7px 8px'; grid.appendChild(b); }
     wcMapEl = { btn, ov, cv, view };
-    setInterval(() => { const bx = camera.x + canvas.width * fov / 2, by = camera.y + canvas.height * fov / 2, hc = wcCityHere(bx, by); const Ld = WC.land, sea = Ld && (bx < Ld.x0 || bx > Ld.x1 || by < Ld.y0 || by > Ld.y1); btn.textContent = `🗺 Map · ${hc ? hc.name : sea ? 'Open ocean' : 'Open road'} · ${wcClock(bx)}`; btn.style.display = isWorldMode && WC.scene === 'ext' ? 'block' : 'none'; if (!(isWorldMode && WC.scene === 'ext')) ov.style.display = 'none'; }, 400);
+    setInterval(() => { if (!isWorldMode || !WC.circ) return; const [bx, by] = wcCamC(), hc = wcCityHere(bx, by); const Ld = WC.land, sea = Ld && (bx < Ld.x0 || bx > Ld.x1 || by < Ld.y0 || by > Ld.y1); btn.textContent = `🗺 Map · ${hc ? hc.name : sea ? 'Open ocean' : 'Open road'} · ${wcClock(bx)}`; btn.style.display = isWorldMode && WC.scene === 'ext' ? 'block' : 'none'; if (!(isWorldMode && WC.scene === 'ext')) ov.style.display = 'none'; }, 400);
 }
 function wcMapFocus(city) {
     const v = wcMapEl.view;
@@ -3215,7 +3214,7 @@ function wcMapToggle(on, mode) {
     const hint = wcMapEl.ov.querySelector('#wc-map-side div:nth-child(2)'); if (hint) hint.textContent = wcMapEl.taxi ? '🚕 Taxi mode: pick a place below, or click the map then “Taxi to selected point”.' : 'Click anywhere to set a destination.';
     if (on) {
         const sz = Math.floor(Math.min(innerWidth - 260, innerHeight - 40, 820)); wcMapEl.cv.width = wcMapEl.cv.height = Math.max(300, sz); wcMapEl.cv.style.width = wcMapEl.cv.style.height = wcMapEl.cv.width + 'px';
-        const px = camera.x + canvas.width * fov / 2, py = camera.y + canvas.height * fov / 2;
+        const [px, py] = wcCamC();
         wcMapFocus(wcCityHere(px, py)); worldSend('world_map');
     }
 }
@@ -3230,10 +3229,11 @@ function wcMapDraw() {
     for (const o of offs) {
         const MX = x => (x + o - v.x + v.half) * k;
         g.fillStyle = '#7fae66'; g.fillRect(MX(Ld.x0), MY(Ld.y0), S(Ld.x1 - Ld.x0), S(Ld.y1 - Ld.y0));
-        if (WC.poleN != null && o === offs[0]) {                                  // polar caps, and nothing beyond the poles on the chart
-            const R = (24 / 180) * (CIRC / 2); g.fillStyle = '#e3edf2'; g.fillRect(0, MY(WC.poleN), N, S(R)); g.fillRect(0, MY(WC.poleS - R), N, S(R));
-            g.fillStyle = '#0b1622'; g.fillRect(0, 0, N, Math.max(0, MY(WC.poleN))); g.fillRect(0, MY(WC.poleS), N, N);
-            g.fillStyle = '#c0392b'; g.font = 'bold 12px sans-serif'; g.textAlign = 'center'; g.fillText('NORTH POLE · 90°N', N / 2, MY(WC.poleN) + 15); g.fillText('SOUTH POLE · 90°S', N / 2, MY(WC.poleS) - 7);
+        if (WC.globe && o === offs[0]) {                                     // Mercator: sea ice beyond ~66°, the chart stops at 85° (the poles are at infinity)
+            const yN = wcYofLat(WC_LATMAX), yS = wcYofLat(-WC_LATMAX), iN = wcYofLat(66 * Math.PI / 180), iS = wcYofLat(-66 * Math.PI / 180);
+            g.fillStyle = '#e3edf2'; g.fillRect(0, MY(yN), N, MY(iN) - MY(yN)); g.fillRect(0, MY(iS), N, MY(yS) - MY(iS));
+            g.fillStyle = '#0b1622'; g.fillRect(0, 0, N, Math.max(0, MY(yN))); g.fillRect(0, MY(yS), N, N);
+            g.fillStyle = '#c0392b'; g.font = 'bold 12px sans-serif'; g.textAlign = 'center'; g.fillText('85°N · NORTH POLE BEYOND', N / 2, MY(yN) + 15); g.fillText('85°S · SOUTH POLE BEYOND', N / 2, MY(yS) - 7);
         }
         // time-zone bands (each column is 6 hours)
         if (WC.gap) for (let c = 0; c < Math.round(CIRC / WC.gap); c++) {
@@ -3281,12 +3281,12 @@ function wcMapDraw() {
         if (n && n.route) { g.strokeStyle = '#18a0ff'; g.lineWidth = 3; g.beginPath(); n.route.pts.forEach((p, i) => i ? g.lineTo(MX(p[0]), MY(p[1])) : g.moveTo(MX(p[0]), MY(p[1]))); g.stroke(); }
         const pin = wcMapSel || (n && { x: n.x, y: n.y, label: n.label });
         if (pin) { g.font = '22px sans-serif'; g.fillText('📍', MX(pin.x), MY(pin.y)); g.font = 'bold 13px sans-serif'; g.fillStyle = '#000'; g.fillText(pin.label || '', MX(pin.x) + 1, MY(pin.y) - 22); g.fillStyle = '#fff'; g.fillText(pin.label || '', MX(pin.x), MY(pin.y) - 23); }
-        const px = camera.x + canvas.width * fov / 2, py = camera.y + canvas.height * fov / 2;
+        const [px, py] = wcCamC();
         // scheduled air traffic, and your own flight's great circle (over the pole it leaves the top and comes back on the far side)
         if (WC.air) { const now = Date.now(); for (const [l, q] of wcAiFlights(now)) { const P = wcAiPos(l, q); if (!P) continue; const x = MX(P.x), y = MY(P.y); if (x < -5 || y < -5 || x > N + 5 || y > N + 5) continue; g.save(); g.translate(x, y); g.rotate(P.a); g.fillStyle = wcAirline(l.al).c1; g.beginPath(); g.moveTo(6, 0); g.lineTo(-4, -4); g.lineTo(-2, 0); g.lineTo(-4, 4); g.closePath(); g.fill(); g.restore(); } }
         if (wcFlight) {
             const A = WC.airports.find(a => a.city === wcFlight.from), B = WC.airports.find(a => a.city === wcFlight.to);
-            if (A && B) { g.save(); g.strokeStyle = '#ffd23d'; g.lineWidth = 2.5; g.setLineDash([8, 5]); g.beginPath(); let lx = null; for (const [x0, y0] of wcGCPath(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 120)) { const q = wcUnfold(x0, y0), X1 = MX(q[0] - Math.round((q[0] - x0) / CIRC) * CIRC * 0 + 0), Y1 = MY(q[1]); if (lx === null || Math.abs(X1 - lx) > N / 3) g.moveTo(X1, Y1); else g.lineTo(X1, Y1); lx = X1; } g.stroke(); g.restore(); }
+            if (A && B) { g.save(); g.strokeStyle = '#ffd23d'; g.lineWidth = 2.5; g.setLineDash([8, 5]); g.beginPath(); for (const seg of wcGCChart(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 160)) seg.forEach(([x0, y0], i) => { const X1 = MX(x0), Y1 = MY(y0); i ? g.lineTo(X1, Y1) : g.moveTo(X1, Y1); }); g.stroke(); g.restore(); }
         }
         g.fillStyle = '#fff'; g.strokeStyle = '#e22'; g.lineWidth = 3; g.beginPath(); g.arc(MX(px), MY(py), 6, 0, 7); g.fill(); g.stroke();
     }
@@ -3296,7 +3296,7 @@ function wcDayPhase(px) { return (((Date.now() % WC_DAY_MS) / WC_DAY_MS + wcWrap
 function wcTzAt(px) { const c = wcCityHere(px, camera.y + canvas.height * fov / 2); if (c) return c.tz; let tz = Math.round(wcWrapD(px - WC.center) / (WC.gap || 450000)) * 6; if (tz <= -12) tz += 24; return tz; }
 function wcClock(px) { const tz = wcTzAt(px), h = ((6 + (Date.now() % WC_DAY_MS) / WC_DAY_MS * 24 + tz) % 24 + 24) % 24; return String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60)).padStart(2, '0') + ' ' + wcTzLabel(tz); }
 function wcCityHere(px, py) { return (WC.cities || []).find(q => wcInCity(q, px, py)) || null; }
-function wcNightLevel() { const t = wcDayPhase(camera.x + canvas.width * fov / 2), sun = Math.sin(t * Math.PI * 2); return Math.max(0, Math.min(1, (0.2 - sun) / 0.7)); }
+function wcNightLevel() { const t = wcDayPhase(wcCamC()[0]), sun = Math.sin(t * Math.PI * 2); return Math.max(0, Math.min(1, (0.2 - sun) / 0.7)); }
 function wcWeather(px, py) {                                             // 0..1 strength, fading in over 3 km outside the city limit
     const out = { rain: 0, fog: 0, heat: 0, petals: 0 };
     for (const q of WC.cities || []) {
@@ -3310,7 +3310,7 @@ function wcWeather(px, py) {                                             // 0..1
     return out;
 }
 function wcDrawDayNight(W, H) {
-    const px = camera.x + W * fov / 2, py = camera.y + H * fov / 2, t = wcDayPhase(px), sun = Math.sin(t * Math.PI * 2);
+    const [px, py] = wcCamC(), t = wcDayPhase(px), sun = Math.sin(t * Math.PI * 2);
     const night = Math.max(0, Math.min(1, (0.2 - sun) / 0.7)) * 0.58, dusk = Math.max(0, 0.3 - Math.abs(sun)) / 0.3 * 0.16, wx = wcWeather(px, py);
     const layers = [];                                                     // composite the tints into ONE full-screen fill (each fill is a full pass over every pixel)
     if (dusk > 0.005) layers.push([255, 140, 60, dusk]);
@@ -4141,32 +4141,43 @@ wcBlurGuard(ctx);
 })();
 function wcTexAvg(t) { try { const c = document.createElement('canvas'); c.width = c.height = 1; const g = c.getContext('2d'); g.drawImage(t.canvas, 0, 0, 1, 1); const d = g.getImageData(0, 0, 1, 1).data; return `rgb(${d[0]},${d[1]},${d[2]})`; } catch (e) { return '#6f8f55'; } }
 
-// ---- the globe (client copies of the server's chart maths) ----
-function wcLat(y) { return Math.PI / 2 - (y - WC.poleN) / (WC.circ / 2) * Math.PI; }
-function wcYofLat(lat) { return WC.poleN + (Math.PI / 2 - lat) / Math.PI * (WC.circ / 2); }
-function wcGCPath(x1, y1, x2, y2, n = 64) {
-    const C = WC.circ, PN = WC.poleN, PS = WC.poleS;
-    const vec = (x, y) => { const la = wcLat(y), lo = x / C * Math.PI * 2; return [Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)]; };
-    let a = vec(x1, y1), b = vec(x2, y2), dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    if (dot < -0.999999) { b = vec(x2 + 1, y2 + (y2 < (PN + PS) / 2 ? 1 : -1)); dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
-    const c = Math.acos(Math.max(-1, Math.min(1, dot))), sc = Math.sin(c) || 1, out = [];
-    let px = null, flip = 0, mirror = 0;
+// ---- the globe (client copies of the server's sphere maths) ----
+// The world is a sphere; the land sits on it in the Mercator projection (conformal, so every city keeps its shape).
+// Near land the chart is drawn flat as before. Over the far-north and far-south oceans the camera switches to a true
+// local view of the sphere (azimuthal, centred on you), so the poles are just places you fly over.
+function wcR() { return WC.globe ? WC.globe.R : (WC.circ || 2700000) / (2 * Math.PI); }
+function wcYeq() { return WC.globe ? WC.globe.yEq : (WC.extentY || 826200) / 2; }
+const WC_LATMAX = 85 * Math.PI / 180;
+function wcLat(y) { return 2 * Math.atan(Math.exp((wcYeq() - y) / wcR())) - Math.PI / 2; }
+function wcYofLat(lat) { lat = Math.max(-WC_LATMAX, Math.min(WC_LATMAX, lat)); return wcYeq() - wcR() * Math.log(Math.tan(Math.PI / 4 + lat / 2)); }
+function wcVec(x, y) { const la = wcLat(y), lo = x / WC.circ * Math.PI * 2, c = Math.cos(la); return [c * Math.cos(lo), c * Math.sin(lo), Math.sin(la)]; }
+function wcVecLL(la, lo) { const c = Math.cos(la); return [c * Math.cos(lo), c * Math.sin(lo), Math.sin(la)]; }
+function wcDot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function wcCross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+function wcNorm(a) { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+function wcChart(q) { const C = WC.circ; return [((Math.atan2(q[1], q[0]) / (Math.PI * 2) * C) % C + C) % C, wcYofLat(Math.asin(Math.max(-1, Math.min(1, q[2]))))]; }
+function wcEN(q) { const r = Math.hypot(q[0], q[1]); const e = r > 1e-9 ? [-q[1] / r, q[0] / r, 0] : [0, 1, 0]; return { e, n: wcCross(q, e) }; }
+function wcAngle(a, b) { return Math.atan2(Math.hypot(...wcCross(a, b)), wcDot(a, b)); }
+function wcSlerp(a, b, t) { const c = wcAngle(a, b), s = Math.sin(c); if (s < 1e-9) return t < 0.5 ? a.slice() : b.slice(); const k1 = Math.sin((1 - t) * c) / s, k2 = Math.sin(t * c) / s; return [a[0] * k1 + b[0] * k2, a[1] * k1 + b[1] * k2, a[2] * k1 + b[2] * k2]; }
+function wcToward(q, b) { const d = wcDot(q, b), v = [b[0] - q[0] * d, b[1] - q[1] * d, b[2] - q[2] * d]; return Math.hypot(...v) < 1e-9 ? wcEN(q).n : wcNorm(v); }
+function wcChartAng(q, h) { const { e, n } = wcEN(q); return Math.atan2(-wcDot(h, n), wcDot(h, e)); }
+// A great circle between two chart points as chart polylines: x is unwrapped so the line is continuous, and it is cut
+// where it goes over a pole (on a Mercator chart it leaves the top edge and comes back at the opposite longitude).
+function wcGCChart(x1, y1, x2, y2, n = 96) {
+    const a = wcVec(x1, y1), b = wcVec(x2, y2), C = WC.circ, out = [[]]; let px = null;
     for (let i = 0; i <= n; i++) {
-        const t = i / n, k1 = c ? Math.sin((1 - t) * c) / sc : 1 - t, k2 = c ? Math.sin(t * c) / sc : t;
-        const v = [a[0] * k1 + b[0] * k2, a[1] * k1 + b[1] * k2, a[2] * k1 + b[2] * k2];
-        const lat = Math.atan2(v[2], Math.hypot(v[0], v[1])), atPole = Math.hypot(v[0], v[1]) < 1e-7; let x = atPole && px !== null ? px - flip : Math.atan2(v[1], v[0]) / (Math.PI * 2) * C, y = wcYofLat(lat);
-        if (px !== null) { let dx = x + flip - px; dx -= Math.round(dx / C) * C; if (Math.abs(dx) > C * 0.3) { mirror = mirror ? 0 : (lat > 0 ? 1 : -1); flip += C / 2; dx = x + flip - px; dx -= Math.round(dx / C) * C; } x = px + dx; }
-        else x = x1 + wcWrapD(x - x1);
-        px = x; if (mirror > 0) y = 2 * PN - y; else if (mirror < 0) y = 2 * PS - y;
-        out.push([x, y]);
+        let [x, y] = wcChart(wcSlerp(a, b, i / n));
+        if (px === null) x = x1 + wcWrapD(x - x1); else { const dx = wcWrapD(x - px); if (Math.abs(dx) > C / 6) out.push([]); x = px + dx; }
+        px = x; out[out.length - 1].push([x, y]);
     }
-    return out;
+    return out.filter(s => s.length > 1);
 }
-// A chart point past a pole is really on the antipodal meridian: fold it back (and say so, for headings).
-function wcUnfold(x, y) { const C = WC.circ; if (y < WC.poleN) return [x + C / 2, 2 * WC.poleN - y, 1]; if (y > WC.poleS) return [x + C / 2, 2 * WC.poleS - y, 1]; return [x, y, 0]; }
+function wcGCVecs(x1, y1, x2, y2, n = 96) { const a = wcVec(x1, y1), b = wcVec(x2, y2), out = []; for (let i = 0; i <= n; i++) out.push(wcSlerp(a, b, i / n)); return out; }
 function wcNearX(x) { if (!isWorldMode || !WC.circ) return x; const ref = camera.x + canvas.width * fov / 2; return x + WC.circ * Math.round((ref - x) / WC.circ); }
+// The camera centre on the chart (in the globe view the camera itself works in local coordinates).
+function wcCamC() { if (WC.G) return [WC.G.cx, WC.G.cy]; return [camera.x + canvas.width * fov / 2, camera.y + canvas.height * fov / 2]; }
 
-// ---- the date line and the poles, seamlessly ----
+// ---- the date line, seamlessly ----
 // The chart is drawn twice where the view straddles the seam, so crossing the date line shows no edge and no jump.
 function wcDrawExteriorWrapped() {
     const C = WC.circ; if (!C) { wcDrawExterior(); return; }
@@ -4177,61 +4188,170 @@ function wcDrawExteriorWrapped() {
         if (camera.x + W * fov > C) { const sx = (C - camera.x) / fov; ctx.save(); ctx.beginPath(); ctx.rect(sx, 0, W - sx, canvas.height); ctx.clip(); camera.x -= C; try { wcDrawExterior(); } finally { camera.x += C; ctx.restore(); } }
     } finally { camera.x = cx0; }
 }
-// Over a pole the server moves you to the antipodal meridian with your heading reversed. The client does the same to
-// its smoothed position and camera and rolls the view 180°, which looks exactly like before; the roll then unwinds,
-// so the camera swings round and you see yourself heading south down the far side of the world.
-function wcPoleFix(rPos, en) {
-    if (!isWorldMode || !WC.circ || WC.poleN == null || rPos.renderY == null || en.y == null) return false;
-    const C = WC.circ, nearPole = Math.min(Math.abs(en.y - WC.poleN), Math.abs(en.y - WC.poleS)) < 90000;
-    if (!nearPole || Math.abs(wcWrapD(en.x - rPos.renderX)) < C / 4) return false;
-    const P = Math.abs(en.y - WC.poleN) < Math.abs(en.y - WC.poleS) ? WC.poleN : WC.poleS;
-    const nx = rPos.renderX + C / 2, ny = 2 * P - rPos.renderY;
-    rPos.renderX = en.x + wcWrapD(nx - en.x); rPos.renderY = ny;
-    if (rPos.flA !== undefined) rPos.flA += Math.PI; if (rPos.renderAngle !== undefined) rPos.renderAngle += Math.PI;
-    if (en.id === myId) {
-        const W = canvas.width * fov, H = canvas.height * fov, ccx = camera.x + W / 2, ccy = camera.y + H / 2;
-        const ncx = rPos.renderX + wcWrapD(ccx + C / 2 - rPos.renderX), ncy = 2 * P - ccy;
-        camera.x = ncx - W / 2; camera.y = ncy - H / 2;
-        WC.roll = (WC.roll || 0) + Math.PI; if (WC.roll > Math.PI) WC.roll -= Math.PI * 2;
+
+// ---- the globe view ----
+// Local azimuthal-equidistant projection around the camera point qc, with screen-up u and screen-right r (tangent
+// vectors at qc). Virtual coordinates: qc is (0, 0), WC_GV_S virtual units per sphere unit, which is the chart's own
+// scale at the latitude where the two views meet, so switching views changes nothing on screen. u is carried along
+// by parallel transport and turned gently towards local north, so flying over a pole the view swings round by itself.
+// Only things that are actually drawn are projected (a few planes, a few hundred graticule points) and the sea is
+// painted into a tiny buffer, so this costs about the same as the flat view.
+const WC_GV_IN = 56 * Math.PI / 180, WC_GV_OUT = 54 * Math.PI / 180, WC_GV_S = 1 / Math.cos(WC_GV_IN);
+WC.G = null;
+function wcEntQ(en) { return en.fl && en.fl.q ? en.fl.q : wcVec(en.x, en.y); }
+function wcGlobeProj(q) {
+    const G = WC.G, qc = G.qc, c = wcDot(qc, q), t = [q[0] - qc[0] * c, q[1] - qc[1] * c, q[2] - qc[2] * c], sl = Math.hypot(t[0], t[1], t[2]);
+    if (sl < 1e-12) return c > 0 ? [0, 0] : [1e9, 1e9];
+    const d = Math.atan2(sl, c) * wcR() * WC_GV_S / sl;
+    return [wcDot(t, G.r) * d, -wcDot(t, G.u) * d];
+}
+function wcGlobeUnproj(vx, vy) {
+    const G = WC.G, K = wcR() * WC_GV_S, h = Math.hypot(vx, vy), rho = h / K; if (h < 1e-9) return G.qc.slice();
+    const a = vx / h, b = -vy / h, s = Math.sin(rho), c = Math.cos(rho), qc = G.qc, r = G.r, u = G.u;
+    return [qc[0] * c + (r[0] * a + u[0] * b) * s, qc[1] * c + (r[1] * a + u[1] * b) * s, qc[2] * c + (r[2] * a + u[2] * b) * s];
+}
+function wcGlobeAng(h) { const G = WC.G; return Math.atan2(-wcDot(h, G.u), wcDot(h, G.r)); }
+// Called once per frame before the camera is placed: decides the view, moves the frame with our own plane.
+function wcGlobeFrame(me, rMe) {
+    const q = isWorldMode && WC.scene === 'ext' && WC.circ && me && me.fl && me.fl.q;
+    const lat = q ? Math.asin(q[2]) : 0, want = q && Math.abs(lat) > (WC.G ? WC_GV_OUT : WC_GV_IN);
+    if (!want) { if (WC.G) wcGlobeExit(me, rMe); return; }
+    if (!WC.G) wcGlobeEnter(rMe, q);
+    const G = WC.G, now = performance.now(), dt = Math.min(0.1, (now - G.t) / 1000); G.t = now;
+    rMe.rq = rMe.rq ? wcNorm(wcSlerp(rMe.rq, q, 0.5)) : q.slice(); rMe._gf = drawCounter;
+    const o = G.qc, qc = rMe.rq, dd = 1 + wcDot(o, qc); let u = G.u;
+    if (dd > 1e-6) { const k = wcDot(qc, u) / dd; u = [u[0] - k * (o[0] + qc[0]), u[1] - k * (o[1] + qc[1]), u[2] - k * (o[2] + qc[2])]; }   // parallel transport along the step
+    const uq = wcDot(u, qc); u = wcNorm([u[0] - qc[0] * uq, u[1] - qc[1] * uq, u[2] - qc[2] * uq]);
+    const r = wcCross(u, qc), K = wcR() * WC_GV_S, st = [qc[0] - o[0], qc[1] - o[1], qc[2] - o[2]], mx = wcDot(st, r) * K, my = -wcDot(st, u) * K;
+    const c = Math.cos(G.tr), s = Math.sin(G.tr); G.tx += c * mx + s * my; G.ty += -s * mx + c * my;   // the sea texture scrolls with the ground
+    if (Math.hypot(qc[0], qc[1]) > 2e-4) {                               // turn screen-up towards north, about 1 rad/s
+        const n = wcEN(qc).n; let psi = Math.atan2(wcDot(qc, wcCross(u, n)), wcDot(u, n));
+        if (Math.abs(psi) > 3 && G.lastD) psi = Math.abs(psi) * Math.sign(G.lastD);
+        const d = Math.max(-1.1 * dt, Math.min(1.1 * dt, psi)); G.lastD = d;
+        if (Math.abs(d) > 1e-6) { const qu = wcCross(qc, u), cd = Math.cos(d), sd = Math.sin(d); u = wcNorm([u[0] * cd + qu[0] * sd, u[1] * cd + qu[1] * sd, u[2] * cd + qu[2] * sd]); G.tr += d; }
     }
-    return true;
+    G.qc = qc.slice(); G.u = u; G.r = wcCross(u, qc);
+    const p = wcChart(qc); G.cx = p[0]; G.cy = p[1]; G.lat = Math.asin(qc[2]); G.lon = Math.atan2(qc[1], qc[0]);
+    rMe.renderX = 0; rMe.renderY = 0;
 }
-function wcNoise2(x, y) {
-    const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, h = (i, j) => { let n = (i * 374761393 + j * 668265263) | 0; n = (n ^ (n >>> 13)) * 1274126177 | 0; return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
-    const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
-    return (h(xi, yi) * (1 - u) + h(xi + 1, yi) * u) * (1 - v) + (h(xi, yi + 1) * (1 - u) + h(xi + 1, yi + 1) * u) * v;
+function wcGlobeEnter(rMe, q) {
+    const W = canvas.width, H = canvas.height, k = 1 / Math.cos(wcLat(rMe.renderY)), f = WC_GV_S / k;
+    const ox = camera.x + W * fov / 2 - rMe.renderX, oy = camera.y + H * fov / 2 - rMe.renderY, en = wcEN(q);
+    WC.G = { qc: q.slice(), u: en.n, r: en.e, tx: camera.x + W * fov / 2, ty: camera.y + H * fov / 2, tr: 0, t: performance.now(), cx: rMe.renderX, cy: rMe.renderY, lat: Math.asin(q[2]), lon: Math.atan2(q[1], q[0]), lastD: 0 };
+    for (const rp of renderEntities.values()) rp.rq = null;
+    rMe.rq = q.slice();
+    camera.x = ox * f - W * fov / 2; camera.y = oy * f - H * fov / 2;
 }
-// The polar caps: sea ice from ~66° to the pole and – drawn the same way – past it, where the chart folds over.
-// Bands depend only on the distance to the pole, so the far side of the pole matches this side exactly.
-function wcDrawPolar(s, W, H) {
-    if (WC.poleN == null) return;
-    const R = (24 / 180) * (WC.circ / 2), now = Date.now() / 1000, pad = WC.roll ? Math.hypot(W, H) : 0;
-    const vx0 = camera.x - pad * fov, vy0 = camera.y - pad * fov, vy1 = camera.y + (H + pad) * fov;
-    for (const P of [WC.poleN, WC.poleS]) {
-        const y0 = Math.max(vy0, P - R), y1 = Math.min(vy1, P + R); if (y1 <= y0) continue;
-        const sy0 = worldToScreenY(y0), sy1 = worldToScreenY(y1);
-        ctx.fillStyle = '#dfe9ef'; ctx.fillRect(-pad, sy0, W + 2 * pad, sy1 - sy0);
-        const step = Math.max(24, 60 * s);                                    // sastrugi: wind-carved snow ridges running along the latitude lines
-        for (let y = Math.floor(y0 / 900) * 900; y < y1; y += 900) {
-            const d = Math.abs(y - P), n = wcNoise2(d / 4000, 3.7), sy = worldToScreenY(P + Math.sign(y - P || 1) * d);
-            if (n < 0.45) continue; ctx.fillStyle = `rgba(150,180,200,${(n - 0.45) * 0.5})`; ctx.fillRect(-pad, sy, W + 2 * pad, Math.max(1, 70 * s * n));
+function wcGlobeExit(me, rMe) {
+    const G = WC.G; WC.G = null; if (!G || !rMe) return;
+    const W = canvas.width, H = canvas.height, q = rMe.rq || G.qc, p = wcChart(q), k = 1 / Math.cos(Math.asin(q[2])), f = k / WC_GV_S;
+    const ox = camera.x + W * fov / 2, oy = camera.y + H * fov / 2;       // screen-up is back on north by the time we get here
+    rMe.renderX = p[0]; rMe.renderY = p[1];
+    camera.x = p[0] + ox * f - W * fov / 2; camera.y = p[1] + oy * f - H * fov / 2;
+    for (const rp of renderEntities.values()) { rp.rq = null; if (rp !== rMe) rp._snap = 1; }
+}
+// Every drawn entity in the globe view: smooth on the sphere, then project.
+function wcGlobeEnt(rPos, en) {
+    if (!WC.G || en.x == null) return;
+    if (rPos._gf !== drawCounter) { const q = wcEntQ(en); rPos.rq = rPos.rq ? wcNorm(wcSlerp(rPos.rq, q, en.fl ? 0.5 : 0.2)) : q.slice(); rPos._gf = drawCounter; }
+    const v = wcGlobeProj(rPos.rq); rPos.renderX = v[0]; rPos.renderY = v[1]; rPos._snap = 1;
+    if (en.fl) en.fl._ga = en.fl.h ? wcGlobeAng(en.fl.h) : en.fl.a;
+}
+// 3D value noise on the unit sphere (so the sea and ice are fixed to the planet, with no seam anywhere)
+function wcNoise3(x, y, z) {
+    const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z), xf = x - xi, yf = y - yi, zf = z - zi;
+    const h = (i, j, k) => { let n = (i * 374761393 + j * 668265263 + k * 2147483647) | 0; n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
+    const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf), w = zf * zf * (3 - 2 * zf), L = (a, b, t) => a + (b - a) * t;
+    return L(L(L(h(xi, yi, zi), h(xi + 1, yi, zi), u), L(h(xi, yi + 1, zi), h(xi + 1, yi + 1, zi), u), v), L(L(h(xi, yi, zi + 1), h(xi + 1, yi, zi + 1), u), L(h(xi, yi + 1, zi + 1), h(xi + 1, yi + 1, zi + 1), u), v), w);
+}
+function wcGlobeSea(G, W, H) {
+    const div = WC_HQ ? 10 : 16, bw = Math.ceil(W / div), bh = Math.ceil(H / div);
+    if (!G.buf || G.buf.width !== bw || G.buf.height !== bh) { G.buf = document.createElement('canvas'); G.buf.width = bw; G.buf.height = bh; G.bg = G.buf.getContext('2d'); G.img = G.bg.createImageData(bw, bh); }
+    const D = G.img.data, K = wcR() * WC_GV_S, R = wcR(), qc = G.qc, r = G.r, u = G.u, sw = W * fov / bw, shh = H * fov / bh;
+    const f1 = R / 1400, f2 = R / 420, f3 = R / 26000, iceLat = 64 * Math.PI / 180, iceVar = 3.2 * Math.PI / 180, edge = 0.5 * Math.PI / 180;
+    let idx = 0;
+    for (let j = 0; j < bh; j++) {
+        const vy = camera.y + (j + 0.5) * shh;
+        for (let i = 0; i < bw; i++, idx += 4) {
+            const vx = camera.x + (i + 0.5) * sw, hh = Math.hypot(vx, vy), rho = hh / K, s = Math.sin(rho), c = Math.cos(rho), a = hh > 1e-9 ? vx / hh : 0, b = hh > 1e-9 ? -vy / hh : 0;
+            const qx = qc[0] * c + (r[0] * a + u[0] * b) * s, qy = qc[1] * c + (r[1] * a + u[1] * b) * s, qz = qc[2] * c + (r[2] * a + u[2] * b) * s;
+            const lat = Math.asin(Math.max(-1, Math.min(1, qz))), al = Math.abs(lat), lim = iceLat + (wcNoise3(qx * f3, qy * f3, qz * f3 + 9.1) - 0.5) * 2 * iceVar;
+            const n = wcNoise3(qx * f1, qy * f1, qz * f1) * 0.7 + wcNoise3(qx * f2 + 3.3, qy * f2, qz * f2) * 0.3;
+            // ice cover 0..1, blended (never a hard per-pixel switch: the buffer is scaled up, so edges must be soft)
+            const ice = Math.max(0, Math.min(1, (al - lim) / (2 * edge) + 0.5 + (n - 0.5) * 1.6)), ki = 0.86 + 0.14 * n, ko = 0.93 + 0.13 * n;
+            const R0 = 43 * ko + (228 * ki - 43 * ko) * ice, G0 = 106 * ko + (238 * ki - 106 * ko) * ice, B0 = 148 * ko + (246 * ki - 148 * ko) * ice;
+            D[idx] = R0; D[idx + 1] = G0; D[idx + 2] = B0; D[idx + 3] = 255;
         }
-        // the ragged ice edge, with floes breaking off into the polar sea
-        const edgeY = P + (P === WC.poleN ? R : -R), sEdge = worldToScreenY(edgeY);
-        if (sEdge > -200 && sEdge < H + 200) {
-            for (let x = Math.floor(vx0 / 1400) * 1400; x < camera.x + (W + pad) * fov; x += 1400) {
-                const r = wcRng(Math.floor(x / 1400) * 7919 + (P > 0 ? 1 : 0)), off = (r() - 0.3) * 6000 * (P === WC.poleN ? 1 : -1);
-                ctx.fillStyle = '#e8f0f4'; ctx.beginPath(); ctx.ellipse(worldToScreenX(x + r() * 900), worldToScreenY(edgeY + off), (300 + r() * 900) * s, (180 + r() * 500) * s, r() * 3, 0, 7); ctx.fill();
+    }
+    G.bg.putImageData(G.img, 0, 0);
+    ctx.imageSmoothingEnabled = true; ctx.drawImage(G.buf, 0, 0, bw, bh, 0, 0, bw * div, bh * div);
+}
+// Runs `fn` with the camera moved into the scrolling texture frame (rotated with the ground).
+function wcGlobeTex(G, W, H, fn) {
+    const cx0 = camera.x, cy0 = camera.y, D = Math.hypot(W, H);
+    ctx.save(); ctx.translate(W / 2, H / 2); ctx.rotate(G.tr); ctx.translate(-D / 2, -D / 2);
+    camera.x = G.tx - D * fov / 2; camera.y = G.ty - D * fov / 2;
+    try { fn(D, D); } finally { camera.x = cx0; camera.y = cy0; ctx.restore(); }
+}
+function wcGlobeSwells(W, H) {
+    const s = 1 / fov, now = Date.now() / 1000, CELL = 900; ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = Math.max(1, 3 * s); ctx.beginPath();
+    for (let i = Math.floor(camera.x / CELL); i <= Math.floor((camera.x + W * fov) / CELL); i++) for (let j = Math.floor(camera.y / CELL); j <= Math.floor((camera.y + H * fov) / CELL); j++) {
+        const r = wcRng(i * 92821 ^ j * 68917), wx = (i + r()) * CELL + Math.sin(now * 0.6 + r() * 6) * 30, wy = (j + r()) * CELL, sx = worldToScreenX(wx), sy = worldToScreenY(wy);
+        ctx.moveTo(sx - 60 * s, sy); ctx.quadraticCurveTo(sx, sy - 14 * s, sx + 60 * s, sy);
+    }
+    ctx.stroke();
+}
+// Meridians converge, every time zone meets: the graticule near a pole, the pole itself, and a pointer to it.
+// Only the bits of each line within ~0.12 rad of the camera are sampled, so this is a few hundred projections a frame.
+function wcGlobeGraticule(G, W, H) {
+    if (Math.abs(G.lat) < 62 * Math.PI / 180) return;
+    const sg = G.lat > 0 ? 1 : -1, X = worldToScreenX, Y = worldToScreenY, C = WC.circ, D = 0.12, cD = Math.cos(D), al = Math.abs(G.lat), deg = Math.PI / 180;
+    const line = (pts) => { ctx.beginPath(); let pen = false; for (const q of pts) { if (wcDot(q, G.qc) < cD) { pen = false; continue; } const p = wcGlobeProj(q), x = X(p[0]), y = Y(p[1]); pen ? ctx.lineTo(x, y) : ctx.moveTo(x, y); pen = true; } ctx.stroke(); };
+    ctx.save(); ctx.lineWidth = 1.5; ctx.font = 'bold 13px Ubuntu, sans-serif'; ctx.textAlign = 'center';
+    const lat0 = Math.max(60 * deg, al - D), lat1 = Math.min(90 * deg, al + D);
+    for (let m = 0; m < 24; m++) {                                        // meridians every 15° (one hour of time); the date line in red
+        const lo = m * Math.PI / 12, idl = m === 0, pts = [];
+        for (let i = 0; i <= 48; i++) pts.push(wcVecLL(sg * (lat0 + (lat1 - lat0) * i / 48), lo));
+        ctx.strokeStyle = idl ? 'rgba(255,90,90,.75)' : m % 6 === 0 ? 'rgba(255,255,255,.45)' : 'rgba(255,255,255,.2)'; ctx.setLineDash(idl ? [14, 10] : []); line(pts);
+        if ((idl || m % 6 === 3) && WC.gap) {                            // the date line, and the meridian through the middle of each zone
+            const la = Math.min(89 * deg, al), q = wcVecLL(sg * la, lo); if (wcDot(q, G.qc) > Math.cos(0.05)) {
+                const p = wcGlobeProj(q), x = lo / (Math.PI * 2) * C, tz0 = Math.round(wcWrapD(x - WC.center) / WC.gap) * 6, t = idl ? 'DATE LINE' : wcTzLabel(tz0 <= -12 ? tz0 + 24 : tz0);
+                ctx.setLineDash([]); ctx.fillStyle = 'rgba(20,40,60,.75)'; ctx.fillText(t, X(p[0]) + 1, Y(p[1]) + 1); ctx.fillStyle = idl ? '#ffb0b0' : '#fff'; ctx.fillText(t, X(p[0]), Y(p[1]));
             }
         }
-        // the pole itself: every meridian meets on this line of the chart
-        const sp = worldToScreenY(P);
-        if (sp > -80 && sp < H + 80) {
-            ctx.strokeStyle = 'rgba(220,60,60,.55)'; ctx.setLineDash([10, 8]); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-pad, sp); ctx.lineTo(W + pad, sp); ctx.stroke(); ctx.setLineDash([]);
-            const cx = W / 2; ctx.fillStyle = '#c0392b'; for (let i = 0; i < 6; i++) { ctx.fillStyle = i % 2 ? '#fff' : '#c0392b'; ctx.fillRect(cx - 4 * s - 2, sp - (i + 1) * 14 * s, 8 * s + 4, 14 * s); }
-            ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.max(12, 20 * s)}px Ubuntu, sans-serif`; ctx.textAlign = 'center'; ctx.fillText(P === WC.poleN ? 'NORTH POLE · 90°N' : 'SOUTH POLE · 90°S', cx, sp + 26 * Math.max(0.6, s));
-        }
     }
+    ctx.setLineDash([]);
+    const span = Math.min(Math.PI, Math.cos(al) > Math.sin(D) ? Math.asin(Math.sin(D) / Math.cos(al)) * 1.3 : Math.PI);
+    for (const la of [66.56, 70, 75, 80, 85, 88]) {                     // parallels, and the Arctic / Antarctic circle
+        if (Math.abs(la * deg - al) > D) continue; const pts = [];
+        for (let i = 0; i <= 96; i++) pts.push(wcVecLL(sg * la * deg, G.lon - span + 2 * span * i / 96));
+        ctx.strokeStyle = la === 66.56 ? 'rgba(255,230,120,.5)' : 'rgba(255,255,255,.22)'; line(pts);
+    }
+    const P = wcGlobeProj([0, 0, sg]), sx = X(P[0]), sy = Y(P[1]), s = Math.max(0.6, Math.min(1.6, 2.2 / fov)), name = sg > 0 ? 'NORTH POLE' : 'SOUTH POLE';
+    if (sx > -120 && sx < W + 120 && sy > -160 && sy < H + 120) {           // the pole: a striped marker
+        ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(sx + 10 * s, sy + 4 * s, 22 * s, 8 * s, 0, 0, 7); ctx.fill();
+        for (let i = 0; i < 7; i++) { ctx.fillStyle = i % 2 ? '#fff' : '#c0392b'; ctx.fillRect(sx - 4 * s, sy - (i + 1) * 13 * s, 8 * s, 13 * s); }
+        ctx.fillStyle = '#ffd23d'; ctx.beginPath(); ctx.arc(sx, sy - 93 * s, 6 * s, 0, 7); ctx.fill();
+        ctx.font = `bold ${Math.round(15 * s + 4)}px Ubuntu, sans-serif`; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(10,25,40,.7)'; const t = name + (sg > 0 ? ' · 90°N' : ' · 90°S');
+        ctx.strokeText(t, sx, sy + 24 * s); ctx.fillStyle = '#fff'; ctx.fillText(t, sx, sy + 24 * s);
+    } else if (al > 70 * deg) {                                           // off screen: a pointer on the edge with the distance
+        const dx = sx - W / 2, dy = sy - H / 2, k = Math.min((W / 2 - 280) / Math.abs(dx || 1e-6), (H / 2 - 150) / Math.abs(dy || 1e-6)), ex = W / 2 + dx * k, ey = H / 2 + dy * k, a = Math.atan2(dy, dx);   // inset clear of the HUD panels
+        const km = Math.round(wcAngle(G.qc, [0, 0, sg]) * wcR() / 1000);
+        ctx.save(); ctx.translate(ex, ey); ctx.rotate(a); ctx.fillStyle = 'rgba(192,57,43,.9)'; ctx.beginPath(); ctx.moveTo(18, 0); ctx.lineTo(-8, -11); ctx.lineTo(-3, 0); ctx.lineTo(-8, 11); ctx.closePath(); ctx.fill(); ctx.restore();
+        const tx = ex - Math.cos(a) * 34, ty = ey - Math.sin(a) * 26 + 4; ctx.font = 'bold 13px Ubuntu, sans-serif'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(10,25,40,.75)'; const t = `${name} · ${km.toLocaleString()} km`;
+        ctx.strokeText(t, tx, ty); ctx.fillStyle = '#fff'; ctx.fillText(t, tx, ty);
+    }
+    ctx.restore();
+}
+function wcDrawGlobe() {
+    const G = WC.G, W = canvas.width, H = canvas.height, s = 1 / fov;
+    wcGlobeSea(G, W, H);
+    wcGlobeTex(G, W, H, wcGlobeSwells);
+    wcGlobeGraticule(G, W, H);
+    wcDrawAiTraffic(s, camera.x - 600, camera.y - 600, camera.x + W * fov + 600, camera.y + H * fov + 600);
+    const meF = myId != null ? gameState.entities.find(e => e.id === myId) : null;
+    if (meF && meF.fl) wcGlobeTex(G, W, H, (w, h) => wcDrawClouds(w, h, renderEntities.get(meF.id)?.flAlt ?? meF.fl.alt));
+    wcDrawDayNight(W, H);
 }
 
 // ---- liveries and aircraft types ----
@@ -4278,8 +4398,8 @@ function wcDrawPlane(context, sx, sy, a, alt, liv) {
     context.restore();
 }
 function wcDrawFlightEntity(context, rPos, en) {
-    const f = en.fl;
-    rPos.flA = lerpAngle(rPos.flA !== undefined ? rPos.flA : f.a, f.a, 0.3);
+    const f = en.fl, ta = WC.G && f._ga != null ? f._ga : f.a;
+    rPos.flA = lerpAngle(rPos.flA !== undefined ? rPos.flA : ta, ta, 0.3);
     rPos.flAlt = rPos.flAlt !== undefined ? rPos.flAlt + (f.alt - rPos.flAlt) * 0.2 : f.alt;
     wcDrawPlane(context, 0, 0, rPos.flA, rPos.flAlt, f.al ? f.al + ':' + (f.ac || 'narrow') : (f.liv || 0));
     const k = (1 + 0.8 * rPos.flAlt) * (f.ac === 'prop' ? 0.8 : 1);
@@ -4291,26 +4411,32 @@ WC._aiPaths = new Map();
 function wcAiPath(l) {
     let P = WC._aiPaths.get(l.fn + l.from); if (P) return P;
     const A = WC.airports.find(a => a.city === l.from), B = WC.airports.find(a => a.city === l.to); if (!A || !B) return null;
-    const pts = wcGCPath(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 80), cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
-    P = { pts, cum, L: cum[cum.length - 1] }; WC._aiPaths.set(l.fn + l.from, P); return P;
+    P = { a: wcVec(A.sb.x, A.sb.y), b: wcVec(B.sb.x, B.sb.y) }; WC._aiPaths.set(l.fn + l.from, P); return P;
 }
 function wcAiFlights(now) {                                   // every scheduled flight in the air right now: [leg, fraction]
     const out = []; if (!WC.air) return out;
     for (const l of WC.air.legs) { const D = l.mins * 60000; for (let k = Math.floor((now - l.off) / l.per); k * l.per + l.off + D > now && k > -5; k--) { const t0 = k * l.per + l.off; if (now >= t0) out.push([l, (now - t0) / D]); } }
     return out;
 }
-function wcAiPos(l, q) {
-    const P = wcAiPath(l); if (!P) return null; const d = q * P.L; let i = 1; while (i < P.cum.length - 1 && P.cum[i] < d) i++;
-    const a = P.pts[i - 1], b = P.pts[i], t = (d - P.cum[i - 1]) / ((P.cum[i] - P.cum[i - 1]) || 1);
-    let x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t, ang = Math.atan2(b[1] - a[1], b[0] - a[0]); const u = wcUnfold(x, y); if (u[2]) ang += Math.PI;
-    return { x: u[0], y: u[1], a: ang, alt: Math.max(0, Math.min(1, q * 9, (1 - q) * 9)) };
+// Scheduled flights fly the great circle on the sphere (a slerp between the two airports).
+function wcAiPos(l, t) {
+    const P = wcAiPath(l); if (!P) return null;
+    const q = wcNorm(wcSlerp(P.a, P.b, t)), h = wcToward(q, P.b), c = wcChart(q);
+    return { q, h, x: c[0], y: c[1], a: wcChartAng(q, h), lat: Math.asin(q[2]), alt: Math.max(0, Math.min(1, t * 9, (1 - t) * 9)) };
 }
 function wcDrawAiTraffic(s, vx0, vy0, vx1, vy1) {
     if (!WC.air || WC.viewMode && s > 1.5) return;
     const now = Date.now(); WC._aiNow = WC._aiNow && now - WC._aiNow.t < 1000 ? WC._aiNow : { t: now, list: wcAiFlights(now) };
     for (const [l, q0] of WC._aiNow.list) {
         const q = q0 + (now - WC._aiNow.t) / (l.mins * 60000); if (q > 1) continue;
-        const p = wcAiPos(l, q); if (!p) continue; const x = wcNearX(p.x);
+        const p = wcAiPos(l, q); if (!p) continue;
+        if (WC.G) {                                                       // globe view: project from the sphere
+            if (wcDot(p.q, WC.G.qc) < 0.995) continue;
+            const v = wcGlobeProj(p.q); if (v[0] < vx0 || v[0] > vx1 || v[1] < vy0 || v[1] > vy1) continue;
+            wcDrawPlane(ctx, worldToScreenX(v[0]), worldToScreenY(v[1]), wcGlobeAng(p.h), p.alt, l.al + ':' + l.ac); continue;
+        }
+        if (Math.abs(p.lat) > 1.05) continue;
+        const x = wcNearX(p.x);
         if (x < vx0 - 600 || x > vx1 + 600 || p.y < vy0 - 600 || p.y > vy1 + 600) continue;
         wcDrawPlane(ctx, worldToScreenX(x), worldToScreenY(p.y), p.a, p.alt, l.al + ':' + l.ac);
     }
@@ -4407,15 +4533,15 @@ function wcDrawOutsideView(D) {
 
 // ---- in-flight screen: a real globe now ----
 function wcIfeDraw() {
-    const I = wcIfe; if (!I || !I.open || I.tab !== 'route' || !wcFlight || !WC.circ || WC.poleN == null) return;
+    const I = wcIfe; if (!I || !I.open || I.tab !== 'route' || !wcFlight || !WC.circ || !WC.globe) return;
     const f = wcFlight, cv = I.cv, g = cv.getContext('2d'), Wc = cv.width, Hc = cv.height, C = WC.circ;
-    const me = gameState.entities.find(e => e.id === myId), rp = me && renderEntities.get(me.id), u = wcUnfold(rp ? rp.renderX : (me ? me.x : 0), rp ? rp.renderY : (me ? me.y : 0));
-    const plat = wcLat(u[1]), plon = u[0] / C * Math.PI * 2;
+    const me = gameState.entities.find(e => e.id === myId), rp = me && renderEntities.get(me.id), pq = rp && rp.rq ? rp.rq : me ? wcEntQ(me) : [1, 0, 0];
+    const plat = Math.asin(pq[2]), plon = Math.atan2(pq[1], pq[0]);
     if (!I.drag && performance.now() - (I.idle || 0) > 4000) { I.rot *= 0.94; I.tilt = (I.tilt || 0) * 0.94; }
     const lc = plon + I.rot, pc = Math.max(-1.45, Math.min(1.45, plat * 0.8 + (I.tilt || 0))), R = Hc * 0.46, cx = Wc * 0.36, cy = Hc / 2;
     const sinPc = Math.sin(pc), cosPc = Math.cos(pc);
     const P = (lat, lon) => { const dl = lon - lc, cl = Math.cos(lat); return [cx + R * cl * Math.sin(dl), cy - R * (cosPc * Math.sin(lat) - sinPc * cl * Math.cos(dl)), sinPc * Math.sin(lat) + cosPc * cl * Math.cos(dl)]; };
-    const PM = (x, y) => { const q = wcUnfold(x, y); return P(wcLat(q[1]), q[0] / C * Math.PI * 2); };
+    const PM = (x, y) => P(wcLat(y), x / C * Math.PI * 2), PQ = q => P(Math.asin(q[2]), Math.atan2(q[1], q[0]));
     const bg = g.createLinearGradient(0, 0, 0, Hc); bg.addColorStop(0, '#040a16'); bg.addColorStop(1, '#0b1d33'); g.fillStyle = bg; g.fillRect(0, 0, Wc, Hc);
     for (let i = 0; i < 80; i++) { g.fillStyle = `rgba(255,255,255,${0.25 + (i % 3) * 0.2})`; g.fillRect((i * 97) % Wc, (i * 53) % Hc, 1.3, 1.3); }
     const oc = g.createRadialGradient(cx - R * 0.35, cy - R * 0.35, R * 0.1, cx, cy, R); oc.addColorStop(0, '#2f7fbf'); oc.addColorStop(1, '#0c3358'); g.fillStyle = oc; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.fill();
@@ -4444,13 +4570,13 @@ function wcIfeDraw() {
     // the route: a great circle, over the pole when that's shorter
     const A = WC.airports.find(a => a.city === f.from), B = WC.airports.find(a => a.city === f.to);
     if (A && B) {
-        const pts = wcGCPath(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 120);
-        for (let i = 1; i < pts.length; i++) { const p = PM(...pts[i - 1]), q = PM(...pts[i]); if (p[2] < 0 || q[2] < 0) continue; g.strokeStyle = '#ffd23d'; g.lineWidth = 2.4; g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.stroke(); }
+        const pts = wcGCVecs(A.sb.x, A.sb.y, B.sb.x, B.sb.y, 120);
+        for (let i = 1; i < pts.length; i++) { const p = PQ(pts[i - 1]), q = PQ(pts[i]); if (p[2] < 0 || q[2] < 0) continue; g.strokeStyle = '#ffd23d'; g.lineWidth = 2.4; g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.stroke(); }
     }
     for (const c of WC.cities) { const p = PM(c.cx, c.cy); if (p[2] < 0.02) continue; const k = c.id === f.from || c.id === f.to; g.fillStyle = k ? '#ffd23d' : 'rgba(255,255,255,.85)'; g.beginPath(); g.arc(p[0], p[1], k ? 4 : 2.3, 0, 7); g.fill(); if (k || p[2] > 0.4) { g.font = `${k ? 'bold 12px' : '10px'} Ubuntu, sans-serif`; g.textAlign = 'left'; g.fillText(c.code, p[0] + 5, p[1] - 4); } }
     for (const [la, lab] of [[Math.PI / 2, 'N'], [-Math.PI / 2, 'S']]) { const p = P(la, 0); if (p[2] > 0) { g.fillStyle = '#ff6b6b'; g.beginPath(); g.arc(p[0], p[1], 3, 0, 7); g.fill(); g.fillStyle = '#ffb3b3'; g.font = 'bold 10px Ubuntu'; g.fillText(lab + ' POLE', p[0] + 5, p[1] + 3); } }
     const ap = P(-plat, plon + Math.PI); if (ap[2] > 0) { g.strokeStyle = 'rgba(255,120,200,.8)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(ap[0] - 5, ap[1] - 5); g.lineTo(ap[0] + 5, ap[1] + 5); g.moveTo(ap[0] + 5, ap[1] - 5); g.lineTo(ap[0] - 5, ap[1] + 5); g.stroke(); }
-    const pp = P(plat, plon), hd = rp && rp.flA !== undefined ? rp.flA + (u[2] ? Math.PI : 0) : 0, ahead = PM(u[0] + Math.cos(hd) * 20000, u[1] + Math.sin(hd) * 20000), ang = Math.atan2(ahead[1] - pp[1], ahead[0] - pp[0]);
+    const pp = P(plat, plon), hv = me && me.fl && me.fl.h, ahead = hv ? PQ(wcNorm([pq[0] + hv[0] * 0.03, pq[1] + hv[1] * 0.03, pq[2] + hv[2] * 0.03])) : pp, ang = Math.atan2(ahead[1] - pp[1], ahead[0] - pp[0]);
     g.save(); g.translate(pp[0], pp[1]); g.rotate(ang); g.fillStyle = '#fff'; g.beginPath(); g.moveTo(10, 0); g.lineTo(-7, -7); g.lineTo(-3, 0); g.lineTo(-7, 7); g.closePath(); g.fill(); g.restore();
     g.strokeStyle = 'rgba(150,200,255,.35)'; g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, R + 1, 0, 7); g.stroke();
     // side panel: the flight at a glance
@@ -4538,7 +4664,7 @@ function phRender() {
     let h = '';
     switch (PH.app) {
         case 'home':
-            h = `<div class="ph-wall"><div class="ph-big">${phLocalTime(phMyTz()).hh}</div><div class="ph-date">${escapeHTML((wcCityHere(camera.x + canvas.width * fov / 2, camera.y + canvas.height * fov / 2) || { name: 'On the road' }).name)}</div></div><div class="ph-grid">` + PH_APPS.map(([id, ic, nm]) => `<button class="ph-app" data-go="${id}"><span>${ic}</span>${nm}${id === 'msgs' && PH.unread ? '<em>' + PH.unread + '</em>' : ''}</button>`).join('') + '</div>';
+            h = `<div class="ph-wall"><div class="ph-big">${phLocalTime(phMyTz()).hh}</div><div class="ph-date">${escapeHTML((wcCityHere(...wcCamC()) || { name: 'On the road' }).name)}</div></div><div class="ph-grid">` + PH_APPS.map(([id, ic, nm]) => `<button class="ph-app" data-go="${id}"><span>${ic}</span>${nm}${id === 'msgs' && PH.unread ? '<em>' + PH.unread + '</em>' : ''}</button>`).join('') + '</div>';
             break;
         case 'flights': {
             const F = PH.flights; h = phHead('Flights');
@@ -4616,11 +4742,10 @@ function phOnMsg(d) {
 
 function drawWorldEnvironment() {
     if (!wcTex) wcMakeTex();
-    if (WC.roll) { WC.roll *= 0.965; if (Math.abs(WC.roll) < 0.002) WC.roll = 0; }
     ctx.save();
-    if (WC.scene === 'ext') wcDrawExteriorWrapped(); else wcDrawInterior();
+    if (WC.scene === 'ext') { if (WC.G) wcDrawGlobe(); else wcDrawExteriorWrapped(); } else wcDrawInterior();
     ctx.restore();
-    if (WC.scene === 'ext' && !WC.roll) wcCityWelcome(canvas.width, canvas.height);
+    if (WC.scene === 'ext' && !WC.G) wcCityWelcome(canvas.width, canvas.height);
     wcIfeDraw();
     wcPositionPrompt();                                                   // keep the bubble glued to its building / car
     const now = performance.now(); if (now - wcChipT > 400) { wcChipT = now; wcRenderChip(); }   // shift countdown
@@ -5746,12 +5871,13 @@ function draw() {
 
             let rMe = renderEntities.get(me.id);
             wcWrapFix(rMe, me);
+            if (isWorldMode) wcGlobeFrame(me, rMe);
 
             targetCamX = rMe.renderX - (canvas.width * fov) / 2;
 
             targetCamY = rMe.renderY - (canvas.height * fov) / 2;
             if (isWorldMode && me.veh) { targetCamX += Math.cos(me.veh.a) * me.veh.v * 22; targetCamY += Math.sin(me.veh.a) * me.veh.v * 22; }   // look ahead while driving
-            if (isWorldMode && me.fl) { targetCamX += Math.cos(me.fl.a) * me.fl.v * 6; targetCamY += Math.sin(me.fl.a) * me.fl.v * 6; }
+            if (isWorldMode && me.fl) { const la = WC.G && me.fl.h ? wcGlobeAng(me.fl.h) : me.fl.a, lv = WC.G && me.fl.vs != null ? me.fl.vs * WC_GV_S : me.fl.v; targetCamX += Math.cos(la) * lv * 6; targetCamY += Math.sin(la) * lv * 6; }
 
 
 
@@ -5822,8 +5948,6 @@ ctx.translate(-((camera.x / fov) % scaledGridSize), -((camera.y / fov) % scaledG
 
     // World geometry is only a backdrop layer. Arena entities and combat
     // continue through the exact same shared renderer below.
-    const wcRolling = isWorldMode && WC.roll;
-    if (wcRolling) { ctx.fillStyle = '#dfe9ef'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.save(); ctx.translate(canvas.width / 2, canvas.height / 2); ctx.rotate(WC.roll); ctx.translate(-canvas.width / 2, -canvas.height / 2); }
     if (isWorldMode) drawWorldEnvironment();
 
     // --- TDM BASE DRAWING ---
@@ -6510,6 +6634,7 @@ if (e.square) {
         rPos.renderX = lerp(rx, en.x, lk);
 
         rPos.renderY = lerp(ry, en.y, lk);
+        if (WC.G) wcGlobeEnt(rPos, en);                                // over the polar oceans: positions come from the sphere
 
 
 
@@ -6688,7 +6813,6 @@ if (e.square) {
 
     });
 
-    if (wcRolling) ctx.restore();
     if (drawCounter % 10 === 0) {
 
         updateLeaderboard();
