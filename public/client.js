@@ -410,6 +410,19 @@ let myName = null;
 
 let gameMode = "FFA";
 
+// ---- arena (sent by the server on join): size, maze walls, and the sandbox room this client is in ----
+let arenaSize = WORLD_SIZE;
+let arenaWalls = [];                 // [x, y, w, h] maze wall rectangles
+let sandboxInfo = null;              // { code, owner, players, shapeCount, botCount, size } while in a sandbox
+let sandboxHoldLevel = false;        // the on-screen "hold to level up" button (mobile has no K key)
+// a party link (?sandbox=CODE) opens Sandbox mode in that room
+let pendingSandboxCode = (() => { try { const c = new URLSearchParams(location.search).get('sandbox'); return c ? c.toUpperCase().replace(/[^0-9A-F]/g, '').slice(0, 6) : null; } catch (e) { return null; } })();
+// FFA rules (no teams): everyone not on your team is an enemy colour
+const isFfaLike = m => m === 'FFA' || m === 'MAZE' || m === 'SANDBOX';
+const MODE_LABELS = { FFA: '⚔️ Free For All', '2TDM': '🔵 2 Teams', '4TDM': '🟪 4 Teams', MAZE: '🧱 Maze', SANDBOX: '🛠️ Sandbox' };
+const MODE_ORDER = ['FFA', '2TDM', '4TDM', 'MAZE', 'SANDBOX'];
+const MODE_TITLES = { FFA: 'FFA', '2TDM': '2 Teams', '4TDM': '4 Teams', MAZE: 'Maze', SANDBOX: 'Sandbox' };
+
 let camera = { x: WORLD_SIZE/2, y: WORLD_SIZE/2 };
 
 let mouse = { x: 0, y: 0, rx: 0, ry: 0, pressed: false, rightDown: false, repel: false };
@@ -517,7 +530,7 @@ function getTeamColor(team) {
 
     if(team === 0) return "#fff";
 
-    if(gameMode === "FFA") return team === myTeam ? COLORS.team1 : COLORS.team2;
+    if(isFfaLike(gameMode)) return team === myTeam ? COLORS.team1 : COLORS.team2;
 
     if(team === 1) return COLORS.team1;
 
@@ -1454,59 +1467,41 @@ function populateModes() {
 
     modeSelect.innerHTML = '';
 
-
-
-    for (let mode in serverData) {
+    // Fixed order (Maze sits under 4 Teams, Sandbox last) and an explicit label per mode. Anything else the server lists
+    // gets its own name instead of falling through to "Free For All" (that is how World showed up as a second FFA).
+    const modes = MODE_ORDER.filter(m => serverData[m]).concat(Object.keys(serverData).filter(m => !MODE_ORDER.includes(m) && m !== 'WORLD'));
+    for (const mode of modes) {
 
         let opt = document.createElement('option');
 
         opt.value = mode;
 
-        opt.innerText =
-
-            mode === "2TDM"
-
-                ? "🔵 2 Teams"
-
-                : mode === "4TDM"
-
-                ? "🟪 4 Teams"
-
-                : "⚔️ Free For All";
-
-
+        opt.innerText = MODE_LABELS[mode] || mode;
 
         modeSelect.appendChild(opt);
 
     }
 
-
-
-    // Restore saved mode if it still exists
-
+    // A party link wins; otherwise restore the saved mode if it still exists
     const savedMode = localStorage.getItem('preferredGameMode');
 
+    if (pendingSandboxCode && serverData.SANDBOX) {
 
+        modeSelect.value = 'SANDBOX';
 
-    if (savedMode && serverData[savedMode]) {
+    } else if (savedMode && serverData[savedMode]) {
 
         modeSelect.value = savedMode;
 
     } else {
 
         // Fallback to FFA
-
         modeSelect.value = serverData.FFA ? "FFA" : modeSelect.options[0]?.value;
 
-
-
         // Clean up invalid saved mode
-
         localStorage.removeItem('preferredGameMode');
 
     }
-
-
 
     populateRegions();
 
@@ -1522,9 +1517,16 @@ function populateRegions() {
 
     regionSelect.innerHTML = ''; // Clear options
 
-    
+    if (mode === 'SANDBOX') {
 
-    if (serverData[mode]) {
+        // One private room: the party link's room, the sandbox we are already in, or a brand new one
+        const code = pendingSandboxCode || (sandboxInfo && sandboxInfo.code) || 'new';
+        let opt = document.createElement('option');
+        opt.value = code;
+        opt.innerText = code === 'new' ? '🔒 New private room' : `🔒 Private room ${code}`;
+        regionSelect.appendChild(opt);
+
+    } else if (serverData[mode]) {
 
         serverData[mode].forEach(srv => {
 
@@ -1540,13 +1542,75 @@ function populateRegions() {
 
     }
 
-    
-
     initConnection(); // Automatically connect to the selected room
 
 }
 
 
+
+// ===================== SANDBOX =====================
+function sandboxPartyUrl(code) { return `${location.origin}${location.pathname}?sandbox=${code}`; }
+// keep ?sandbox=CODE in the address bar while in a sandbox, so a refresh rejoins the same room
+function setSandboxUrl(code) {
+    try {
+        const u = new URL(location.href);
+        if (code) u.searchParams.set('sandbox', code); else u.searchParams.delete('sandbox');
+        if (u.href !== location.href) history.replaceState({}, document.title, u.pathname + u.search + u.hash);
+    } catch (e) { }
+}
+function copyPartyLink(btn) {
+    if (!sandboxInfo || !sandboxInfo.code) return;
+    const url = sandboxPartyUrl(sandboxInfo.code);
+    const done = ok => { if (!btn) return; const t = btn.dataset.label || btn.innerText; btn.dataset.label = t; btn.innerText = ok ? '✅ Link copied!' : url; setTimeout(() => { btn.innerText = btn.dataset.label; }, ok ? 1500 : 6000); };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(url).then(() => done(true), () => fallback());
+    else fallback();
+    function fallback() {
+        try { const ta = document.createElement('textarea'); ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); done(ok); }
+        catch (e) { done(false); }
+    }
+}
+function toggleSandboxSettings() { document.getElementById('sbx-settings').classList.toggle('open'); }
+function sendSandboxSettings() {
+    if (!sandboxInfo || !sandboxInfo.owner) return;
+    wsSendObj({ type: 'sandbox_settings',
+        shapeCount: +document.getElementById('sbx-shapes').value,
+        size: +document.getElementById('sbx-size').value,
+        botCount: +document.getElementById('sbx-bots').value });
+}
+function renderSandboxUi() {
+    const inSbx = !!sandboxInfo && gameMode === 'SANDBOX' && !isWorldMode;
+    const menu = document.getElementById('sandbox-menu'), panel = document.getElementById('sandbox-panel');
+    if (menu) menu.style.display = inSbx ? 'block' : 'none';
+    if (panel) panel.style.display = inSbx ? 'block' : 'none';
+    if (!inSbx) return;
+    const who = sandboxInfo.players > 1 ? `${sandboxInfo.players} players` : 'just you';
+    document.getElementById('sandbox-menu-text').innerHTML = `🔒 Private sandbox <b>${sandboxInfo.code}</b> · ${who}<br><span style="font-size:12px">Share the party link to let friends join. Hold K in game to level up.</span>`;
+    document.getElementById('sbx-title').innerText = `🛠️ Sandbox ${sandboxInfo.code} · ${who}`;
+    const ids = { 'sbx-shapes': sandboxInfo.shapeCount, 'sbx-size': sandboxInfo.size, 'sbx-bots': sandboxInfo.botCount };
+    for (const id in ids) { const el = document.getElementById(id); if (document.activeElement !== el) el.value = ids[id]; el.disabled = !sandboxInfo.owner; }
+    document.getElementById('sbx-apply').style.display = sandboxInfo.owner ? '' : 'none';
+    document.getElementById('sbx-owner-note').innerText = sandboxInfo.owner ? 'Applies to everyone in this room.' : 'Only the room owner can change these.';
+}
+// on-screen hold button (works with touch as well as the mouse)
+(() => {
+    const b = document.getElementById('sbx-hold'); if (!b) return;
+    const on = e => { e.preventDefault(); sandboxHoldLevel = true; b.classList.add('on'); };
+    const off = () => { sandboxHoldLevel = false; b.classList.remove('on'); };
+    b.addEventListener('pointerdown', on); b.addEventListener('pointerup', off); b.addEventListener('pointerleave', off); b.addEventListener('pointercancel', off);
+})();
+// the server's description of the arena we just joined (or of a sandbox whose settings changed)
+function applyArenaInfo(d) {
+    arenaSize = d.size || WORLD_SIZE;
+    arenaWalls = Array.isArray(d.walls) ? d.walls : [];
+    if (d.mode === 'SANDBOX' && d.sandbox) {
+        sandboxInfo = d.sandbox; pendingSandboxCode = null;
+        setSandboxUrl(sandboxInfo.code);
+        const opt = document.querySelector('#regionInput option');           // a reconnect rejoins this room, not a new one
+        if (opt && document.getElementById('gameModeInput').value === 'SANDBOX') { opt.value = sandboxInfo.code; opt.innerText = `🔒 Private room ${sandboxInfo.code}`; }
+    } else sandboxInfo = null;
+    if (!myId && !isWorldMode) { camera.x = arenaSize / 2 - (canvas.width * fov) / 2; camera.y = arenaSize / 2 - (canvas.height * fov) / 2; }
+    renderSandboxUi();
+}
 
 function initConnection() {
 
@@ -1594,6 +1658,11 @@ function initConnection() {
 
 document.getElementById('gameModeInput').addEventListener('change', () => {
 
+    const mode = document.getElementById('gameModeInput').value;
+    // Sandbox isn't remembered (it would open a new private room on every visit)
+    if (mode !== 'SANDBOX') localStorage.setItem('preferredGameMode', mode);
+    // picking Sandbox from the menu opens a NEW room; leaving it forgets the old one
+    pendingSandboxCode = null; sandboxInfo = null; setSandboxUrl(null);
     populateRegions(); // changing mode repopulates regions AND reconnects
 
 });
@@ -1622,7 +1691,7 @@ function spawnPlayer() {
 
     gameMode = document.getElementById('gameModeInput').value;
 
-    document.getElementById('sb-title').innerText = gameMode === "2TDM" ? "2 Teams" : (gameMode === "4TDM" ? "4 Teams" : "FFA");
+    document.getElementById('sb-title').innerText = MODE_TITLES[gameMode] || gameMode;
 
     const playerName = document.getElementById('nameInput').value;
 
@@ -1754,6 +1823,7 @@ function exitGame() {
     if(confirm("Are you sure you want to disconnect and return to the menu?")) {
         if(isWorldMode) worldSend('world_leave');
         isWorldMode=false;
+        setSandboxUrl(null);              // exiting a sandbox goes back to the normal menu, not into the same room
         location.reload();
     }
 }
@@ -2120,6 +2190,7 @@ function wcWrapFix(rPos, en) {
 }
 function beginWorldMode() {
     isWorldMode = true; gameMode = 'WORLD'; pendingWorldJoin = false;
+    arenaWalls = []; sandboxInfo = null; renderSandboxUi();
     myTeam = 0; spectateId = null; isSpectating = false;
     gameState = { entities: [], bullets: [], drones: [] }; renderEntities.clear(); lastBullets.clear(); lastDrones.clear();
     WC.chunks.clear(); WC.allBld.clear(); WC.dyn.clear(); wcSpriteCache.clear();
@@ -5585,6 +5656,8 @@ function connectWS(regionStr, modeStr) {
 
         if (mouse.repel)                                flags |= (1 << 5); // Bit 5
 
+        if (gameMode === 'SANDBOX' && (keys.k || sandboxHoldLevel)) flags |= (1 << 6); // Bit 6: K held = level up (sandbox)
+
         
 
         view.setUint8(1, flags);
@@ -5633,6 +5706,14 @@ function connectWS(regionStr, modeStr) {
         if (handleWorldMessage(data)) return;
 
         if(data.type === 'init') { myId = data.id; myTeam = data.team; spectateId = null; myNameColor = data.nc; myName = data.name1}
+
+        else if (data.type === 'arena') { applyArenaInfo(data); }
+
+        else if (data.type === 'sandbox_full') {
+            const r = document.getElementById('disconnect-reason'), t = document.getElementById('disconnect-text');
+            if (r && t) { t.innerText = data.message; r.style.display = 'flex'; }
+            document.getElementById('playBtn').disabled = true;
+        }
 
         else if (data.type === 'achievement_unlocked') {
 
@@ -6449,7 +6530,7 @@ const escapeHTML = (str) => {
 
             let fillPct = Math.max(2, Math.min(100, (s.score / leaderScore) * 100));
 
-            let barColor = gameMode === "FFA" ? "#f0a824" : getTeamColor(s.team); 
+            let barColor = isFfaLike(gameMode) ? "#f0a824" : getTeamColor(s.team); 
 
             let displayScore = formatScore(Math.floor(s.score));
 
@@ -6489,6 +6570,25 @@ const escapeHTML = (str) => {
 
 let drawCounter = 0;
 
+// Maze walls (diep-style grey blocks) and a darker band outside the arena so its edge is visible in small arenas.
+function drawArenaExtras() {
+    const S = arenaSize, x0 = worldToScreenX(0), y0 = worldToScreenY(0), x1 = worldToScreenX(S), y1 = worldToScreenY(S);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.08)";
+    if (x0 > 0) ctx.fillRect(0, 0, x0, canvas.height);
+    if (x1 < canvas.width) ctx.fillRect(x1, 0, canvas.width - x1, canvas.height);
+    if (y0 > 0) ctx.fillRect(Math.max(0, x0), 0, Math.min(canvas.width, x1) - Math.max(0, x0), y0);
+    if (y1 < canvas.height) ctx.fillRect(Math.max(0, x0), y1, Math.min(canvas.width, x1) - Math.max(0, x0), canvas.height - y1);
+    if (!arenaWalls.length) return;
+    const pad = 200 * fov, vx0 = camera.x - pad, vy0 = camera.y - pad, vx1 = camera.x + canvas.width * fov + pad, vy1 = camera.y + canvas.height * fov + pad;
+    ctx.fillStyle = "#999999"; ctx.strokeStyle = "#727272"; ctx.lineWidth = scaleSize(5); ctx.lineJoin = 'round';
+    for (const w of arenaWalls) {
+        if (w[0] > vx1 || w[1] > vy1 || w[0] + w[2] < vx0 || w[1] + w[3] < vy0) continue;   // off screen
+        const sx = worldToScreenX(w[0]), sy = worldToScreenY(w[1]), sw = scaleSize(w[2]), sh = scaleSize(w[3]);
+        ctx.fillRect(sx, sy, sw, sh);
+        ctx.strokeRect(sx + ctx.lineWidth / 2, sy + ctx.lineWidth / 2, sw - ctx.lineWidth, sh - ctx.lineWidth);
+    }
+}
+
 function draw() {
     drawCounter++;
 
@@ -6523,7 +6623,7 @@ function draw() {
     // Camera targeting logic stays exactly the same...
 
     if (isWorldMode) { updateVisualFov(); fov += (fovTarget - fov) * 0.08; }
-    const activeWorldExtent = isWorldMode ? wcExtent() : WORLD_SIZE;
+    const activeWorldExtent = isWorldMode ? wcExtent() : arenaSize;
     let targetCamX = activeWorldExtent/2 - (canvas.width * fov) / 2;
 
     let targetCamY = activeWorldExtent/2 - (canvas.height * fov) / 2;
@@ -6692,6 +6792,9 @@ ctx.translate(-((camera.x / fov) % scaledGridSize), -((camera.y / fov) % scaledG
     }
 
 
+
+    // --- MAZE WALLS & ARENA EDGE (Maze / Sandbox) ---
+    if (!isWorldMode && (gameMode === 'MAZE' || gameMode === 'SANDBOX')) drawArenaExtras();
 
     if (!isWorldMode) {
     ctx.fillStyle = "rgba(0,0,0,0.02)"; 
@@ -7504,11 +7607,16 @@ if (e.square) {
             mCtx.fillStyle = "rgba(0, 225, 110, 0.3)"; mCtx.fillRect(0, 150-bs, bs, bs);
             mCtx.fillStyle = "rgba(241, 78, 84, 0.3)"; mCtx.fillRect(150-bs, 150-bs, bs, bs);
         }
+        if (arenaWalls.length) {                       // maze walls on the minimap
+            const k = 150 / arenaSize;
+            mCtx.fillStyle = "rgba(90, 90, 90, 0.55)";
+            for (const w of arenaWalls) mCtx.fillRect(w[0] * k, w[1] * k, Math.max(1, w[2] * k), Math.max(1, w[3] * k));
+        }
         gameState.entities.forEach(en => {
             if(!['tank','ai'].includes(en.type)) return;
             mCtx.fillStyle = en.id === myId ? '#fff' : getTeamColor(en.team);
             let z = en.id === myId ? 4 : 2;
-            mCtx.fillRect((en.x/WORLD_SIZE)*150-z/2,(en.y/WORLD_SIZE)*150-z/2,z,z);
+            mCtx.fillRect((en.x/arenaSize)*150-z/2,(en.y/arenaSize)*150-z/2,z,z);
         });
     }
 
@@ -7723,9 +7831,9 @@ window.oncontextmenu = e => e.preventDefault(); function resizeGame() {
 
     if (!myId && camera) {
 
-        camera.x = WORLD_SIZE/2 - (canvas.width * fov) / 2;
+        camera.x = arenaSize/2 - (canvas.width * fov) / 2;
 
-        camera.y = WORLD_SIZE/2 - (canvas.height * fov) / 2;
+        camera.y = arenaSize/2 - (canvas.height * fov) / 2;
 
     }
 
