@@ -167,6 +167,41 @@
             margin-top: 15px; cursor: pointer; color: #555;
             text-decoration: underline; font-size: 14px; font-weight: bold;
         }
+        /* Sandbox: party link in the menu, settings panel in game */
+        #sandbox-menu {
+            display: none; margin: 4px auto 6px; width: 85%; padding: 8px 10px; box-sizing: border-box;
+            background: #fff; border: 3px solid #ccc; border-bottom-width: 5px; border-radius: 6px;
+            font-size: 13px; color: #444; text-align: left;
+        }
+        #sandbox-menu b { color: #222; letter-spacing: 1px; }
+        .sbx-copy {
+            border: none; border-radius: 5px; border-bottom: 3px solid #b8860b; background: #f0a824; color: #fff;
+            font: bold 13px 'Ubuntu', sans-serif; padding: 6px 10px; cursor: pointer; margin-top: 6px; width: 100%;
+        }
+        .sbx-copy:active { transform: translateY(1px); border-bottom-width: 2px; }
+        #sandbox-panel {
+            display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%) scale(var(--ui-scale));
+            transform-origin: top center; z-index: 60; min-width: 300px; max-width: 360px;
+            background: rgba(0,0,0,0.45); border: 4px solid #555; border-radius: 10px; color: #fff;
+            font: bold 13px 'Ubuntu', sans-serif; padding: 8px 10px;
+            text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+        }
+        #sandbox-panel .sbx-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        #sandbox-panel .sbx-row + .sbx-row { margin-top: 6px; }
+        #sandbox-panel button {
+            border: none; border-radius: 5px; border-bottom: 3px solid #0085a8; background: #00b2e1; color: #fff;
+            font: bold 12px 'Ubuntu', sans-serif; padding: 5px 9px; cursor: pointer; text-shadow: none; white-space: nowrap;
+        }
+        #sandbox-panel button.alt { background: #777; border-bottom-color: #555; }
+        #sandbox-panel button.hold { background: #8bc34a; border-bottom-color: #5f8a2e; user-select: none; -webkit-user-select: none; touch-action: none; }
+        #sandbox-panel button.hold.on { background: #5f8a2e; }
+        #sandbox-panel label { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+        #sandbox-panel input[type=number] {
+            width: 84px; padding: 3px 5px; border-radius: 4px; border: 2px solid #555; font: bold 12px 'Ubuntu', sans-serif;
+        }
+        #sbx-settings { display: none; margin-top: 8px; border-top: 2px solid #777; padding-top: 8px; }
+        #sbx-settings.open { display: block; }
+        #sbx-settings .sbx-note { font-size: 11px; color: #ddd; font-weight: normal; margin-top: 4px; }
         #disconnect-reason {
             color: #f14e54; font-weight: bold; margin-top: 10px; font-size: 14px;
             display: none; align-items: center; justify-content: center; gap: 6px;
@@ -840,6 +875,10 @@
 
         <select id="gameModeInput"><option>Loading</option></select>
         <select id="regionInput"><option>Loading</option></select>
+        <div id="sandbox-menu">
+            <div id="sandbox-menu-text">🔒 Private sandbox</div>
+            <button type="button" class="sbx-copy" onclick="copyPartyLink(this)">📋 Copy party link</button>
+        </div>
         <input type="text" id="nameInput" placeholder="This is the tale of..." maxlength="15" autocomplete="nickname" aria-label="Tank name"><br>
 
         <button class="btn" id="playBtn" onclick="spawnPlayer()" disabled aria-label="Play game">Connecting...</button>
@@ -915,6 +954,26 @@
             Points: <span id="stat-points">0</span>
         </div>
         <div id="stats-container"></div>
+    </div>
+
+    <div id="sandbox-panel">
+        <div class="sbx-row">
+            <span id="sbx-title">🛠️ Sandbox</span>
+            <span style="display:flex; gap:6px;">
+                <button type="button" onclick="copyPartyLink(this)">📋 Party link</button>
+                <button type="button" class="alt" id="sbx-gear" onclick="toggleSandboxSettings()">⚙ Settings</button>
+            </span>
+        </div>
+        <div class="sbx-row">
+            <span style="font-weight:normal">Hold <b>K</b> to level up</span>
+            <button type="button" class="hold" id="sbx-hold">⏫ Hold to level up</button>
+        </div>
+        <div id="sbx-settings">
+            <label>Max shapes <input type="number" id="sbx-shapes" min="0" max="400" step="10"></label>
+            <label style="margin-top:5px">Arena size <input type="number" id="sbx-size" min="800" max="8000" step="100"></label>
+            <label style="margin-top:5px">Bots <input type="number" id="sbx-bots" min="0" max="20" step="1"></label>
+            <div class="sbx-row"><span class="sbx-note" id="sbx-owner-note"></span><button type="button" id="sbx-apply" onclick="sendSandboxSettings()">Apply</button></div>
+        </div>
     </div>
 
     <div id="scoreboard">
@@ -1081,6 +1140,7 @@
             <option value="FFA">FFA</option>
             <option value="2TDM">2TDM</option>
             <option value="4TDM">4TDM</option>
+            <option value="MAZE">Maze</option>
         </select>
     </div>
 
