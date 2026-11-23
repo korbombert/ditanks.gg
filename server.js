@@ -155,7 +155,9 @@ const DTB = (() => {
                 if (Array.isArray(v)) { need(1); buf[n++] = 9; uv(v.length); for (let i = 0; i < v.length; i++) val(v[i]); return; }
                 if (v instanceof Set) return val([...v]);
                 if (v instanceof Map) return val([...v]);
-                { const ks = Object.keys(v); let c = 0; for (const k of ks) if (v[k] !== undefined && typeof v[k] !== 'function') c++; need(1); buf[n++] = 10; uv(c); for (const k of ks) { const x = v[k]; if (x === undefined || typeof x === 'function') continue; str(k); val(x); } }
+                // for..in instead of Object.keys: same output, but no throw-away key array per object (this runs for every
+                // entity of every state packet, so the arrays were a large share of the server's garbage)
+                { let c = 0; for (const k in v) { const x = v[k]; if (x !== undefined && typeof x !== 'function') c++; } need(1); buf[n++] = 10; uv(c); for (const k in v) { const x = v[k]; if (x === undefined || typeof x === 'function') continue; str(k); val(x); } }
                 return;
             default: need(1); buf[n++] = 0;
         }
@@ -299,6 +301,17 @@ const LEVEL_REQUIREMENTS = [ 0, 0, 22, 100, 210, 355, 470, 600, 775, 930, 1100, 
 // variable on every spawn so toggling it takes effect immediately.
 const SANDBOX_SPAWN_SCORE = 24000;
 let sandboxMode = true;
+
+// ===================== SANDBOX ROOMS =====================
+// Not to be confused with `sandboxMode` above. Picking "Sandbox" in the mode list opens a private arena that only its
+// creator is in until they share the party link. Everyone spawns at level 1 there (whatever `sandboxMode` says), can hold
+// K to level up quickly, and the creator can change the shape cap, bot count and arena size. Nothing earned in a sandbox
+// counts: no coins, kills, achievements, high scores or leaderboard entries.
+const SANDBOX_DEFAULTS = { size: 2000, shapeCount: 40, botCount: 0, shapeRespawn: true };
+const SANDBOX_LIMITS = { minSize: 800, maxSize: 8000, shapes: 400, bots: 20 };
+const SANDBOX_LEVEL_TICKS = 5;              // holding K: one level every 5 ticks (≈12 levels a second)
+const SANDBOX_EMPTY_MS = 60 * 1000;         // an empty sandbox is kept this long (so a refresh or the party link still works)
+const SANDBOX_MAX_ROOMS = 200;
 // ===================== GAME DATA =====================
 let BOT_NAMES = [];
 try {
@@ -627,6 +640,8 @@ app.get('/api/servers', (req, res) => {
     for (let roomId in rooms) {
         const room = rooms[roomId];
         if (room.status === 'stopped') continue;
+        // WORLD has its own button; listing it here put a second "Free For All" entry in the mode menu
+        if (room.mode === 'WORLD' || roomId === 'WORLD') continue;
         const parts = roomId.split('-');
         const mode = parts[0];
         const region = parts.slice(1).join('-'); 
@@ -640,6 +655,8 @@ app.get('/api/servers', (req, res) => {
             players: playerCount 
         });
     }
+    // Sandbox is always available: picking it opens a new private room (or the one in a party link).
+    serverList.SANDBOX = [{ id: 'new', name: 'Private room', players: 0 }];
     res.json(serverList);
 });
 
@@ -985,7 +1002,7 @@ app.post('/api/admin/broadcast', requireAdmin, (req, res) => {
     const { message, type } = req.body;
     if (!message) return res.status(400).json({ error: "Message is required" });
     let sent = 0;
-    for (const room of Object.values(rooms)) {
+    for (const room of Object.values(rooms).concat(Object.values(sandboxRooms))) {
         if (room.status !== 'running') continue;
         for (const client of room.clients) {
             if (client.ws && client.ws.readyState === WebSocket.OPEN) {
@@ -1000,7 +1017,7 @@ app.post('/api/admin/broadcast', requireAdmin, (req, res) => {
 // ===================== ADMIN: KICK ALL =====================
 
 app.post('/api/admin/kick-all', requireAdmin, (req, res) => {
-    for (const room of Object.values(rooms)) {
+    for (const room of Object.values(rooms).concat(Object.values(sandboxRooms))) {
         for (const client of [...room.clients]) {
             try { client.ws.close(4000, "Kicked by admin"); } catch(e) {}
             if (client.player) client.player.markedForDeletion = true;
@@ -1035,18 +1052,27 @@ const wss = new WebSocket.Server({ server });
 
 // ===================== GAME CLASSES =====================
 
+// Fixed-capacity list used for spatial query results. Unlike `array.length = 0` (which makes V8 throw the backing store
+// away, so every query re-grew three arrays from nothing), clearing it keeps its storage. Supports .length, .forEach
+// and direct reads from .a[i] for i < length.
+class NearList {
+    constructor() { this.a = []; this.n = 0; }
+    get length() { return this.n; }
+    push(v) { this.a[this.n++] = v; }
+    forEach(fn) { const a = this.a, n = this.n; for (let i = 0; i < n; i++) fn(a[i], i); }
+}
+const newNearResult = () => ({ entities: new NearList(), bullets: new NearList(), drones: new NearList() });
+
 class SpatialGrid {
     constructor(size, cellSize) {
         this.cellSize = cellSize;
         this.cols = Math.ceil(size / cellSize);
         this.rows = Math.ceil(size / cellSize);
-        this.cells = Array.from({ length: this.cols * this.rows }, () => ({ entities: [], bullets: [], drones: [] }));
+        this.cells = Array.from({ length: this.cols * this.rows }, newNearResult);
     }
     clear() {
         for (let i = 0; i < this.cells.length; i++) {
-            this.cells[i].entities.length = 0;
-            this.cells[i].bullets.length = 0;
-            this.cells[i].drones.length = 0;
+            const c = this.cells[i]; c.entities.n = 0; c.bullets.n = 0; c.drones.n = 0;
         }
     }
     insert(obj, type) {
@@ -1056,8 +1082,12 @@ class SpatialGrid {
         if (row < 0) row = 0; if (row >= this.rows) row = this.rows - 1;
         this.cells[col + row * this.cols][type].push(obj);
     }
+    // Returns a SHARED result object (refilled on every call) instead of allocating three fresh arrays: this is called
+    // several times per bullet per tick, and those arrays were most of the garbage that forced the long full GCs.
+    // Callers use the result straight away and never keep it or query again while still iterating it.
     getNearby(x, y, range) {
-        let result = { entities: [], bullets: [], drones: [] };
+        let result = this.scratch || (this.scratch = newNearResult());
+        result.entities.n = 0; result.bullets.n = 0; result.drones.n = 0;
         let startCol = Math.max(0, Math.floor((x - range) / this.cellSize));
         let endCol = Math.min(this.cols - 1, Math.floor((x + range) / this.cellSize));
         let startRow = Math.max(0, Math.floor((y - range) / this.cellSize));
@@ -1066,9 +1096,9 @@ class SpatialGrid {
         for (let c = startCol; c <= endCol; c++) {
             for (let r = startRow; r <= endRow; r++) {
                 let cell = this.cells[c + r * this.cols];
-                for (let i = 0; i < cell.entities.length; i++) result.entities.push(cell.entities[i]);
-                for (let i = 0; i < cell.bullets.length; i++) result.bullets.push(cell.bullets[i]);
-                for (let i = 0; i < cell.drones.length; i++) result.drones.push(cell.drones[i]);
+                for (let i = 0, a = cell.entities.a; i < cell.entities.n; i++) result.entities.push(a[i]);
+                for (let i = 0, a = cell.bullets.a; i < cell.bullets.n; i++) result.bullets.push(a[i]);
+                for (let i = 0, a = cell.drones.a; i < cell.drones.n; i++) result.drones.push(a[i]);
             }
         }
         return result;
@@ -1078,28 +1108,198 @@ class SpatialGrid {
 // Sparse spatial hash with the SpatialGrid interface, for the World exterior (far too large for a dense grid).
 class HashGrid {
     constructor(cellSize) { this.cellSize = cellSize; this.map = new Map(); this.pool = []; }
-    clear() { for (const c of this.map.values()) { c.entities.length = 0; c.bullets.length = 0; c.drones.length = 0; this.pool.push(c); } this.map.clear(); }
+    clear() { for (const c of this.map.values()) { c.entities.n = 0; c.bullets.n = 0; c.drones.n = 0; this.pool.push(c); } this.map.clear(); }
     insert(obj, type) {
         const k = Math.floor(obj.x / this.cellSize) + Math.floor(obj.y / this.cellSize) * 100000;
-        let c = this.map.get(k); if (!c) { c = this.pool.pop() || { entities: [], bullets: [], drones: [] }; this.map.set(k, c); }
+        let c = this.map.get(k); if (!c) { c = this.pool.pop() || newNearResult(); this.map.set(k, c); }
         c[type].push(obj);
     }
-    getNearby(x, y, range) {
-        if (this.wrap && (x - range < 0 || x + range > this.wrap)) {      // the world wraps: look on the far side of the date line too
-            const a = this._near(x, y, range), b = this._near(x - range < 0 ? x + this.wrap : x - this.wrap, y, range);
-            return { entities: a.entities.concat(b.entities), bullets: a.bullets.concat(b.bullets), drones: a.drones.concat(b.drones) };
-        }
-        return this._near(x, y, range);
+    getNearby(x, y, range) {                                             // shared result object, see SpatialGrid.getNearby
+        const result = this.scratch || (this.scratch = newNearResult());
+        result.entities.n = 0; result.bullets.n = 0; result.drones.n = 0;
+        this._near(x, y, range, result);
+        if (this.wrap && (x - range < 0 || x + range > this.wrap))       // the world wraps: look on the far side of the date line too
+            this._near(x - range < 0 ? x + this.wrap : x - this.wrap, y, range, result);
+        return result;
     }
-    _near(x, y, range) {
-        const result = { entities: [], bullets: [], drones: [] }, cs = this.cellSize;
+    _near(x, y, range, result) {
+        const cs = this.cellSize;
         for (let c = Math.floor((x - range) / cs); c <= Math.floor((x + range) / cs); c++) for (let r = Math.floor((y - range) / cs); r <= Math.floor((y + range) / cs); r++) {
             const cell = this.map.get(c + r * 100000); if (!cell) continue;
-            for (let i = 0; i < cell.entities.length; i++) result.entities.push(cell.entities[i]);
-            for (let i = 0; i < cell.bullets.length; i++) result.bullets.push(cell.bullets[i]);
-            for (let i = 0; i < cell.drones.length; i++) result.drones.push(cell.drones[i]);
+            for (let i = 0, a = cell.entities.a; i < cell.entities.n; i++) result.entities.push(a[i]);
+            for (let i = 0, a = cell.bullets.a; i < cell.bullets.n; i++) result.bullets.push(a[i]);
+            for (let i = 0, a = cell.drones.a; i < cell.drones.n; i++) result.drones.push(a[i]);
         }
         return result;
+    }
+}
+
+// ===================== MAZE =====================
+// The Maze mode arena is a grid of MAZE_CELL squares; a square is either open or a solid wall block. Walls are grown
+// as short straight / bent segments (like diep.io's maze), never inside the middle of the map, and a wall square is only
+// placed if every open square can still reach every other one, so no area of the map is ever sealed off.
+// Tanks, bots and shapes are pushed out of walls; bullets and (non-Necromancer) drones are destroyed when they touch one.
+const MAZE_CELL = 250;
+const SHAPE_TYPES = new Set(['square', 'triangle', 'pentagon', 'hexagon']);
+const isShapeType = t => SHAPE_TYPES.has(t);
+const isTankType = t => t === 'tank' || t === 'ai';
+class Maze {
+    constructor(size, cell = MAZE_CELL) {
+        this.size = size; this.cell = cell; this.n = Math.max(1, Math.floor(size / cell));
+        const N = this.n * this.n;
+        this.cells = new Uint8Array(N);
+        this._prev = new Int32Array(N); this._queue = new Int32Array(N); this._seen = new Uint8Array(N);
+        this.generate();
+        this.rects = this.mergeRects();
+    }
+    wall(cx, cy) { return cx >= 0 && cy >= 0 && cx < this.n && cy < this.n && this.cells[cx + cy * this.n] === 1; }
+    // squares whose centre lies in the middle disc of the map stay open
+    inCenter(cx, cy) { const c = this.cell, h = this.size / 2; return Math.hypot((cx + 0.5) * c - h, (cy + 0.5) * c - h) < this.size * 0.16 + c * 0.5; }
+    centerCell() { const m = Math.min(this.n - 1, Math.floor(this.size / 2 / this.cell)); return m + m * this.n; }
+    // true when every open square is reachable from the (always open) centre square
+    connected() {
+        const n = this.n, cells = this.cells, seen = this._seen, q = this._queue;
+        seen.fill(0); let open = 0; for (let i = 0; i < cells.length; i++) if (!cells[i]) open++;
+        const s = this.centerCell(); if (cells[s]) return false;
+        let h = 0, t = 0, reached = 1; q[t++] = s; seen[s] = 1;
+        while (h < t) {
+            const i = q[h++], x = i % n, y = (i / n) | 0;
+            if (x > 0 && !seen[i - 1] && !cells[i - 1]) { seen[i - 1] = 1; q[t++] = i - 1; reached++; }
+            if (x < n - 1 && !seen[i + 1] && !cells[i + 1]) { seen[i + 1] = 1; q[t++] = i + 1; reached++; }
+            if (y > 0 && !seen[i - n] && !cells[i - n]) { seen[i - n] = 1; q[t++] = i - n; reached++; }
+            if (y < n - 1 && !seen[i + n] && !cells[i + n]) { seen[i + n] = 1; q[t++] = i + n; reached++; }
+        }
+        return reached === open;
+    }
+    canPlace(cx, cy) {
+        if (cx < 0 || cy < 0 || cx >= this.n || cy >= this.n || this.wall(cx, cy) || this.inCenter(cx, cy)) return false;
+        // no blocks that only touch another block at a corner (looks broken, and makes a zero-width gap)
+        for (const [dx, dy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]])
+            if (this.wall(cx + dx, cy + dy) && !this.wall(cx + dx, cy) && !this.wall(cx, cy + dy)) return false;
+        const i = cx + cy * this.n; this.cells[i] = 1;
+        if (this.connected()) return true;
+        this.cells[i] = 0; return false;
+    }
+    generate() {
+        const n = this.n, target = Math.floor(n * n * 0.24), dirs = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+        let walls = 0;
+        for (let attempt = 0; walls < target && attempt < 6000; attempt++) {
+            let cx = (Math.random() * n) | 0, cy = (Math.random() * n) | 0;
+            if (this.wall(cx, cy) || this.inCenter(cx, cy)) continue;
+            // segments start in open space so they read as separate walls rather than one blob
+            if (this.wall(cx + 1, cy) || this.wall(cx - 1, cy) || this.wall(cx, cy + 1) || this.wall(cx, cy - 1)) continue;
+            let d = (Math.random() * 4) | 0; const len = 2 + ((Math.random() * 5) | 0);
+            for (let k = 0; k < len && walls < target; k++) {
+                if (!this.canPlace(cx, cy)) break;
+                walls++;
+                if (k > 0 && Math.random() < 0.22) d = (d + (Math.random() < 0.5 ? 1 : 3)) % 4;   // bend into an L
+                cx += dirs[d][0]; cy += dirs[d][1];
+            }
+        }
+    }
+    // greedy merge of wall squares into rectangles (fewer things for the client to draw)
+    mergeRects() {
+        const n = this.n, c = this.cell, used = new Uint8Array(n * n), out = [];
+        for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+            if (!this.wall(x, y) || used[x + y * n]) continue;
+            let w = 1; while (x + w < n && this.wall(x + w, y) && !used[x + w + y * n]) w++;
+            let h = 1;
+            grow: while (y + h < n) { for (let k = 0; k < w; k++) if (!this.wall(x + k, y + h) || used[x + k + (y + h) * n]) break grow; h++; }
+            for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) used[xx + yy * n] = 1;
+            out.push([x * c, y * c, w * c, h * c]);
+        }
+        return out;
+    }
+    // does a circle overlap any wall?
+    hitsCircle(x, y, r) {
+        const c = this.cell, n = this.n, cells = this.cells;
+        const x0 = Math.max(0, Math.floor((x - r) / c)), x1 = Math.min(n - 1, Math.floor((x + r) / c));
+        const y0 = Math.max(0, Math.floor((y - r) / c)), y1 = Math.min(n - 1, Math.floor((y + r) / c));
+        for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) {
+            if (!cells[cx + cy * n]) continue;
+            const nx = x < cx * c ? cx * c : x > cx * c + c ? cx * c + c : x, ny = y < cy * c ? cy * c : y > cy * c + c ? cy * c + c : y;
+            if ((x - nx) * (x - nx) + (y - ny) * (y - ny) < r * r) return true;
+        }
+        return false;
+    }
+    // moves `o` (x, y, optional vx/vy) out of every wall it overlaps and removes the velocity going into the wall,
+    // so tanks slide along walls instead of sticking to them
+    pushOut(o, r) {
+        const c = this.cell, n = this.n, cells = this.cells; let moved = false;
+        for (let pass = 0; pass < 3; pass++) {
+            let any = false;
+            const x0 = Math.max(0, Math.floor((o.x - r) / c)), x1 = Math.min(n - 1, Math.floor((o.x + r) / c));
+            const y0 = Math.max(0, Math.floor((o.y - r) / c)), y1 = Math.min(n - 1, Math.floor((o.y + r) / c));
+            for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) {
+                if (!cells[cx + cy * n]) continue;
+                const rx0 = cx * c, ry0 = cy * c, rx1 = rx0 + c, ry1 = ry0 + c;
+                const nx = Math.max(rx0, Math.min(o.x, rx1)), ny = Math.max(ry0, Math.min(o.y, ry1));
+                const dx = o.x - nx, dy = o.y - ny, d2 = dx * dx + dy * dy;
+                if (d2 >= r * r) continue;
+                let ux, uy, pen;
+                if (d2 > 1e-6) { const d = Math.sqrt(d2); ux = dx / d; uy = dy / d; pen = r - d; }
+                else {                                                     // centre inside the block: leave through the nearest open face
+                    const faces = [[o.x - rx0, -1, 0, !this.wall(cx - 1, cy)], [rx1 - o.x, 1, 0, !this.wall(cx + 1, cy)], [o.y - ry0, 0, -1, !this.wall(cx, cy - 1)], [ry1 - o.y, 0, 1, !this.wall(cx, cy + 1)]];
+                    let best = null; for (const f of faces) if (f[3] && (!best || f[0] < best[0])) best = f;
+                    if (!best) for (const f of faces) if (!best || f[0] < best[0]) best = f;
+                    ux = best[1]; uy = best[2]; pen = best[0] + r;
+                }
+                o.x += ux * pen; o.y += uy * pen;
+                if (typeof o.vx === 'number') { const vn = o.vx * ux + o.vy * uy; if (vn < 0) { o.vx -= vn * ux; o.vy -= vn * uy; } }
+                any = true;
+            }
+            if (!any) break;
+            moved = true;
+        }
+        return moved;
+    }
+    // clear straight line between two points for a circle of radius r
+    los(x0, y0, x1, y1, r = 0) {
+        const dx = x1 - x0, dy = y1 - y0, k = Math.ceil(Math.hypot(dx, dy) / (this.cell * 0.2));
+        for (let i = 1; i < k; i++) { const t = i / k; if (this.hitsCircle(x0 + dx * t, y0 + dy * t, r)) return false; }
+        return true;
+    }
+    cellAt(x, y) { const n = this.n; return Math.max(0, Math.min(n - 1, Math.floor(x / this.cell))) + Math.max(0, Math.min(n - 1, Math.floor(y / this.cell))) * n; }
+    cellCenter(i) { return { x: (i % this.n + 0.5) * this.cell, y: (((i / this.n) | 0) + 0.5) * this.cell }; }
+    nearestOpen(i) {                                                     // breadth-first search through any squares
+        if (!this.cells[i]) return i;
+        const n = this.n, seen = this._seen, q = this._queue; seen.fill(0);
+        let h = 0, t = 0; q[t++] = i; seen[i] = 1;
+        while (h < t) {
+            const j = q[h++]; if (!this.cells[j]) return j;
+            const x = j % n, y = (j / n) | 0;
+            for (const k of [x > 0 ? j - 1 : -1, x < n - 1 ? j + 1 : -1, y > 0 ? j - n : -1, y < n - 1 ? j + n : -1]) if (k >= 0 && !seen[k]) { seen[k] = 1; q[t++] = k; }
+        }
+        return i;
+    }
+    // shortest path of squares from (fx,fy) to (tx,ty), start square excluded; null when there is none
+    path(fx, fy, tx, ty) {
+        const n = this.n, cells = this.cells, prev = this._prev, q = this._queue;
+        const s = this.nearestOpen(this.cellAt(fx, fy)), g = this.nearestOpen(this.cellAt(tx, ty));
+        if (s === g) return [g];
+        prev.fill(-1); prev[s] = s;
+        let h = 0, t = 0; q[t++] = s;
+        while (h < t) {
+            const j = q[h++]; if (j === g) break;
+            const x = j % n, y = (j / n) | 0;
+            if (x > 0 && prev[j - 1] < 0 && !cells[j - 1]) { prev[j - 1] = j; q[t++] = j - 1; }
+            if (x < n - 1 && prev[j + 1] < 0 && !cells[j + 1]) { prev[j + 1] = j; q[t++] = j + 1; }
+            if (y > 0 && prev[j - n] < 0 && !cells[j - n]) { prev[j - n] = j; q[t++] = j - n; }
+            if (y < n - 1 && prev[j + n] < 0 && !cells[j + n]) { prev[j + n] = j; q[t++] = j + n; }
+        }
+        if (prev[g] < 0) return null;
+        const out = []; for (let j = g; j !== s; j = prev[j]) out.push(j);
+        return out.reverse();
+    }
+    // a random point inside an open square, at least r from every wall
+    randomOpenPoint(r = 40) {
+        const c = this.cell, m = Math.min(r, c / 2 - 1);
+        for (let i = 0; i < 400; i++) {
+            const cx = (Math.random() * this.n) | 0, cy = (Math.random() * this.n) | 0;
+            if (this.wall(cx, cy)) continue;
+            return { x: cx * c + m + Math.random() * (c - 2 * m), y: cy * c + m + Math.random() * (c - 2 * m) };
+        }
+        return { x: this.size / 2, y: this.size / 2 };
     }
 }
 
@@ -1113,6 +1313,10 @@ class Room {
             shapeRespawn: config.shapeRespawn ?? true,
             ...config
         };
+        // Arena side length. Every arena used to be WORLD_SIZE; sandboxes can be resized by their owner.
+        this.size = Math.round(Number(this.config.size) > 0 ? Number(this.config.size) : WORLD_SIZE);
+        this.isSandbox = mode === 'SANDBOX';
+        this.maze = mode === 'MAZE' ? new Maze(this.size) : null;
         this.entities = [];
         this.bullets = [];
         this.drones = [];
@@ -1120,9 +1324,59 @@ class Room {
         this.nextEntityId = 1;
         this.nextBulletId = 1;
         this.nextDroneId = 1;
-        this.grid = new SpatialGrid(WORLD_SIZE, 250); 
+        this.grid = new SpatialGrid(this.size, 250);
         this.status = 'running';
         this.spawnEntities();
+    }
+
+    // What a client needs to draw this arena: its size, maze walls and (in a sandbox) the party code and settings.
+    arenaInfo(client) {
+        const info = { type: 'arena', mode: this.mode, size: this.size, walls: this.maze ? this.maze.rects : [] };
+        if (this.isSandbox) info.sandbox = { code: this.sandboxCode, owner: this.owner === client, players: this.clients.length, shapeCount: this.config.shapeCount, botCount: this.config.botCount, size: this.size };
+        return info;
+    }
+    broadcastArena() { for (const c of this.clients) if (c.ws.readyState === WebSocket.OPEN) wsSendObj(c.ws, this.arenaInfo(c)); }
+
+    // Random spawn point inside the arena: never inside (or touching) a maze wall, and optionally away from the middle.
+    randomSpawnPoint(r = 40, avoidCenter = false) {
+        const S = this.size;
+        for (let i = 0; i < 80; i++) {
+            const p = this.maze ? this.maze.randomOpenPoint(r) : { x: r + Math.random() * (S - 2 * r), y: r + Math.random() * (S - 2 * r) };
+            if (avoidCenter && S >= 3000 && Math.abs(p.x - S / 2) < 800 && Math.abs(p.y - S / 2) < 800) continue;
+            if (this.maze && this.maze.hitsCircle(p.x, p.y, r)) continue;
+            return p;
+        }
+        return this.maze ? this.maze.randomOpenPoint(r) : { x: Math.random() * S, y: Math.random() * S };
+    }
+
+    // ---- sandbox settings (owner only; validated here) ----
+    applySandboxSettings(s) {
+        const num = (v, lo, hi, def) => { v = Math.round(Number(v)); return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : def; };
+        this.config.shapeCount = num(s.shapeCount, 0, SANDBOX_LIMITS.shapes, this.config.shapeCount);
+        this.config.botCount = num(s.botCount, 0, SANDBOX_LIMITS.bots, this.config.botCount);
+        const size = num(s.size, SANDBOX_LIMITS.minSize, SANDBOX_LIMITS.maxSize, this.size);
+        if (size !== this.size) this.resize(size);
+        // too many shapes or bots for the new settings: remove the extras straight away
+        let shapes = 0, bots = 0;
+        const removed = new Set();
+        for (const e of this.entities) {
+            if (isShapeType(e.type) || e.type === 'powerup') { if (++shapes > this.config.shapeCount) removed.add(e); }
+            else if (e.type === 'ai') { if (++bots > this.config.botCount) removed.add(e); }
+        }
+        if (removed.size) {
+            this.entities = this.entities.filter(e => !removed.has(e));
+            this.drones = this.drones.filter(d => !removed.has(d.owner));
+            for (const e of removed) e.markedForDeletion = true;
+        }
+        for (let i = bots; i < this.config.botCount; i++) this.spawnBot(i);
+        this.broadcastArena();
+    }
+    resize(size) {
+        this.size = size;
+        this.grid = new SpatialGrid(size, 250);
+        for (const e of this.entities) { e.x = Math.max(0, Math.min(size, e.x)); e.y = Math.max(0, Math.min(size, e.y)); e.wanderAnchorX = Math.random() * size; e.wanderAnchorY = Math.random() * size; }
+        for (const d of this.drones) { d.x = Math.max(0, Math.min(size, d.x)); d.y = Math.max(0, Math.min(size, d.y)); }
+        this.bullets = this.bullets.filter(b => b.x >= 0 && b.y >= 0 && b.x <= size && b.y <= size);
     }
 
     stop() {
@@ -1140,6 +1394,7 @@ class Room {
     start() {
         if (this.status === 'stopped') {
             this.status = 'running';
+            if (this.mode === 'MAZE') this.maze = new Maze(this.size);   // a fresh maze every boot
             this.nextEntityId = 1;
             this.nextBulletId = 1;
             this.nextDroneId = 1;
@@ -1163,19 +1418,23 @@ class Room {
 }
 
     spawnShape() {
-        let x = Math.random() * WORLD_SIZE, y = Math.random() * WORLD_SIZE;
-        
-        let isCenter = x > 1400 && x < 2600 && y > 1400 && y < 2600;
+        const S = this.size;
+        let x = Math.random() * S, y = Math.random() * S;
+        // the original arena keeps its exact shape distribution; other sizes use the same layout scaled to the arena
+        let isCenter = S === WORLD_SIZE ? (x > 1400 && x < 2600 && y > 1400 && y < 2600) : (Math.abs(x - S / 2) < S * 0.11 && Math.abs(y - S / 2) < S * 0.11);
         let type;
 
         if (isCenter && Math.random() < 0.08) {
-            x = WORLD_SIZE / 2 + (Math.random() * 200 - 100);
-            y = WORLD_SIZE / 2 + (Math.random() * 200 - 100);
+            x = S / 2 + (Math.random() * 200 - 100);
+            y = S / 2 + (Math.random() * 200 - 100);
             type = 'hexagon';
         } else {
             type = isCenter 
                 ? ['pentagon', 'pentagon', 'triangle', 'pentagon'][Math.floor(Math.random()*4)]
                 : ['square','square','square','triangle','triangle','pentagon'][Math.floor(Math.random()*5)]; 
+        }
+        if (this.maze && this.maze.hitsCircle(x, y, 50)) {              // never inside a maze wall
+            const p = this.maze.randomOpenPoint(50); x = p.x; y = p.y;
         }
         const shape = new Entity(this, x, y, type);
 
@@ -1207,7 +1466,7 @@ this.entities.push(shape);
             });
             team = counts.indexOf(Math.min(...counts)) + 1;
         } else {
-            team = index + 5; 
+            team = this.nextEntityId + 100;     // unique, like a player's (index + 5 could equal a player's team and draw the bot in your colour)
         }
 
         let bx, by;
@@ -1222,11 +1481,11 @@ this.entities.push(shape);
             else if (team === 3) { bx = WORLD_SIZE - px; by = py; } 
             else if (team === 4) { bx = px; by = WORLD_SIZE - py; } 
         } else {
-            bx = Math.random() * WORLD_SIZE;
-            by = Math.random() * WORLD_SIZE;
+            const p = this.randomSpawnPoint(40, false);
+            bx = p.x; by = p.y;
         }
         let bot = new Entity(this, bx, by, 'ai', "", team);
-        if (sandboxMode) {
+        if (sandboxMode && !this.isSandbox) {           // private sandboxes always start everyone at level 1
             bot.addXP(SANDBOX_SPAWN_SCORE);
         } else if (startScore > 0) {
             bot.addXP(startScore);
@@ -1304,7 +1563,8 @@ function getSafeZone(room, team) {
         if (team === 4) return { x: WORLD_SIZE * 0.22, y: WORLD_SIZE * 0.78 };
     }
 
-    return { x: WORLD_SIZE / 2, y: WORLD_SIZE / 2 };
+    const S = room.size || WORLD_SIZE;
+    return { x: S / 2, y: S / 2 };
 }
 // Returns true if obj is inside an ENEMY base zone that the AI (of aiTeam) cannot enter.
 // The AI's own base is excluded — bots can freely walk there.
@@ -1459,6 +1719,9 @@ this.baseMaxHpBeforePowerup = null;
         // Manager invisibility
         this.opacity = 1;
         this.stillTicks = 0;
+        this.levelUpTicks = SANDBOX_LEVEL_TICKS - 1;
+        // Maze navigation state (bots only)
+        this.navPath = null; this.navGoalCell = -1; this.navRepath = 0; this.navStuck = 0;
         if(type === 'square') { this.hp = 14; this.maxHp = 14; this.radius = 15; this.xpVal = 60; }
         if(type === 'triangle') { this.hp = 35; this.maxHp = 35; this.radius = 18; this.xpVal = 150; }
         if(type === 'pentagon') { this.hp = 140; this.maxHp = 140; this.radius = 30; this.xpVal = 600; }
@@ -1503,7 +1766,7 @@ getPowerupBulletSpeedMultiplier() {
         
         let prevReq = LEVEL_REQUIREMENTS[this.level];
         this.xp = this.level === MAX_LEVEL ? 0 : this.score - prevReq; 
-        if (this.isPlayer && this.ws) {
+        if (this.isPlayer && this.ws && !this.room.isSandbox) {
     const client = this.room.clients.find(c => c.player === this);
 
     if (client?.dbId) {
@@ -1574,6 +1837,42 @@ getPowerupBulletSpeedMultiplier() {
         return target;
     }
 
+    rerollWanderAnchor() {
+        const room = this.room, S = room.size || WORLD_SIZE;
+        if (room.maze) { const p = room.maze.randomOpenPoint(40); this.wanderAnchorX = p.x; this.wanderAnchorY = p.y; }
+        else { this.wanderAnchorX = Math.random() * S; this.wanderAnchorY = Math.random() * S; }
+        this.wanderAnchorTimer = 600 + Math.floor(Math.random() * 900);
+    }
+
+    // Maze bots: while the straight line to where the bot wants to go (its target, or its patrol point) is clear, the
+    // normal AI steering is kept. When a wall is in the way, this tick's steering is replaced by a step along the shortest
+    // route through the maze (breadth-first search over the maze squares, smoothed by heading for the furthest square of
+    // the route that is in clear sight), and the bot holds fire instead of shooting into the wall.
+    mazeSteer(preVx, preVy, gx, gy, moveSpeed, isShooting) {
+        const mz = this.room.maze, r = this.radius * 0.9;
+        // stuck check (once a second): barely moved while trying to get somewhere → forget the route and pick a new goal
+        if (++this.navStuck >= 60) {
+            const moved = Math.hypot(this.x - this.navLX, this.y - this.navLY);
+            this.navLX = this.x; this.navLY = this.y; this.navStuck = 0;
+            if (moved < 40) { this.navPath = null; this.aiFarShape = null; this.rerollWanderAnchor(); }
+        }
+        if (mz.los(this.x, this.y, gx, gy, r)) { this.navPath = null; return isShooting; }
+        const goalCell = mz.nearestOpen(mz.cellAt(gx, gy));
+        if (!this.navPath || this.navGoalCell !== goalCell || --this.navRepath <= 0) {
+            this.navPath = mz.path(this.x, this.y, gx, gy); this.navGoalCell = goalCell; this.navRepath = 30;
+        }
+        const path = this.navPath;
+        if (path) { const at = path.indexOf(mz.cellAt(this.x, this.y)); if (at >= 0) path.splice(0, at + 1); }
+        if (!path || !path.length) { this.navPath = null; return isShooting; }
+        let wp = mz.cellCenter(path[0]);
+        for (let k = Math.min(path.length - 1, 5); k > 0; k--) { const c = mz.cellCenter(path[k]); if (mz.los(this.x, this.y, c.x, c.y, r)) { wp = c; break; } }
+        const a = Math.atan2(wp.y - this.y, wp.x - this.x);
+        this.vx = preVx + Math.cos(a) * moveSpeed + this.evadeVx * 0.5;
+        this.vy = preVy + Math.sin(a) * moveSpeed + this.evadeVy * 0.5;
+        this.angle = a;
+        return false;
+    }
+
     update() {
         this.vx *= 0.85; this.vy *= 0.85;
         this.x += this.vx; this.y += this.vy;
@@ -1581,7 +1880,7 @@ getPowerupBulletSpeedMultiplier() {
             if (!this.flight) { this.x = clamp(this.x, W_LAND.x0 - 12000, W_LAND.x1 + 12000); this.y = clamp(this.y, W_LAND.y0 - 12000, W_LAND.y1 + 12000); }
         }
         else {
-            const arenaExtent = this.room.mode === 'WORLD' ? (this.room.worldExtent || WORLD_SIZE) : WORLD_SIZE;
+            const arenaExtent = this.room.mode === 'WORLD' ? (this.room.worldExtent || WORLD_SIZE) : (this.room.size || WORLD_SIZE);
             this.x = Math.max(0, Math.min(arenaExtent, this.x));
             this.y = Math.max(0, Math.min(arenaExtent, this.y));
         }
@@ -1672,6 +1971,11 @@ if (this.hp < effectiveMaxHp) {
             this.angle = this.inputs.angle;
             if(this.inputs.shooting) isShooting = true;
 
+            // Sandbox: holding K levels you up quickly (one level every SANDBOX_LEVEL_TICKS ticks).
+            if (this.room.isSandbox && this.inputs.levelUp && this.level < MAX_LEVEL) {
+                if (++this.levelUpTicks >= SANDBOX_LEVEL_TICKS) { this.levelUpTicks = 0; this.addXP(Math.max(1, LEVEL_REQUIREMENTS[this.level + 1] - this.score)); }
+            } else this.levelUpTicks = SANDBOX_LEVEL_TICKS - 1;   // first level arrives on the next tick K is held
+
             // Drone-class autopilot: while the player is NOT firing (and not repelling),
             // keep spawning drones and let the drones run the same AI as bot Overlords.
             // As soon as the player fires or repels again, manual control resumes.
@@ -1695,6 +1999,9 @@ if (this.hp < effectiveMaxHp) {
             }
 
         } else if(this.type === 'ai') {
+            const mz = this.room.maze;
+            const preVx = this.vx, preVy = this.vy;          // velocity before this tick's steering (maze pathing can replace the steering)
+            let navX = null, navY = null;                    // where the bot is trying to get to this tick
             this.thinkTimer++;
             if (this.thinkTimer >= 9) {
                 this.thinkTimer = 0;
@@ -1735,8 +2042,9 @@ if (this.hp < effectiveMaxHp) {
                     let isSameTeam = this.room.mode.includes("TDM") && d.team === this.team && d.team !== 0;
                     if (isSameTeam) return;
                     let distSq = (this.x - d.x)**2 + (this.y - d.y)**2;
-                    if (distSq < 90000 && distSq < minDroneDistSq) { minDroneDistSq = distSq; droneTarget = d; } 
+                    if (distSq < 90000 && distSq < minDroneDistSq && (!mz || mz.los(this.x, this.y, d.x, d.y, 4))) { minDroneDistSq = distSq; droneTarget = d; } 
                 });
+                let farShape = null, minFarShapeDistSq = Infinity;   // maze: nearest shape behind a wall, to walk to when nothing is in sight
 
                 nearby.entities.forEach(e => {
                     if(e === this || e.markedForDeletion) return;
@@ -1756,14 +2064,14 @@ if (this.hp < effectiveMaxHp) {
                         if (this.tankType === 'Overlord') detectionDist *= 1.2;
                         let detectionSq = detectionDist * detectionDist;
                         
-                        if(distSq < detectionSq && distSq < minEnemyDistSq) { 
+                        if(distSq < detectionSq && distSq < minEnemyDistSq && (!mz || mz.los(this.x, this.y, e.x, e.y, 4))) { 
                             minEnemyDistSq = distSq; 
                             enemyTarget = e; 
                         }
                     } else if (isPowerup) {
                         // Skip powerups inside enemy bases for the same reason shapes are skipped.
                         if (isInEnemyBase(this.room, e, this.team)) return;
-                        if(distSq < minPowerupDistSq) {
+                        if(distSq < minPowerupDistSq && (!mz || mz.los(this.x, this.y, e.x, e.y, 4))) {
                             minPowerupDistSq = distSq;
                             powerupTarget = e;
                         }
@@ -1772,9 +2080,9 @@ if (this.hp < effectiveMaxHp) {
                         // Skip shapes inside enemy bases — the AI can't enter those zones
                         // and will get stuck. Own base is allowed since bots can walk there.
                         if (isInEnemyBase(this.room, e, this.team)) return;
-                        if(distSq < minShapeDistSq) { 
-                            minShapeDistSq = distSq; 
-                            shapeTarget = e; 
+                        if(distSq < minShapeDistSq) {
+                            if (!mz || mz.los(this.x, this.y, e.x, e.y, 4)) { minShapeDistSq = distSq; shapeTarget = e; }
+                            else if (distSq < minFarShapeDistSq) { minFarShapeDistSq = distSq; farShape = e; }
                         }
                     }
                 });
@@ -1782,6 +2090,7 @@ if (this.hp < effectiveMaxHp) {
                 // Powerups are valuable but shouldn't distract a bot from a close,
                 // actively dangerous enemy — same threat override used for drones below.
                 this.aiTarget = droneTarget || enemyTarget || powerupTarget || shapeTarget;
+                this.aiFarShape = (!this.aiTarget && farShape) ? farShape : null;
                 if (powerupTarget && enemyTarget) {
                     const closeThreatDistSq = 200 * 200;
                     if (minEnemyDistSq < closeThreatDistSq) {
@@ -1820,6 +2129,9 @@ if (this.hp < effectiveMaxHp) {
                 this.flockSeparationX = sepCount > 0 ? sepX / sepCount : 0;
                 this.flockSeparationY = sepCount > 0 ? sepY / sepCount : 0;
             }
+            // Labelled block so the maze steering below still runs on the paths that used to `return` early.
+            // Outside the maze those paths still return exactly as before.
+            aiMove: {
             this.vx += this.evadeVx;
             this.vy += this.evadeVy;
             let target = this.aiTarget;
@@ -1829,6 +2141,7 @@ if (this.hp < effectiveMaxHp) {
             }
             const isDestroyer = this.tankType === 'Destroyer';
             if(target) {
+                navX = target.x; navY = target.y;
                 let isDrone = target.owner !== undefined;
                 let predX = target.x;
                 let predY = target.y;
@@ -1861,7 +2174,8 @@ if (this.hp < effectiveMaxHp) {
             isShooting = true;
         }
 
-        return;
+        if (!mz) return;
+        break aiMove;
     }
 
     // Ambush spacing
@@ -1888,7 +2202,8 @@ if (this.hp < effectiveMaxHp) {
     // Check both conditions to fire, otherwise stop firing
 isShooting = (aimError < 0.25 && dist < 1050);
 
-    return;
+    if (!mz) return;
+    break aiMove;
 }
                 if (this.isFleeing && !target.isShape) {
                     this.angle = Math.atan2(predY - this.y, predX - this.x);
@@ -1938,7 +2253,9 @@ if (tooDeep) {
     this.vx += Math.cos(retreatAngle) * moveSpeed * 1.4;
     this.vy += Math.sin(retreatAngle) * moveSpeed * 1.4;
 
-    return;
+    navX = safeZone.x; navY = safeZone.y;
+    if (!mz) return;
+    break aiMove;
 }
                 // For TDM modes, bots should flee/wander toward their own base corner,
                 // not the world center which may sit inside enemy territory.
@@ -1965,13 +2282,14 @@ if (tooDeep) {
                     // routes drift across the whole map over time.
                     this.wanderAnchorTimer--;
                     if (this.wanderAnchorTimer <= 0) {
-                        this.wanderAnchorX = Math.random() * WORLD_SIZE;
-                        this.wanderAnchorY = Math.random() * WORLD_SIZE;
-                        this.wanderAnchorTimer = 600 + Math.floor(Math.random() * 900);
+                        this.rerollWanderAnchor();
                         wanderX = this.wanderAnchorX;
                         wanderY = this.wanderAnchorY;
                     }
+                    // Maze: nothing in sight, but a shape is somewhere behind a wall — go and get it.
+                    if (mz && this.aiFarShape && !this.aiFarShape.markedForDeletion && this.aiFarShape.hp > 0) { wanderX = this.aiFarShape.x; wanderY = this.aiFarShape.y; }
                 }
+                navX = wanderX; navY = wanderY;
 
                 if (this.isFleeing) {
                     // When low HP and no target in sight, flee back toward own base to recover
@@ -2009,6 +2327,9 @@ if (tooDeep) {
                     }
                 }
             }
+            } // end aiMove
+
+            if (mz && navX !== null) isShooting = this.mazeSteer(preVx, preVy, navX, navY, moveSpeed, isShooting);
             
             if (this.thinkTimer === 0) {
                 if (this.level >= 15 && this.tankType === 'Basic' && this.type === 'ai') {
@@ -2110,19 +2431,16 @@ function applyPowerupEffect(entity, powerupType) {
     entity.hp = Math.min(entity.hp + POWERUP_HEAL_AMOUNT, effectiveMaxHp);
 }
 
-function getActivePowerups(entity) {
-    if (!entity.powerups) return {};
-
-    const now = Date.now();
-    const result = {};
-
-    for (const [type, expiry] of Object.entries(entity.powerups)) {
-        if (expiry > now) {
-            result[type] = expiry - now;
-        }
+const NO_POWERUPS = Object.freeze({});
+function getActivePowerups(entity, now = Date.now()) {
+    if (!entity.powerups) return NO_POWERUPS;
+    // no Object.entries() pair arrays, and one shared empty object for the usual case of no active powerup
+    let result = null;
+    for (const type in entity.powerups) {
+        const expiry = entity.powerups[type];
+        if (expiry > now) (result || (result = {}))[type] = expiry - now;
     }
-
-    return result;
+    return result || NO_POWERUPS;
 }
 class Drone {
     constructor(room, x, y, owner) {
@@ -2275,7 +2593,8 @@ class Drone {
 
 // The arena rooms are created at startup once their saved lobby configs have been read (see serverStart below).
 const rooms = {};
-const DEFAULT_ROOMS = [["FFA-S1", "FFA"], ["2TDM-S1", "2TDM"], ["4TDM-S1", "4TDM"]];
+const DEFAULT_ROOMS = [["FFA-S1", "FFA"], ["2TDM-S1", "2TDM"], ["4TDM-S1", "4TDM"], ["MAZE-S1", "MAZE"]];
+const ROOM_DEFAULTS = { MAZE: { botCount: 30 } };     // the maze has less open floor, so a few fewer bots by default
 
 // WORLD is a real arena Room: the same Entity, input, firing, collision,
 // projectile, XP and broadcast loops process its players and shape targets.
@@ -2288,7 +2607,39 @@ worldRoom.worldKind = 'exterior';
 // Interiors (houses / workplaces) are private Rooms created on demand; they are kept out of `rooms`
 // so they never show up in server lists / admin APIs.
 const interiorRooms = {};
-function allRooms() { return Object.values(rooms).concat(Object.values(interiorRooms)); }
+// Private sandbox rooms, keyed by party code. Like interiors they are kept out of `rooms` (server list, admin, Discord).
+const sandboxRooms = {};
+function allRooms() { return Object.values(rooms).concat(Object.values(interiorRooms), Object.values(sandboxRooms)); }
+function newSandboxCode() { let c; do { c = crypto.randomBytes(4).toString('hex').slice(0, 6).toUpperCase(); } while (sandboxRooms[c]); return c; }
+// Join the sandbox with this party code, or open a new one (the joining client becomes its owner).
+function sandboxRoomFor(client, code) {
+    code = String(code || '').toUpperCase().replace(/[^0-9A-F]/g, '').slice(0, 6);
+    let room = code && sandboxRooms[code];
+    if (!room) {
+        if (Object.keys(sandboxRooms).length >= SANDBOX_MAX_ROOMS) return null;
+        code = newSandboxCode();
+        room = new Room('SANDBOX-' + code, 'SANDBOX', { ...SANDBOX_DEFAULTS });
+        room.sandboxCode = code;
+        sandboxRooms[code] = room;
+    }
+    if (!room.owner || !room.clients.includes(room.owner)) room.owner = client;
+    room.emptySince = null;
+    return room;
+}
+// Empty sandboxes are closed after SANDBOX_EMPTY_MS.
+setInterval(() => {
+    const now = Date.now();
+    for (const [code, room] of Object.entries(sandboxRooms)) {
+        if (room.clients.length) { room.emptySince = null; continue; }
+        if (!room.emptySince) room.emptySince = now;
+        else if (now - room.emptySince > SANDBOX_EMPTY_MS) { room.stop(); delete sandboxRooms[code]; }
+    }
+}, 5000);
+function leaveRoom(client) {
+    const room = client.room; if (!room) return;
+    room.clients = room.clients.filter(c => c !== client);
+    if (room.isSandbox && room.owner === client) { room.owner = room.clients[0] || null; room.broadcastArena(); }   // hand the settings to whoever is left
+}
 
 // ===================== GAME LOGIC =====================
 
@@ -2555,8 +2906,10 @@ function updateRoom(room) {
         }
     });
 
+    const maze = room.maze;
     room.bullets.forEach(b => {
         b.x += b.vx; b.y += b.vy; b.life--;
+        if (maze && b.life > 0 && maze.hitsCircle(b.x, b.y, b.r)) b.life = 0;      // bullets break on maze walls
     });
     room.grid.clear();
     room.entities.forEach(e => { if(!e.markedForDeletion && !e.ghost) room.grid.insert(e, 'entities'); });
@@ -2564,6 +2917,16 @@ function updateRoom(room) {
     room.drones.forEach(d => { if(!d.markedForDeletion) room.grid.insert(d, 'drones'); });
     room.entities.forEach(e => { if(!e.markedForDeletion) e.update(); });
     room.drones.forEach(d => { if(!d.markedForDeletion) d.update(); });
+    if (maze) {
+        // tanks, bots and shapes can't enter walls; drones that touch one are destroyed, except Necromancer squares,
+        // which are stopped by the wall like a tank
+        for (const e of room.entities) if (!e.markedForDeletion) maze.pushOut(e, e.radius);
+        for (const d of room.drones) {
+            if (d.markedForDeletion) continue;
+            if (d.isNecroSquare) maze.pushOut(d, d.radius);
+            else if (maze.hitsCircle(d.x, d.y, d.radius)) d.markedForDeletion = true;
+        }
+    }
 
     room.bullets.forEach(b1 => {
         if (b1.life <= 0) return;
@@ -2608,7 +2971,7 @@ function updateRoom(room) {
         let nearby = room.grid.getNearby(b.x, b.y, b.r + 50);
 
         for(let i=0; i<nearby.drones.length; i++) {
-            let d = nearby.drones[i];
+            let d = nearby.drones.a[i];
             if (b.life <= 0 || d.markedForDeletion || b.owner === d.owner) continue;
             if (room.mode.includes("TDM") && d.team === b.team && b.team !== 0) continue;
             let dx = b.x - d.x, dy = b.y - d.y, rad = b.r + d.radius;
@@ -2621,7 +2984,7 @@ function updateRoom(room) {
 
         if (b.life > 0) {
             for(let i=0; i<nearby.entities.length; i++) {
-                let en = nearby.entities[i];
+                let en = nearby.entities.a[i];
                 if (b.life <= 0 || en.markedForDeletion || b.owner === en) continue;
                 if (room.mode.includes("TDM") && en.team === b.team && !['square','triangle','pentagon','hexagon'].includes(en.type)) continue;
                 
@@ -2670,7 +3033,7 @@ function updateRoom(room) {
         if (d.markedForDeletion) return;
         let nearby = room.grid.getNearby(d.x, d.y, d.radius + 50);
         for(let i=0; i<nearby.entities.length; i++) {
-            let en = nearby.entities[i];
+            let en = nearby.entities.a[i];
             if (d.markedForDeletion || en.markedForDeletion || d.owner === en) continue;
             if (room.mode.includes("TDM") && en.team === d.team && !['square','triangle','pentagon','hexagon'].includes(en.type)) continue;
             
@@ -2748,7 +3111,7 @@ function updateRoom(room) {
             }
         });
     });
-    room.bullets = room.bullets.filter(b => b.life > 0);
+    { const B = room.bullets; let k = 0; for (let i = 0; i < B.length; i++) if (B[i].life > 0) B[k++] = B[i]; B.length = k; }   // in place: no new array every tick
     room.drones = room.drones.filter(d => {
         if (d.markedForDeletion) {
             if (d.owner && d.owner.activeDrones > 0) {
@@ -2765,6 +3128,9 @@ function updateRoom(room) {
 });
     let respawningBots = [];
     room.entities = room.entities.filter(e => {
+        // removed without dying (a Necromancer turned a square into a drone, or an admin lowered the shape / bot count):
+        // these used to stay in the list for ever, invisible but still counted against the shape cap
+        if (e.markedForDeletion && e.hp > 0 && !e.isPlayer) return false;
         if(e.hp <= 0) {
             if (room.mode === 'WORLD' && e.isPlayer) {
                 const owner = room.clients.find(c => c.player === e);
@@ -2781,8 +3147,8 @@ function updateRoom(room) {
                 ? room.clients.find(c => c.player === killer)
                 : null;
 
-            // Award kill achievements whenever a tank/bot dies (not just real players)
-            if (['tank', 'ai'].includes(e.type)) {
+            // Award kill achievements whenever a tank/bot dies (not just real players). Nothing counts in a sandbox.
+            if (['tank', 'ai'].includes(e.type) && !room.isSandbox) {
                 if (killer && killer.isPlayer) {
                     if (killerClient?.dbId) {
                         Users.addKill(killerClient.dbId);
@@ -2823,7 +3189,7 @@ function updateRoom(room) {
                 let timeAlive = Math.floor((Date.now() - e.spawnTime) / 1000);
                 wsSendObj(e.ws, ({ type: 'death', score: e.score, level: e.level, timeAlive: timeAlive, tank: e.tankType, killerId: e.lastDamagedBy }));
                 let client = room.clients.find(c => c.player === e);
-                if (client && client.dbId) {
+                if (client && client.dbId && !room.isSandbox) {
                     // rewards are applied to the in-memory account (and written through by the database worker)
                     const uid = client.dbId, ws2 = client.ws, score = e.score, earnedCoins = Math.floor(score / 1000);
                     const reward = userRecord => {
@@ -2875,8 +3241,10 @@ function updateRoom(room) {
 
     respawningBots.forEach(score => room.spawnBot(Math.floor(Math.random()*100), score));
 
-    let shapes = room.entities.filter(e => !['ai','tank'].includes(e.type)).length;
-    if(shapes < 300 && room.mode !== 'WORLD') room.spawnShape();
+    let shapes = 0;
+    for (const e of room.entities) if (!isTankType(e.type)) shapes++;
+    const shapeCap = room.config.shapeRespawn === false ? 0 : (room.config.shapeCount ?? 300);
+    if(shapes < shapeCap && room.mode !== 'WORLD') room.spawnShape();
 }
 
 // ===================== GAME TICK =====================
@@ -3949,12 +4317,27 @@ function buildCityLayout(seed, city, idx) {
 }
 function indexLayout(L) {
     L.dealerLot = L.dealerLot || L.lots.find(l => l.dealer);
-    L.cbuckets = new Map();
-    for (const c of L.colliders) {
-        const x0 = c.t ? c.x - c.r : c.x, x1 = c.t ? c.x + c.r : c.x + c.w, y0 = c.t ? c.y - c.r : c.y, y1 = c.t ? c.y + c.r : c.y + c.h;
-        for (let bx = Math.floor(x0 / 600); bx <= Math.floor(x1 / 600); bx++) for (let by = Math.floor(y0 / 600); by <= Math.floor(y1 / 600); by++) {
-            const key = bx + by * W_NB; let a = L.cbuckets.get(key); if (!a) L.cbuckets.set(key, a = []); a.push(c);
-        }
+    // Collision buckets, packed into ONE Float64Array: for each 600-unit bucket, a record count followed by
+    // [type, x, y, w-or-r, h] records; L.cbuckets maps bucket key -> offset of its count. The ~1.3 million collider
+    // objects and ~1.4 million bucket references used to live on the JS heap for ever, and every full garbage
+    // collection had to walk all of them (a big part of the periodic game-loop freezes).
+    {
+        const eachBucket = (c, fn) => {
+            const x0 = c.t ? c.x - c.r : c.x, x1 = c.t ? c.x + c.r : c.x + c.w, y0 = c.t ? c.y - c.r : c.y, y1 = c.t ? c.y + c.r : c.y + c.h;
+            for (let bx = Math.floor(x0 / 600); bx <= Math.floor(x1 / 600); bx++) for (let by = Math.floor(y0 / 600); by <= Math.floor(y1 / 600); by++) fn(bx + by * W_NB);
+        };
+        const count = new Map();
+        for (const c of L.colliders) eachBucket(c, key => count.set(key, (count.get(key) || 0) + 1));
+        const off = new Map(); let total = 0;
+        for (const [key, n] of count) { off.set(key, total); total += 1 + n * 5; count.set(key, 0); }
+        const D = new Float64Array(total);
+        for (const c of L.colliders) eachBucket(c, key => {
+            const o = off.get(key), i = count.get(key); count.set(key, i + 1);
+            const p = o + 1 + i * 5; D[p] = c.t ? 1 : 0; D[p + 1] = c.x; D[p + 2] = c.y; D[p + 3] = c.t ? c.r : c.w; D[p + 4] = c.t ? 0 : c.h;
+        });
+        for (const [key, o] of off) D[o] = count.get(key);
+        L.cdata = D; L.cbuckets = off;
+        L.colliders = [];                    // only the packed copy is used after this (props that are colliders stay in L.props)
     }
     L.houseById = new Map(L.houses.map(h => [h.hid, h]));
     L.buildingById = new Map(L.buildings.map(b => [b.id, b]));
@@ -4369,26 +4752,29 @@ function layoutPushOut(L, pos, r) {
         let any = false;
         for (let bx = Math.floor((pos.x - r) / 600); bx <= Math.floor((pos.x + r) / 600); bx++)
             for (let by = Math.floor((pos.y - r) / 600); by <= Math.floor((pos.y + r) / 600); by++) {
-                const list = L.cbuckets.get(bx + by * W_NB); if (!list) continue;
-                for (const c of list) any = collidePush(pos, r, c) || any;
+                const o = L.cbuckets.get(bx + by * W_NB); if (o === undefined) continue;
+                const D = L.cdata, n = D[o];
+                for (let i = 0, p = o + 1; i < n; i++, p += 5) any = collidePushRaw(pos, r, D[p], D[p + 1], D[p + 2], D[p + 3], D[p + 4]) || any;
             }
         moved = moved || any; if (!any) break;
     }
     return moved;
 }
-function collidePush(pos, r, c) {
-    if (c.t === 1) {
-        const dx = pos.x - c.x, dy = pos.y - c.y, rr = r + c.r, d2 = dx * dx + dy * dy;
+function collidePush(pos, r, c) { return c.t === 1 ? collidePushRaw(pos, r, 1, c.x, c.y, c.r, 0) : collidePushRaw(pos, r, 0, c.x, c.y, c.w, c.h); }
+// t = 1: circle at (cx, cy) with radius a; t = 0: rectangle at (cx, cy), size a × b
+function collidePushRaw(pos, r, t, cx, cy, a, b) {
+    if (t === 1) {
+        const dx = pos.x - cx, dy = pos.y - cy, rr = r + a, d2 = dx * dx + dy * dy;
         if (d2 >= rr * rr) return false;
-        const d = Math.sqrt(d2) || 0.001; pos.x = c.x + dx / d * rr; pos.y = c.y + dy / d * rr; return true;
+        const d = Math.sqrt(d2) || 0.001; pos.x = cx + dx / d * rr; pos.y = cy + dy / d * rr; return true;
     }
-    const nx = Math.max(c.x, Math.min(pos.x, c.x + c.w)), ny = Math.max(c.y, Math.min(pos.y, c.y + c.h));
+    const nx = Math.max(cx, Math.min(pos.x, cx + a)), ny = Math.max(cy, Math.min(pos.y, cy + b));
     let dx = pos.x - nx, dy = pos.y - ny, d2 = dx * dx + dy * dy;
     if (d2 >= r * r) return false;
     if (d2 > 1e-6) { const d = Math.sqrt(d2); pos.x = nx + dx / d * r; pos.y = ny + dy / d * r; return true; }
     // centre is inside the rectangle: exit through the nearest face
-    const l = pos.x - c.x, rt = c.x + c.w - pos.x, t = pos.y - c.y, b = c.y + c.h - pos.y, m = Math.min(l, rt, t, b);
-    if (m === l) pos.x = c.x - r; else if (m === rt) pos.x = c.x + c.w + r; else if (m === t) pos.y = c.y - r; else pos.y = c.y + c.h + r;
+    const l = pos.x - cx, rt = cx + a - pos.x, tp = pos.y - cy, bt = cy + b - pos.y, m = Math.min(l, rt, tp, bt);
+    if (m === l) pos.x = cx - r; else if (m === rt) pos.x = cx + a + r; else if (m === tp) pos.y = cy - r; else pos.y = cy + b + r;
     return true;
 }
 // <<WORLD_LAYOUT_END>>
@@ -7075,6 +7461,7 @@ wss.on('connection', (ws, req) => {
                         right: !!(flags & 8),
                         shooting: !!(flags & 16),
                         repel: !!(flags & 32),
+                        levelUp: !!(flags & 64),          // K held (only does anything in a sandbox)
                         angle: view.getFloat32(2, true),
                         mouseX: view.getFloat32(6, true),
                         mouseY: view.getFloat32(10, true)
@@ -7104,22 +7491,40 @@ wss.on('connection', (ws, req) => {
         if (data.type === 'world_join') { afterAuth(client, () => worldJoin(client)); return; }
         if (data.type && data.type.startsWith('world_') && data.type !== 'world_join') { worldHandle(client,data); return; }
         if(data.type === 'ping') {
-            wsSendObj(ws, ({ type: 'pong', time: data.time, locationl: SERVER_LOCATION }));
+            wsSendObj(ws, ({ type: 'pong', time: data.time, location: SERVER_LOCATION }));   // was "locationl", so the client never showed it
             client.lastPingTime = data.time;
         }
         else if (data.type === 'spectate') {
-            if (client.room) {
-                client.room.clients = client.room.clients.filter(c => c !== client);
+            if (client.world) return;                                     // World Mode has its own rooms
+            if (client.player) {                                          // switching arena on the same connection: the old tank goes
+                const old = client.player, r0 = client.room;
+                if (r0) { r0.entities = r0.entities.filter(e => e !== old); r0.drones = r0.drones.filter(d => d.owner !== old); }
+                old.markedForDeletion = true; client.player = null;
             }
-            const roomId = `${data.mode}-${data.region}`;
-            client.room = rooms[roomId];
-            const roomToJoin = rooms[roomId];
+            leaveRoom(client);
+            client.room = null;
+            let roomToJoin;
+            if (data.mode === 'SANDBOX') {
+                roomToJoin = sandboxRoomFor(client, data.region);
+                if (!roomToJoin) { wsSendObj(ws, { type: 'sandbox_full', message: 'Too many sandboxes are open right now - try again in a minute.' }); return; }
+            } else {
+                roomToJoin = data.mode === 'WORLD' ? null : rooms[`${data.mode}-${data.region}`];
+            }
             if (!roomToJoin || roomToJoin.status === 'stopped') return;
+            client.room = roomToJoin;
             client.room.clients.push(client);
+            if (roomToJoin.isSandbox) roomToJoin.broadcastArena();        // includes the newcomer; everyone's player count updates
+            else wsSendObj(ws, roomToJoin.arenaInfo(client));
+        }
+        else if (data.type === 'sandbox_settings') {
+            const room = client.room;
+            if (room && room.isSandbox && room.owner && !room.clients.includes(room.owner)) room.owner = client;
+            if (room && room.isSandbox && room.owner === client) room.applySandboxSettings(data);
         }
         else if (data.type === 'spawn') {
             const room = client.room;
             if (!room || room.status === 'stopped') return;
+            if (client.player && !client.player.markedForDeletion) return;   // already alive
             let team;
             if (room.mode === "2TDM") team = Math.random() > 0.5 ? 1 : 2;
             else if (room.mode === "4TDM") team = Math.floor(Math.random() * 4) + 1;
@@ -7136,14 +7541,13 @@ wss.on('connection', (ws, req) => {
                 else if (team === 3) { px = WORLD_SIZE - offset; py = offset; }
                 else if (team === 4) { px = offset; py = WORLD_SIZE - offset; }
             } else {
-                do {
-                    px = Math.random() * WORLD_SIZE;
-                    py = Math.random() * WORLD_SIZE;
-                } while (Math.abs(px - WORLD_SIZE/2) < 800 && Math.abs(py - WORLD_SIZE/2) < 800);
+                // FFA-style arenas: random point away from the middle, never inside a maze wall
+                const p = room.randomSpawnPoint(45, true);
+                px = p.x; py = p.y;
             }
             
             client.player = new Entity(room, px, py, 'tank', data.name || "Unnamed", team, true, ws);
-            if (sandboxMode) {
+            if (sandboxMode && !room.isSandbox) {            // a private sandbox always starts you at level 1
                 client.player.addXP(SANDBOX_SPAWN_SCORE);
             }
             client.spectatingId = null;
@@ -7236,7 +7640,7 @@ wss.on('connection', (ws, req) => {
             client.player.markedForDeletion = true;
             client.player = null;
         }
-        if (client.room) client.room.clients = client.room.clients.filter(c => c !== client);
+        leaveRoom(client);
     });
 });
 
@@ -7244,19 +7648,65 @@ wss.on('connection', (ws, req) => {
 
 let tickCount = 0;
 
+// Payload objects are built once per broadcast for each tank / shape / bullet / drone and shared by every client that
+// sees it. They used to be rebuilt per client per packet, which made the broadcast one of the biggest sources of garbage.
+function bcTank(e, visible, tick, now) {
+    if (e._bcTick !== tick) { e._bcTick = tick; e._bcVis = null; e._bcHid = null; }
+    const slot = visible ? '_bcVis' : '_bcHid';
+    if (e[slot]) return e[slot];
+    return (e[slot] = {
+        id: e.id,
+        x: visible ? Math.round(e.x) : null,
+        y: visible ? Math.round(e.y) : null,
+        powerupType: e.powerupType || null,
+        type: e.type, team: e.team, hp: e.hp, maxHp: e.maxHp,
+        radius: e.radius, angle: Math.round(e.angle * 100) / 100, tankType: e.tankType,
+        name: e.name, score: e.score, nameColor: e.nameColor,
+        inView: visible,
+        opacity: (e.opacity !== undefined) ? Math.round(e.opacity * 100) / 100 : 1,
+        powerups: getActivePowerups(e, now),
+        veh: e.vehicle ? { a: Math.round(e.vehicle.a * 100) / 100, v: Math.round(e.vehicle.v * 10) / 10, m: e.vehicle.model } : e.taxiRide ? { a: Math.round(e.taxiRide.a * 100) / 100, v: Math.round(e.taxiRide.v * 10) / 10, m: 'taxi' } : undefined,
+        fl: e.flight ? { a: Math.round(e.flight.a * 1000) / 1000, alt: Math.round(e.flight.alt * 1000) / 1000, v: Math.round(e.flight.v * 10) / 10, liv: e.flight.liv, al: e.flight.al, ac: e.flight.ac, svc: e.flight.svc, ph: e.flight.ph === 'board' ? 'board' : undefined, vs: e.flight.q ? Math.round(e.flight.vs * 10) / 10 : undefined, q: e.flight.q ? e.flight.q.map(v => Math.round(v * 1e6) / 1e6) : undefined, h: e.flight.h ? e.flight.h.map(v => Math.round(v * 1e6) / 1e6) : undefined } : undefined
+    });
+}
+function bcShape(e, tick, now) {
+    if (e._bsTick === tick) return e._bs;
+    e._bsTick = tick;
+    return (e._bs = {
+        id: e.id, x: Math.round(e.x), y: Math.round(e.y), type: e.type, team: e.team, hp: e.hp, maxHp: e.maxHp,
+        radius: e.radius, angle: Math.round(e.angle * 100) / 100, inView: true, powerupType: e.powerupType || null,
+        powerups: getActivePowerups(e, now)
+    });
+}
+function bcBullet(b, tick) {
+    if (b._bTick === tick) return b._b;
+    b._bTick = tick;
+    return (b._b = { id: b.id, x: Math.round(b.x), y: Math.round(b.y), r: b.r, team: b.team, powerupEffects: b.powerupEffects || [] });
+}
+function bcDrone(d, tick) {
+    if (d._dTick === tick) return d._d;
+    d._dTick = tick;
+    const o = { id: d.id, x: Math.round(d.x), y: Math.round(d.y), radius: d.radius, angle: Math.round(d.angle * 100) / 100, team: d.team };
+    if (d.owner && d.owner.tankType === 'Necromancer') o.square = true;
+    return (d._d = o);
+}
+
 setInterval(() => {
     tickCount++;
     let shouldSend = (tickCount % 2 === 0);
 
     if (!shouldSend) return;
+    const now = Date.now();
 
     allRooms().forEach(room => {
-        if (room.status === 'stopped') return;
+        if (room.status === 'stopped' || !room.clients.length) return;
+        const tanks = [];
+        for (const e of room.entities) if (!e.markedForDeletion && isTankType(e.type)) tanks.push(e);
         room.clients.forEach(c => {
             if(c.ws.readyState === WebSocket.OPEN) {
                 
-                let focalX = room.mode === 'WORLD' ? W_CX : WORLD_SIZE / 2;
-                let focalY = room.mode === 'WORLD' ? W_CY : WORLD_SIZE / 2;
+                let focalX = room.mode === 'WORLD' ? W_CX : (room.size || WORLD_SIZE) / 2;
+                let focalY = room.mode === 'WORLD' ? W_CY : (room.size || WORLD_SIZE) / 2;
 
                 if (c.player && !c.player.markedForDeletion) {
                     focalX = c.player.x; focalY = c.player.y;
@@ -7270,95 +7720,37 @@ setInterval(() => {
                 const VD = VIEW_DISTANCE * ((room.mode === 'WORLD' && c.player) ? worldViewScale(c.player) : 1);
                 const VDY = room.mode === 'WORLD' ? VD : VD / 1.8;
 
-                let nearby = room.grid.getNearby(focalX, focalY, VD);
-                let processedEntities = new Set();
                 const vq = room.worldKind === 'exterior' && c.player && c.player.flight && c.player.flight.q, vk = vq ? Math.min(8, wSec(focalY)) : 1;   // flying: compare on the sphere
 
-                for (let i = 0; i < room.entities.length; i++) {
-                    let e = room.entities[i];
-                    if (e.markedForDeletion) continue;
-                    if (['tank', 'ai'].includes(e.type)) {
-                        processedEntities.add(e.id);
-                        let isVisible = Math.abs(room.worldKind === 'exterior' ? wrapDx(e.x - focalX) : e.x - focalX) < VD && 
-                                        Math.abs(e.y - focalY) < VDY;
-                        if (vq && e.flight && e.flight.q) isVisible = wDistV(vq, e.flight.q) * vk < VD;     // chart x/y mean nothing near a pole
+                // every tank is listed (the scoreboard needs them all); only the ones in view carry a position
+                for (let i = 0; i < tanks.length; i++) {
+                    const e = tanks[i];
+                    let isVisible = Math.abs(room.worldKind === 'exterior' ? wrapDx(e.x - focalX) : e.x - focalX) < VD && 
+                                    Math.abs(e.y - focalY) < VDY;
+                    if (vq && e.flight && e.flight.q) isVisible = wDistV(vq, e.flight.q) * vk < VD;     // chart x/y mean nothing near a pole
 
-                        // Invisible Manager: hide coordinates from everyone except the player themselves.
-                        // This prevents scripted clients from tracking the manager's position.
-                        const isSelf = (c.player === e);
-                        const isInvisible = !isSelf && e.tankType === 'Manager' && e.opacity < 0.15;
-
-                        payloadEntities.push({
-                            id: e.id, 
-                            x: (isVisible && !isInvisible) ? Math.round(e.x) : null, 
-                            y: (isVisible && !isInvisible) ? Math.round(e.y) : null, 
-                            powerupType: e.powerupType || null,
-                            type: e.type, team: e.team, hp: e.hp, maxHp: e.maxHp, 
-                            radius: e.radius, angle: Math.round(e.angle * 100) / 100, tankType: e.tankType, 
-                            name: e.name, score: e.score, nameColor: e.nameColor,
-                            inView: isVisible && !isInvisible,
-                            opacity: (e.opacity !== undefined) ? Math.round(e.opacity * 100) / 100 : 1,
-                            powerups: getActivePowerups(e),
-                            veh: e.vehicle ? { a: Math.round(e.vehicle.a * 100) / 100, v: Math.round(e.vehicle.v * 10) / 10, m: e.vehicle.model } : e.taxiRide ? { a: Math.round(e.taxiRide.a * 100) / 100, v: Math.round(e.taxiRide.v * 10) / 10, m: 'taxi' } : undefined,
-                            fl: e.flight ? { a: Math.round(e.flight.a * 1000) / 1000, alt: Math.round(e.flight.alt * 1000) / 1000, v: Math.round(e.flight.v * 10) / 10, liv: e.flight.liv, al: e.flight.al, ac: e.flight.ac, svc: e.flight.svc, ph: e.flight.ph === 'board' ? 'board' : undefined, vs: e.flight.q ? Math.round(e.flight.vs * 10) / 10 : undefined, q: e.flight.q ? e.flight.q.map(v => Math.round(v * 1e6) / 1e6) : undefined, h: e.flight.h ? e.flight.h.map(v => Math.round(v * 1e6) / 1e6) : undefined } : undefined
-                        });
-                    }
+                    // Invisible Manager: hide coordinates from everyone except the player themselves.
+                    // This prevents scripted clients from tracking the manager's position.
+                    const isSelf = (c.player === e);
+                    const isInvisible = !isSelf && e.tankType === 'Manager' && e.opacity < 0.15;
+                    payloadEntities.push(bcTank(e, isVisible && !isInvisible, tickCount, now));
                 }
 
+                // getNearby returns a shared object: it is only read here, before any other grid query
+                let nearby = room.grid.getNearby(focalX, focalY, VD);
                 for (let i = 0; i < nearby.entities.length; i++) {
-                    let e = nearby.entities[i];
-                    if (!processedEntities.has(e.id)) { 
-                        payloadEntities.push({
-    id: e.id,
-    x: Math.round(e.x),
-    y: Math.round(e.y),
-    type: e.type,
-    team: e.team,
-    hp: e.hp,
-    maxHp: e.maxHp,
-    radius: e.radius,
-    angle: Math.round(e.angle * 100) / 100,
-    inView: true,
-    powerupType: e.powerupType || null,
-
-    // Active tank powerups
-    powerups: getActivePowerups(e)
-});
-                    }
+                    const e = nearby.entities.a[i];
+                    if (!isTankType(e.type) && !e.markedForDeletion) payloadEntities.push(bcShape(e, tickCount, now));
                 }
 
                 for(let i=0; i<nearby.bullets.length; i++) {
-                    let b = nearby.bullets[i];
-                    if (Math.abs(b.y - focalY) < VDY) {
-                        payloadBullets.push({
-    id: b.id,
-    x: Math.round(b.x),
-    y: Math.round(b.y),
-    r: b.r,
-    team: b.team,
-    powerupEffects: b.powerupEffects || []
-});
-                    }
+                    let b = nearby.bullets.a[i];
+                    if (b.life > 0 && Math.abs(b.y - focalY) < VDY) payloadBullets.push(bcBullet(b, tickCount));
                 }
 
                 for(let i=0; i<nearby.drones.length; i++) {
-                    let d = nearby.drones[i];
-                    if (Math.abs(d.y - focalY) < VDY) {
-                        let droneData = { 
-                            id: d.id, 
-                            x: Math.round(d.x), 
-                            y: Math.round(d.y), 
-                            radius: d.radius, 
-                            angle: Math.round(d.angle * 100) / 100, 
-                            team: d.team 
-                        };
-                        
-                        if (d.owner && d.owner.tankType === 'Necromancer') {
-                            droneData.square = true;
-                        }
-                        
-                        payloadDrones.push(droneData);
-                    }
+                    let d = nearby.drones.a[i];
+                    if (!d.markedForDeletion && Math.abs(d.y - focalY) < VDY) payloadDrones.push(bcDrone(d, tickCount));
                 }
 
                 wsSendObj(c.ws, ({ type: 'state', entities: payloadEntities, bullets: payloadBullets, drones: payloadDrones }));
@@ -7369,7 +7761,7 @@ setInterval(() => {
                     if (psKey !== c.lastStatsKey || tickCount - (c.lastStatsTick || 0) > 120) { c.lastStatsKey = psKey; c.lastStatsTick = tickCount; wsSendObj(c.ws, ps); }   // only when something changed (plus a 2 s refresh)
                 } else {
                     if (!c.spectatingId) {
-                        let top = room.entities.filter(en => ['tank','ai'].includes(en.type)).sort((a,b) => b.score - a.score)[0];
+                        let top = null; for (const t of tanks) if (!top || t.score > top.score) top = t;
                         c.spectatingId = top ? top.id : null;
                     }
                     if (c.spectatingId) wsSendObj(c.ws, ({ type: 'spectate_update', id: c.spectatingId }));
@@ -7796,11 +8188,20 @@ async function reloadAfterRestore() {
         houseOwner.set(h.id, { owner_id: h.owner_id, name: h.username || 'Resident', purchased_at: h.purchased_at || 0 });
     await worldLoadCompanies();
 }
+// World Mode keeps ~300 MB of map data in memory for good. If Node's heap limit is not far above that, V8 has to run a
+// full garbage collection every few seconds, and every one of them freezes the game loop - the "interrupts every 4-5
+// seconds" problem. Warn loudly when the limit is too low (start with `npm start`, or pass the flag yourself).
+function checkHeapLimit() {
+    const limitMb = Math.round(require('v8').getHeapStatistics().heap_size_limit / 1048576);
+    if (limitMb < 1500) console.warn(`[Memory] Node heap limit is only ${limitMb} MB. World Mode needs ~300 MB permanently, so the game will freeze for a moment every few seconds while V8 collects garbage. Start the server with "npm start" (or node --max-old-space-size=2048 server.js; with PM2: pm2 start server.js --node-args="--max-old-space-size=2048").`);
+    else console.log(`[Memory] Node heap limit: ${limitMb} MB.`);
+}
 async function serverStart() {
     const t0 = Date.now();
+    checkHeapLimit();
     await DB.op('seedAchievements', ACHIEVEMENTS);
     for (const r of await DB.all('SELECT ip_hash FROM banned_ips_v2')) bannedIps.add(r.ip_hash);
-    for (const [id, mode] of DEFAULT_ROOMS) rooms[id] = new Room(id, mode, await loadLobbyConfig(id));
+    for (const [id, mode] of DEFAULT_ROOMS) rooms[id] = new Room(id, mode, { ...(ROOM_DEFAULTS[mode] || {}), ...((await loadLobbyConfig(id)) || {}) });
 
     await ensureWorld();
     console.log(`[Startup] Database and world ready in ${Date.now() - t0} ms.`);
